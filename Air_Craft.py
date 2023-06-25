@@ -20,6 +20,8 @@ from PIL import Image
 from functions import mini_map_image, random_breaks, Image_count, mini_map_bool
 import functions
 
+#Adding comment to test github desktop
+
 iflag = False
 
 with open("pybot-config.yaml", "r") as yamlfile:
