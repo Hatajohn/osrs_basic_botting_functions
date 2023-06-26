@@ -1,0 +1,282 @@
+#imports
+import numpy as np
+import win32gui
+from PIL import Image, ImageGrab
+import pyautogui
+import math
+import random
+import cv2
+import os
+
+#Globals
+# pylint: disable-next=global-statement
+global runelite, winiD, window_x, window_y
+
+#Functions ---------------------------------------------------------
+def find_window(DEBUG=False):  # find window name returns PID of the window, needs to be run first to establish the PID
+    try:
+        win32gui.EnumWindows(enum_window_callback, None)
+    except Exception:
+        if DEBUG:
+            print('Window enum fails after it works for some reason, I dont know what I am doing.')
+            # Example on how to move and resize a window if needed, for debug it 
+            win32gui.MoveWindow(globals()['winiD'], 0, 0, int(globals()['window_x']/2), globals()['window_y'], True)
+
+    winiD = globals()['winiD']
+    win32gui.SetActiveWindow(winiD)
+
+    if DEBUG:
+        left, top, right, bottom = get_window_rect()
+        print('Window handle: %i'%(winiD))
+        print('left %d top %d right %d bottom %d'%(left, top, right, bottom))
+
+    return winiD
+
+def get_window_rect():
+    rect = win32gui.GetWindowRect(globals()['winiD'])
+    return rect[0], rect[1], rect[2], rect[3]
+
+#Callback function for EnumWindows, once it finds the window its looking for, sets the global to the PID
+def enum_window_callback(hwnd, extra):
+    if 'RuneLite' in win32gui.GetWindowText(hwnd) and win32gui.IsWindowVisible(hwnd):
+        globals()['winiD'] = hwnd
+        return False
+    
+def screen_image(name='screenshot.png', DEBUG=False):
+    left, top, right, bottom = get_window_rect()
+    
+    if DEBUG:
+        print(left, top, right, bottom)
+
+    if left != 0 or top != 0 or right != 0 or bottom != 0:
+        #bbox has a different order of dimensions than GetWindowRect
+        myScreenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
+    else:
+        myScreenshot = ImageGrab.grab()
+    myScreenshot.save('images/' + name)
+    # Get the image via cv2 so I don't have to worry about whatever format it wants
+    return cv2.imread('images/screenshot.png')
+
+# Covers username top left
+def isolate_min(image):
+    left, top, right, bottom = get_window_rect()
+    image = cv2.rectangle(image, pt1=(top, left), pt2=(bottom, 25), color=(0, 0, 0), thickness=-1)
+    return image
+
+# Block the locations of the username in the client title, the chatbox, and also block the inventory from the image
+def isolate_playspace(image):
+    left, top, right, bottom = get_window_rect()
+    # 0, 0, 1920, 1040
+    # Rectangle points (this took me a minute because im deficient):
+    #   top -> left side of screen
+    #   bottom -> right side of screen
+    #   right -> bottom of the screen
+    #   left -> top of the screen
+
+    image = isolate_min(image)
+    # Covers chat bottom right
+    image = cv2.rectangle(image, pt1=(top+520, right-80), pt2=(top, right+80), color=(0, 0, 0), thickness=-1)
+    # Covers inventory 180, 260
+    x1, y1, x2, y2 = find_inventory(image)
+    print(x1, y1, x2, y2)
+    image = cv2.rectangle(image, (x1, y1), (x2, y2), color=(0, 0, 0), thickness=-1)
+    return image
+
+# Block everything but the inventory
+def isolate_inventory(image):
+    left, top, right, bottom = get_window_rect()
+    x1, y1, x2, y2 = find_inventory(image)
+    image = cv2.rectangle(image, (top, left), (x2+60, y1), color=(0, 0, 0), thickness=-1)
+    image = cv2.rectangle(image, (top, y1), (x1, y2+50), color=(0, 0, 0), thickness=-1)
+    return image
+
+# Locate the inventory on the client screen and returns the corners
+def find_inventory(image, threshold=0.5, DEBUG=False):
+    image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    template = cv2.imread('images/ui_icons.png', 0)
+    w, h = template.shape[::-1]
+    pt = None
+    res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
+    loc = np.where(res >= threshold)
+    for pt in zip(*loc[::-1]):
+        cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 0), 2)
+        # cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
+    x1, y1, x2, y2 = pt[0]+20, pt[1]+35, pt[0] + 200, pt[1] + 290
+    if DEBUG:
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        image = resize_image(image, 75)
+        cv2.imshow("Screenshot", np.hstack([image]))
+        cv2.waitKey(0)
+    return x1, y1, x2, y2
+
+# Locate the chat area on the client screen and returns the corners
+def find_chat(image, threshold=0.7, DEBUG=False):
+    image_gray = cv2.cvtColor(resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
+    template = cv2.imread('images/chat_template.png', 0)
+    w, h = template.shape[::-1]
+    pt = None
+    res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
+    loc = np.where(res >= threshold)
+    for pt in zip(*loc[::-1]):
+        rect = cv2.rectangle(image, pt, (pt[0] + w, pt[1] + h), (0, 0, 0), 2)
+        cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
+    x1, y1, x2, y2 = pt[0]+20, pt[1]+35, pt[0] + 200, pt[1] + 290
+    if DEBUG:
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        image = resize_image(image, 75)
+        cv2.imshow("Screenshot", np.hstack([image]))
+        cv2.waitKey(0)
+    return x1, y1, x2, y2
+
+def locate_color(left=0, top=0, right=1920, bottom=1040, boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=False):
+    #Grab a current screenshot of the client
+    image = screen_image()
+    #Remove the username from the window, the chatbox, and the inventory from the image
+    image = isolate_playspace(image)
+    cv2.imwrite('images/screenshot3.png', image)
+
+    # define the list of boundaries
+    # loop over the boundaries
+    for (lower, upper) in boundaries:
+        # create NumPy arrays from the boundaries
+        lower = np.array(lower, dtype="uint8")
+        upper = np.array(upper, dtype="uint8")
+
+        # find the colors within the specified boundaries and apply the mask
+        mask = cv2.inRange(image, lower, upper)
+        output = cv2.bitwise_and(image, image, mask=mask)
+        ret, thresh = cv2.threshold(mask, 40, 255, 0)
+        contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if len(contours) != 0:
+        # find the biggest countour by the area -> usually implies the closest contour to the camera
+        c = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(c)
+
+        # The biggest contour will be drawn with a green outline
+        image = cv2.rectangle(image, pt1=(x, y), pt2=(x+w, y+h), color=(0, 255, 0), thickness=2)
+        image = cv2.drawContours(image, contours, 0, color=(0,255,0), thickness=2)
+        for cont in contours:
+            x_c, y_c, w_c, h_c = cv2.boundingRect(cont)
+            if(x != x_c or y != y_c or w != w_c or h != h_c):
+                # Other contours will be highlighted with the opposite color of upper for visibility
+                image = cv2.rectangle(image, pt1=(x_c, y_c), pt2=(x_c+w_c, y_c+h_c), color=(0,0,255), thickness=2)
+        x_center, y_center = (math.floor(x+w/2), math.floor(y+h/2))
+        click_radius = math.floor(min(w, h)/2)
+        x_mouse = math.floor(random.uniform(x_center-click_radius, x_center+click_radius))
+        y_mouse = math.floor(random.uniform(y_center-click_radius, y_center+click_radius))
+
+        if DEBUG:
+            print('Length of contours: %d'%(len(contours)))
+            print(x, y, w, h)
+            print(x_mouse, y_mouse)
+            # show the images
+            # image = cv2.rectangle(image, pt1=(x_mouse, y_mouse), pt2=(x_mouse, y_mouse), color=(255,0,0), thickness=5)
+            image = cv2.circle(image, center=[x_mouse, y_mouse], radius=5, color=(0, 0, 255), thickness=2)
+            image = cv2.circle(image, center=[x_center, y_center], radius=click_radius, color=(255,0,0), thickness=2)
+            cv2.imwrite('images/screenshot_debug.png', image)
+            cv2.imshow("Screenshot", np.hstack([image, output]))
+            cv2.waitKey(0)
+
+        return (x_mouse, y_mouse, click_radius)
+    else:
+        return False
+    
+def locate_image(image, filename, threshold=0.7, area='screen', name='Screenshot'):
+    img_rgb = image
+    # If the image is expected to be found outside the inventory
+    if area == 'screen':
+        img_rgb = isolate_playspace(img_rgb)
+    elif area == 'inventory':
+        img_rgb = isolate_inventory(img_rgb)
+    else:
+        img_rgb = isolate_min(img_rgb)
+        
+    img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
+    template = cv2.imread('images/' + filename, 0)
+    w, h = template.shape[::-1]
+    pt = None
+    res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
+    loc = np.where(res >= threshold)
+    for pt in zip(*loc[::-1]):
+        cv2.rectangle(img_rgb, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
+    img_rgb = resize_image(img_rgb, 75)
+    cv2.imshow(name, np.hstack([img_rgb]))
+    cv2.waitKey(0)
+    return False
+
+# Resizes a given image by a integer percentage (like 70), helpful for viewing the entirety of a screenshot
+def resize_image(image, scale_percent):
+    width = int(image.shape[1] * scale_percent / 100)
+    height = int(image.shape[0] * scale_percent / 100)
+    dim = (width, height)
+    return cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+
+def click_here(x, y, rad):
+    b = random.uniform(0.2, 0.5)
+    pyautogui.moveTo(x, y, duration=b)
+    b = random.uniform(0.01, 0.05)
+    pyautogui.click(duration=b)
+    # The code here might be useful for continuing the click function
+    def temp_area():
+        if pt is None:
+                iflag = False
+        else:
+            if playarea == False:
+                cropx = 620
+                cropy = 480
+            else:
+                cropx = 0
+                cropy = 0
+
+            iflag = True
+            x = random.randrange(iwidth, iwidth + ispace) + cropx
+            y = random.randrange(iheight, iheight + ispace) + cropy
+            icoord = pt[0] + iheight + x
+            icoord = (icoord, pt[1] + iwidth + y)
+            if fast == True:
+                b = random.uniform(0.05, 0.1)
+            else:
+                b = random.uniform(0.1, 0.3)
+            pyautogui.moveTo(icoord, duration=b)
+            if fast == True:
+                b = random.uniform(0.01, 0.05)
+            else:
+                b = random.uniform(0.05, 0.15)
+
+            pyautogui.click(icoord, duration=b, button=clicker)
+        return iflag
+
+#Main
+if __name__ == "__main__":
+    print('Get window dimensions and id')
+    globals()['runelite'] = 'RuneLite'
+    globals()['window_x'] = 1920
+    globals()['window_y'] = 1040
+    id = find_window()
+
+    print('Get screenshot of window')
+    image = screen_image()
+
+    print('Find some fishing spots')
+    # RGB color=(200,10,200) opacity 255
+    # Arrays in boundaries are actually in B, G, R format
+
+    # Colors
+    # click_info = locate_color(boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=True)
+
+    # Fish
+    click_info = locate_image(image, r'Angler_Spot.png', area='min', name='Find Fishing Spots')
+    # click_info = locate_image(image, r'Angler_Spot.png', area='screen', name='Find Fishing Spots')
+    # click_info = locate_image(image, r'Angler_Spot.png', area='inventory', name='Find Fish in Inventory')
+    
+    # find_inventory(image)
+    # find_chat(image, DEBUG=True)
+    # Click on a fishing spot
+    
+    
+    # image = isolate_playspace(image)
+    # image = isolate_inventory(image)
+    # image = resize_image(image, 75)
+
+    # cv2.imshow("Screenshot", np.hstack([image]))
+    # cv2.waitKey(0)

@@ -19,3 +19,4 @@ Shapely>=1.8.2
 keyboard>=0.13.5
 simplejson>=3.17.6
 requests>=2.28.1
+pywin32>=221.6
