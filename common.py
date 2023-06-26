@@ -4,13 +4,19 @@ import win32gui
 from PIL import Image, ImageGrab
 import pyautogui
 import math
+import time
+import sys
 import random
 import cv2
+import copy
 import os
 
 #Globals
 # pylint: disable-next=global-statement
-global runelite, winiD, window_x, window_y
+runelite = 'RuneLite'
+winiD = -1
+window_x = 1920
+window_y = 1080
 
 #Functions ---------------------------------------------------------
 def find_window(DEBUG=False):  # find window name returns PID of the window, needs to be run first to establish the PID
@@ -18,19 +24,19 @@ def find_window(DEBUG=False):  # find window name returns PID of the window, nee
         win32gui.EnumWindows(enum_window_callback, None)
     except Exception:
         if DEBUG:
-            print('Window enum fails after it works for some reason, I dont know what I am doing.')
+            # print('Window enum fails after it works for some reason, I dont know what I am doing.')
             # Example on how to move and resize a window if needed, for debug it 
             win32gui.MoveWindow(globals()['winiD'], 0, 0, int(globals()['window_x']/2), globals()['window_y'], True)
-
-    winiD = globals()['winiD']
-    win32gui.SetActiveWindow(winiD)
-
-    if DEBUG:
-        left, top, right, bottom = get_window_rect()
-        print('Window handle: %i'%(winiD))
-        print('left %d top %d right %d bottom %d'%(left, top, right, bottom))
-
-    return winiD
+    if globals()['winiD'] != -1:
+        winiD = globals()['winiD']
+        # win32gui.SetActiveWindow(winiD)
+        if DEBUG:
+            left, top, right, bottom = get_window_rect()
+            print('Window handle: %i'%(winiD))
+            print('left %d top %d right %d bottom %d'%(left, top, right, bottom))
+        return winiD
+    else:
+        return False
 
 def get_window_rect():
     rect = win32gui.GetWindowRect(globals()['winiD'])
@@ -42,17 +48,13 @@ def enum_window_callback(hwnd, extra):
         globals()['winiD'] = hwnd
         return False
     
-def screen_image(name='screenshot.png', DEBUG=False):
-    left, top, right, bottom = get_window_rect()
-    
-    if DEBUG:
-        print(left, top, right, bottom)
-
-    if left != 0 or top != 0 or right != 0 or bottom != 0:
-        #bbox has a different order of dimensions than GetWindowRect
-        myScreenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
+def screen_image(x1=None, y1=None, x2=None, y2=None, name='screenshot.png', DEBUG=False):
+    if None in [x1,x2,y1,y2]:
+        left, top, right, bottom = get_window_rect()
     else:
-        myScreenshot = ImageGrab.grab()
+        left, top, right, bottom = x1, y1, x2, y2
+    #bbox has a different order of dimensions than GetWindowRect
+    myScreenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
     myScreenshot.save('images/' + name)
     # Get the image via cv2 so I don't have to worry about whatever format it wants
     return cv2.imread('images/screenshot.png')
@@ -60,11 +62,12 @@ def screen_image(name='screenshot.png', DEBUG=False):
 # Covers username top left
 def isolate_min(image):
     left, top, right, bottom = get_window_rect()
-    image = cv2.rectangle(image, pt1=(top, left), pt2=(bottom, 25), color=(0, 0, 0), thickness=-1)
+    image = cv2.rectangle(image, pt1=(0, 0), pt2=(200, 25), color=(0, 0, 0), thickness=-1)
     return image
 
 # Block the locations of the username in the client title, the chatbox, and also block the inventory from the image
 def isolate_playspace(image):
+    print('ISOLATE PLAYSPACE')
     left, top, right, bottom = get_window_rect()
     # 0, 0, 1920, 1040
     # Rectangle points (this took me a minute because im deficient):
@@ -73,30 +76,39 @@ def isolate_playspace(image):
     #   right -> bottom of the screen
     #   left -> top of the screen
 
-    image = isolate_min(image)
-    # Covers chat bottom right
-    image = cv2.rectangle(image, pt1=(top+520, right-80), pt2=(top, right+80), color=(0, 0, 0), thickness=-1)
-    # Covers inventory 180, 260
     x1, y1, x2, y2 = find_inventory(image)
     print(x1, y1, x2, y2)
     image = cv2.rectangle(image, (x1, y1), (x2, y2), color=(0, 0, 0), thickness=-1)
     return image
 
 # Block everything but the inventory
-def isolate_inventory(image):
+def isolate_inventory(image, DEBUG=False):
+    print('ISOLATE INVENTORY')
     left, top, right, bottom = get_window_rect()
     x1, y1, x2, y2 = find_inventory(image)
-    image = cv2.rectangle(image, (top, left), (x2+60, y1), color=(0, 0, 0), thickness=-1)
+    inv = screen_image(x1, y1, x2, y2)
+    # Top left of client to the top right of the inventory
+    image = cv2.rectangle(image, (top+x1, left+y1), (x2+60, y1), color=(0, 0, 0), thickness=-1)
+    # Everything to the left of the inventory
     image = cv2.rectangle(image, (top, y1), (x1, y2+50), color=(0, 0, 0), thickness=-1)
+    if DEBUG:
+        debug_image = image
+        cv2.rectangle(debug_image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        image = resize_image(debug_image, 75)
+        cv2.imshow("Isolate inventory", np.hstack([inv]))
+        cv2.waitKey(0)
+        cv2.imshow("Isolate inventory", np.hstack([debug_image]))
+        cv2.waitKey(0)
+        debug_image = None
     return image
 
-# Locate the inventory on the client screen and returns the corners
-def find_inventory(image, threshold=0.5, DEBUG=False):
+def find_inventory_bank(image, threshold=0.7, DEBUG=False):
     image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    template = cv2.imread('images/ui_icons.png', 0)
-    w, h = template.shape[::-1]
+    template2 = cv2.imread('images/inventory_banking.png', 0)    
+    w, h = template2.shape[::-1]
     pt = None
-    res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
+    res = cv2.matchTemplate(image_gray, template2, cv2.TM_CCOEFF_NORMED)
+
     loc = np.where(res >= threshold)
     for pt in zip(*loc[::-1]):
         cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 0), 2)
@@ -105,7 +117,27 @@ def find_inventory(image, threshold=0.5, DEBUG=False):
     if DEBUG:
         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
         image = resize_image(image, 75)
-        cv2.imshow("Screenshot", np.hstack([image]))
+        cv2.imshow("Inventory Location Banking", np.hstack([image]))
+        cv2.waitKey(0)
+    return x1, y1, x2, y2
+
+# Locate the inventory on the client screen and returns the corners
+def find_inventory(image, threshold=0.7, DEBUG=False):
+    image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    template = cv2.imread('images/ui_icons.png', 0)
+    w, h = template.shape[::-1]
+    pt = None
+    res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
+
+    loc = np.where(res >= threshold)
+    for pt in zip(*loc[::-1]):
+        cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 0), 2)
+        # cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
+    x1, y1, x2, y2 = pt[0]+20, pt[1]+35, pt[0] + 200, pt[1] + 290
+    if DEBUG:
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        image = resize_image(image, 75)
+        cv2.imshow("Inventory Location", np.hstack([image]))
         cv2.waitKey(0)
     return x1, y1, x2, y2
 
@@ -128,7 +160,7 @@ def find_chat(image, threshold=0.7, DEBUG=False):
         cv2.waitKey(0)
     return x1, y1, x2, y2
 
-def locate_color(left=0, top=0, right=1920, bottom=1040, boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=False):
+def locate_color(boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=False):
     #Grab a current screenshot of the client
     image = screen_image()
     #Remove the username from the window, the chatbox, and the inventory from the image
@@ -160,36 +192,25 @@ def locate_color(left=0, top=0, right=1920, bottom=1040, boundaries=[([180, 0, 1
             if(x != x_c or y != y_c or w != w_c or h != h_c):
                 # Other contours will be highlighted with the opposite color of upper for visibility
                 image = cv2.rectangle(image, pt1=(x_c, y_c), pt2=(x_c+w_c, y_c+h_c), color=(0,0,255), thickness=2)
+        # Center of the contour
         x_center, y_center = (math.floor(x+w/2), math.floor(y+h/2))
         click_radius = math.floor(min(w, h)/2)
-        x_mouse = math.floor(random.uniform(x_center-click_radius, x_center+click_radius))
-        y_mouse = math.floor(random.uniform(y_center-click_radius, y_center+click_radius))
 
         if DEBUG:
             print('Length of contours: %d'%(len(contours)))
             print(x, y, w, h)
-            print(x_mouse, y_mouse)
-            # show the images
-            # image = cv2.rectangle(image, pt1=(x_mouse, y_mouse), pt2=(x_mouse, y_mouse), color=(255,0,0), thickness=5)
-            image = cv2.circle(image, center=[x_mouse, y_mouse], radius=5, color=(0, 0, 255), thickness=2)
-            image = cv2.circle(image, center=[x_center, y_center], radius=click_radius, color=(255,0,0), thickness=2)
-            cv2.imwrite('images/screenshot_debug.png', image)
-            cv2.imshow("Screenshot", np.hstack([image, output]))
-            cv2.waitKey(0)
 
-        return (x_mouse, y_mouse, click_radius)
+        return (x_center, y_center, click_radius)
     else:
         return False
     
-def locate_image(image, filename, threshold=0.7, area='screen', name='Screenshot'):
+def locate_image(image, filename, threshold=0.7, area='none', name='Screenshot', DEBUG=False):
     img_rgb = image
-    # If the image is expected to be found outside the inventory
+    # If the image is expected to be found outside the inventory, inside the inventory, or it does not matter
     if area == 'screen':
         img_rgb = isolate_playspace(img_rgb)
     elif area == 'inventory':
         img_rgb = isolate_inventory(img_rgb)
-    else:
-        img_rgb = isolate_min(img_rgb)
         
     img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
     template = cv2.imread('images/' + filename, 0)
@@ -197,11 +218,24 @@ def locate_image(image, filename, threshold=0.7, area='screen', name='Screenshot
     pt = None
     res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
     loc = np.where(res >= threshold)
+    items = []
+    # Add a mask to remove duplicate matches
+    mask = np.zeros(img_rgb.shape[:2], np.uint8)
     for pt in zip(*loc[::-1]):
-        cv2.rectangle(img_rgb, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
-    img_rgb = resize_image(img_rgb, 75)
-    cv2.imshow(name, np.hstack([img_rgb]))
-    cv2.waitKey(0)
+        # Add a circle to mark a match
+        if DEBUG:
+            cv2.rectangle(img_rgb, pt, (pt[0] + w, pt[1] + h), (255, 0, 0), thickness=1)
+        if mask[pt[1] + int(round(h/2)), pt[0] + int(round(w/2))] != 255:
+            mask[pt[1]:pt[1]+h, pt[0]:pt[0]+w] = 255
+            # An array of points
+            items.append([pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)])
+            if DEBUG:
+                cv2.circle(img_rgb, (pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)), radius=min(math.floor(w/3), math.floor(h/3)), color=(0,255,0), thickness=1)
+    if DEBUG:
+        cv2.imshow(name, np.hstack([img_rgb]))
+        cv2.waitKey(0)
+    if len(items) > 0:
+        return items
     return False
 
 # Resizes a given image by a integer percentage (like 70), helpful for viewing the entirety of a screenshot
@@ -211,40 +245,103 @@ def resize_image(image, scale_percent):
     dim = (width, height)
     return cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
 
-def click_here(x, y, rad):
-    b = random.uniform(0.2, 0.5)
-    pyautogui.moveTo(x, y, duration=b)
+def find_center(image=None, DEBUG=False):
+    x1,y1,x2,y2 = get_window_rect()
+    true_center = (math.floor((x2-x1)/2), math.floor((y2-y1)/2))
+
+    if DEBUG:
+        image = cv2.circle(image, (math.floor((x2-x1)/2), math.floor((y2-y1)/2)), radius=5, color=(0, 0, 255), thickness=-1)
+        image = resize_image(image, 70)
+        cv2.imshow("Find Center", np.hstack([image]))
+        cv2.waitKey(0)
+
+    return true_center
+
+# takes an array of points, selects the point closest to the center of the client screen
+def click_here(points, image=None, DEBUG=False):
+    x1,y1,x2,y2 = get_window_rect()
+    #pick a point closest to the center of the screen?
+    center = find_center()
+    _dist = sys.maxsize
+    point = None
+    for p in points:
+        dist = math.dist((p[0], p[1]), center)
+        if DEBUG:
+            print(p[0], p[1], dist)
+        if dist < _dist:
+            _dist = dist
+            point = p
+    x, y = point[0], point[1]
+    rad=15
+
+    x_mouse = math.floor(random.uniform(x-rad, x+rad))
+    y_mouse = math.floor(random.uniform(y-rad, y+rad))
+
+    if DEBUG:
+        print('Moving mouse to: ', x_mouse, y_mouse)
+        image = cv2.circle(image, (x, y), radius=rad, color=(0, 0, 255), thickness=2)
+        image = cv2.circle(image, (x_mouse, y_mouse), radius=2, color=(0, 255, 0), thickness=2)
+        image = resize_image(image, 70)
+        cv2.imshow("Click location", np.hstack([image]))
+        cv2.waitKey(0)
+
+    b = random.uniform(0.07, 0.21)
+    # account for the location of the top left corner since that will offset the required position
+    pyautogui.moveTo(x_mouse + x1, y_mouse + y1, duration=b)
     b = random.uniform(0.01, 0.05)
     pyautogui.click(duration=b)
-    # The code here might be useful for continuing the click function
-    def temp_area():
-        if pt is None:
-                iflag = False
+
+def click_logout(FAST=False, DEBUG=False):
+    image = screen_image()
+    click_info = locate_image(image, r'logout_button.png', area=None, name='Find logout button', DEBUG=DEBUG)
+    if not FAST:
+        click_here(click_info, image, DEBUG=DEBUG)
+        time.sleep(random.uniform(0.6, 1.8))
+    else:
+        time.sleep(random.uniform(0.6, 1.8))
+        # Hit ESC and click the logout button asap
+        pyautogui.keyDown('escape')
+        time.sleep(random.uniform(0.03, 0.09))
+        pyautogui.keyUp('escape')
+        
+    time.sleep(random.uniform(0.03, 0.09))
+    # Small pause before grabbing a new image and clicking logout
+    image = screen_image()
+    click_info = locate_image(image, r'logout_button2.png', area=None, name='Find logout button', DEBUG=DEBUG)
+    try:
+        click_here(click_info)
+    except:
+        print('Could not find logout button')
+
+# The code here might be useful for continuing the click function
+def temp_area():
+    if pt is None:
+            iflag = False
+    else:
+        if playarea == False:
+            cropx = 620
+            cropy = 480
         else:
-            if playarea == False:
-                cropx = 620
-                cropy = 480
-            else:
-                cropx = 0
-                cropy = 0
+            cropx = 0
+            cropy = 0
 
-            iflag = True
-            x = random.randrange(iwidth, iwidth + ispace) + cropx
-            y = random.randrange(iheight, iheight + ispace) + cropy
-            icoord = pt[0] + iheight + x
-            icoord = (icoord, pt[1] + iwidth + y)
-            if fast == True:
-                b = random.uniform(0.05, 0.1)
-            else:
-                b = random.uniform(0.1, 0.3)
-            pyautogui.moveTo(icoord, duration=b)
-            if fast == True:
-                b = random.uniform(0.01, 0.05)
-            else:
-                b = random.uniform(0.05, 0.15)
+        iflag = True
+        x = random.randrange(iwidth, iwidth + ispace) + cropx
+        y = random.randrange(iheight, iheight + ispace) + cropy
+        icoord = pt[0] + iheight + x
+        icoord = (icoord, pt[1] + iwidth + y)
+        if fast == True:
+            b = random.uniform(0.05, 0.1)
+        else:
+            b = random.uniform(0.1, 0.3)
+        pyautogui.moveTo(icoord, duration=b)
+        if fast == True:
+            b = random.uniform(0.01, 0.05)
+        else:
+            b = random.uniform(0.05, 0.15)
 
-            pyautogui.click(icoord, duration=b, button=clicker)
-        return iflag
+        pyautogui.click(icoord, duration=b, button=clicker)
+    return iflag
 
 #Main
 if __name__ == "__main__":
@@ -252,31 +349,53 @@ if __name__ == "__main__":
     globals()['runelite'] = 'RuneLite'
     globals()['window_x'] = 1920
     globals()['window_y'] = 1040
+
     id = find_window()
+    if id:
+        print('Get screenshot of window')
+        image = screen_image()
+        image = isolate_min(image)
+        # cv2.imshow("First screenshot", np.hstack([image]))
+        # cv2.waitKey(0)
+        # find_center(image, DEBUG=True)
 
-    print('Get screenshot of window')
-    image = screen_image()
+        print('Find some fishing spots')
+        DEBUG = True
+        # RGB color=(200,10,200) opacity 255
+        # Arrays in boundaries are actually in B, G, R format
 
-    print('Find some fishing spots')
-    # RGB color=(200,10,200) opacity 255
-    # Arrays in boundaries are actually in B, G, R format
+        # Colors
+        # click_info = locate_color(boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=True)
 
-    # Colors
-    # click_info = locate_color(boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=True)
+        # Fish
+        # click_info = locate_image(image, r'Angler_Spot.png', name='Find Fishing Spots', DEBUG=True)
+        click_info = False
+        DEBUG = False
+        click_info = locate_image(copy.deepcopy(image), r'Fishing_text.png', area='screen', name='Locate fishing text', DEBUG=DEBUG)
+        click_info = locate_image(copy.deepcopy(image), r'Not_fishing_text.png', area='screen', name='Locate Not-fishing text', DEBUG=DEBUG)
+        # while(not click_info):
+        #    image = screen_image()
+        #    # Scan for image
 
-    # Fish
-    click_info = locate_image(image, r'Angler_Spot.png', area='min', name='Find Fishing Spots')
-    # click_info = locate_image(image, r'Angler_Spot.png', area='screen', name='Find Fishing Spots')
-    # click_info = locate_image(image, r'Angler_Spot.png', area='inventory', name='Find Fish in Inventory')
-    
-    # find_inventory(image)
-    # find_chat(image, DEBUG=True)
-    # Click on a fishing spot
-    
-    
-    # image = isolate_playspace(image)
-    # image = isolate_inventory(image)
-    # image = resize_image(image, 75)
+            # Get location for image
+        #    click_info = locate_image(image, r'Angler_Spot.png', area='screen', name='Find Fishing Spots', DEBUG=True)
+        #    attempt += 1
+        #    print(attempt)
+        # click_info = locate_image(image, r'Angler_Spot.png', area='inventory', name='Find Fish in Inventory', DEBUG=True)
+        # print(click_info)
+        # click_here(click_info, image, DEBUG=DEBUG)
+        click_logout(DEBUG=True)
+        # click_logout(FAST=True, DEBUG=True)
+        
+        # find_inventory(image, DEBUG=True)
+        # find_chat(image, DEBUG=True)
+        # Click on a fishing spot
+                
+        # image = isolate_playspace(image)
+        # image = isolate_inventory(image)
+        # image = resize_image(image, 75)0
 
-    # cv2.imshow("Screenshot", np.hstack([image]))
-    # cv2.waitKey(0)
+        # cv2.imshow("Screenshot", np.hstack([image]))
+        # cv2.waitKey(0)
+    else:
+        print('RuneLite not found!')
