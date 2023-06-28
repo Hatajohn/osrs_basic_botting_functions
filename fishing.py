@@ -26,7 +26,7 @@ from functions import random_quests
 from functions import random_skills
 from functions import random_inventory
 from functions import random_breaks
-from common import findWindow
+from common import find_window
 
 # from core import findWindow_runelite
 
