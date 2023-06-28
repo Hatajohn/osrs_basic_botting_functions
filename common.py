@@ -345,7 +345,7 @@ def resize_image(image, scale_percent):
 
 def find_center(image=None, DEBUG=False):
     x1,y1,x2,y2 = get_window_rect()
-    true_center = (math.floor((x2-x1)/2), math.floor((y2-y1)/2))
+    true_center = [math.floor((x2-x1)/2), math.floor((y2-y1)/2)]
 
     if DEBUG:
         image = cv2.circle(image, (math.floor((x2-x1)/2), math.floor((y2-y1)/2)), radius=5, color=(0, 0, 255), thickness=-1)
@@ -362,14 +362,14 @@ def click_here(points, rad=15, image=None, DEBUG=False):
     _dist = sys.maxsize
     point = None
     for p in points:
-        dist = math.dist((p[0], p[1]), center)
+        dist = math.dist(p, center)
         if DEBUG:
             print(p[0], p[1], dist)
         if dist < _dist:
             _dist = dist
             point = p
     # Pick a point inside the click area
-    [x_mouse, y_mouse] = pick_point_in_circle(point[0], point[1], rad)
+    [x_mouse, y_mouse] = pick_point_in_circle(point, rad)
 
     if DEBUG:
         print('Moving mouse to: ', x_mouse, y_mouse)
@@ -377,7 +377,7 @@ def click_here(points, rad=15, image=None, DEBUG=False):
         image = cv2.circle(image, (x_mouse, y_mouse), radius=2, color=(0, 255, 0), thickness=2)
         debug_view(image)
 
-    move_mouse([x_mouse, y_mouse], rad, DEBUG=False)
+    move_mouse([x_mouse, y_mouse])
     b = random.uniform(0.01, 0.05)
     pyautogui.click(duration=b)
 
@@ -406,9 +406,9 @@ def control_camera(drag_to, rad=40, DEBUG=False):
 # Locates and clicks the logout button at the bottom of inv, then clicks the actual logout button
 def click_logout(FAST=False, DEBUG=False):
     image = screen_image()
-    click_info = locate_image(image, r'logout_button.png', name='Find logout button', DEBUG=DEBUG)
+    click_info = locate_image(image, r'logout_button.png', name='Find logout button')
     if not FAST:
-        click_here(click_info, image, DEBUG=DEBUG)
+        click_here(click_info)
         time.sleep(random.uniform(0.6, 1.8))
     else:
         # Hit ESC and click the logout button asap
@@ -417,7 +417,7 @@ def click_logout(FAST=False, DEBUG=False):
     time.sleep(random.uniform(0.03, 0.09))
     # Small pause before grabbing a new image and clicking logout
     image = screen_image()
-    click_info = locate_image(image, r'logout_button2.png', name='Find logout button', DEBUG=DEBUG)
+    click_info = locate_image(image, r'logout_button2.png', name='Find logout button')
     try:
         click_here(click_info)
     except:
@@ -520,7 +520,7 @@ if __name__ == "__main__":
         # click_info = locate_color(base_image, boundaries=[([0, 245, 245], [10, 255, 255])], DEBUG=True)
         # print(click_info)
         # click_here(click_info, image, DEBUG=DEBUG)
-        click_logout(DEBUG=DEBUG1)
+        click_logout()
         # click_logout(FAST=True)
         
         # find_inventory(image, DEBUG=True)
