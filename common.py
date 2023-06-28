@@ -406,7 +406,7 @@ def control_camera(drag_to, rad=40, DEBUG=False):
 # Locates and clicks the logout button at the bottom of inv, then clicks the actual logout button
 def click_logout(FAST=False, DEBUG=False):
     image = screen_image()
-    click_info = locate_image(image, r'logout_button.png', area=None, name='Find logout button', DEBUG=DEBUG)
+    click_info = locate_image(image, r'logout_button.png', name='Find logout button', DEBUG=DEBUG)
     if not FAST:
         click_here(click_info, image, DEBUG=DEBUG)
         time.sleep(random.uniform(0.6, 1.8))
@@ -417,7 +417,7 @@ def click_logout(FAST=False, DEBUG=False):
     time.sleep(random.uniform(0.03, 0.09))
     # Small pause before grabbing a new image and clicking logout
     image = screen_image()
-    click_info = locate_image(image, r'logout_button2.png', area=None, name='Find logout button', DEBUG=DEBUG)
+    click_info = locate_image(image, r'logout_button2.png', name='Find logout button', DEBUG=DEBUG)
     try:
         click_here(click_info)
     except:
@@ -520,7 +520,7 @@ if __name__ == "__main__":
         # click_info = locate_color(base_image, boundaries=[([0, 245, 245], [10, 255, 255])], DEBUG=True)
         # print(click_info)
         # click_here(click_info, image, DEBUG=DEBUG)
-        # click_logout(DEBUG=True)
+        click_logout(DEBUG=DEBUG1)
         # click_logout(FAST=True)
         
         # find_inventory(image, DEBUG=True)
