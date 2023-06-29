@@ -64,7 +64,7 @@ def screen_image(rect=None, name='screenshot.png', DEBUG=False):
         [left, top, right, bottom] = get_window_rect()
     else:
         [left, top, right, bottom] = rect
-    #bbox has a different order of dimensions than GetWindowRect
+    #bbox has a different order of dimensions than GetWindowRect, right+left,etc, because right and bottom are w/h, not locations
     myScreenshot = ImageGrab.grab(bbox=(left, top, right+left, bottom+top))
     myScreenshot.save('images/' + name)
     # Get the image via cv2 so I don't have to worry about whatever format it wants
@@ -348,14 +348,21 @@ def resize_image(image, scale_percent):
 
 def find_center(DEBUG=False):
     x1,y1,x2,y2 = get_window_rect()
-    true_center = [math.floor((x2-x1)/2), math.floor((y2-y1)/2)]
+    print('FIND CENTER: ', x1, y1, x2, y2)
+    image_center = [math.floor((x2-x1)/2), math.floor((y2-y1)/2)]
+    true_center = [image_center[0] + x1, image_center[1] + y1]
 
     if DEBUG:
+        print('IMAGE CENTER ', image_center)
+        print('TRUE CENTER ', true_center)
         image = screen_image([x1, y1, x2, y2])
-        image = cv2.circle(image, (math.floor((x2-x1)/2), math.floor((y2-y1)/2)), radius=5, color=(0, 0, 255), thickness=-1)
-        image = resize_image(image, 70)
-        cv2.imshow("Find Center", np.hstack([image]))
-        cv2.waitKey(0)
+        image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
+        image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
+        debug_view(image)
+        image = screen_image([0, 0, 1920, 1040])
+        image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
+        image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
+        debug_view(image)
 
     return true_center
 
@@ -489,7 +496,7 @@ def init_session(DEBUG=False):
         image = isolate_min(screen_image())
         if DEBUG:
             debug_view(image)
-        grab_inventory(copy.deepcopy(image), DEBUG=True)
+        grab_inventory(copy.deepcopy(image), DEBUG=DEBUG)
         image = isolate_playspace(image)
         return image
     else:
@@ -521,14 +528,15 @@ if __name__ == "__main__":
     if id:
         print('Get screenshot of window')
         # Some initial setup
-        base_image = init_session(True)
+        base_image = init_session()
         screenshot_check = screen_image([0, 0, 1920, 1040])
         rect = get_window_rect()
         print(rect)
-        screenshot_check = cv2.rectangle(screenshot_check, rect, color=(0,255,0), thickness=3)
-        debug_view(screenshot_check)
-        screenshot_check = screen_image(get_window_rect())
-        debug_view(screenshot_check)
+        # screenshot_check = cv2.rectangle(screenshot_check, rect, color=(0,255,0), thickness=3)
+        # debug_view(screenshot_check)
+        # screenshot_check = screen_image(get_window_rect())
+        # debug_view(screenshot_check)
+        print(find_center(True))
         # cv2.imshow("First screenshot", np.hstack([image]))
         # cv2.waitKey(0)
         # find_center(image, DEBUG=True)
