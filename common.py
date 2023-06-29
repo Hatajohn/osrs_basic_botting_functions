@@ -50,7 +50,7 @@ def get_window_rect():
     # I'll try to work on a way to handle multiple monitors at some point :^)
     # if len(rect) == 0:
     #    win32gui.MoveWindow(winiD, 0, 0, rect[2]-rect[0], rect[3]-rect[1], True)
-    return rect[0], rect[1], rect[2], rect[3]
+    return [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
 
 #Callback function for EnumWindows, once it finds the window its looking for, sets the global to the PID
 def enum_window_callback(hwnd, extra):
@@ -58,13 +58,14 @@ def enum_window_callback(hwnd, extra):
         globals()['winiD'] = hwnd
         return False
     
-def screen_image(x1=None, y1=None, x2=None, y2=None, name='screenshot.png', DEBUG=False):
-    if None in [x1,x2,y1,y2]:
-        left, top, right, bottom = get_window_rect()
+# Expects a tuple[x1,y1,x2,y2]
+def screen_image(rect=None, name='screenshot.png', DEBUG=False):
+    if rect == None:
+        [left, top, right, bottom] = get_window_rect()
     else:
-        left, top, right, bottom = x1, y1, x2, y2
+        [left, top, right, bottom] = rect
     #bbox has a different order of dimensions than GetWindowRect
-    myScreenshot = ImageGrab.grab(bbox=(left, top, right, bottom))
+    myScreenshot = ImageGrab.grab(bbox=(left, top, right+left, bottom+top))
     myScreenshot.save('images/' + name)
     # Get the image via cv2 so I don't have to worry about whatever format it wants
     return cv2.imread('images/screenshot.png')
@@ -73,7 +74,7 @@ def get_action_text(DEBUG=False):
     scale = 300
     left, top, right, bottom = get_window_rect()
     # I don't identify the locaiton of the fishing/mining/woodcutting text, make sure it's dragged to the top,left area
-    screen_image(left+30, top+50, left+130, top+70, 'Session_Action.png')
+    screen_image([left+30, top+50, left+130, top+70], 'Session_Action.png')
     img = resize_image(cv2.imread('images/Session_Action.png'), scale)
     if DEBUG:
         debug_view(img)
@@ -194,11 +195,13 @@ def isolate_playspace(image):
     return image
 
 def grab_inventory(img, DEBUG=False):
+    if DEBUG:
+        debug_view(img)
     image = copy.deepcopy(img)
     try:
         [x1, y1, x2, y2] = find_inventory(image, DEBUG=DEBUG)
-        left, top, right, bottom = get_window_rect()
-        screen_image(x1+left, y1+top, x2+left, y2+top, 'Session_Inventory.png', DEBUG=DEBUG)
+        [left, top, right, bottom] = get_window_rect()
+        screen_image([x1+left, y1+top, x2+left, y2+top], 'Session_Inventory.png', DEBUG=DEBUG)
 
         if DEBUG:
             debug_view(image, "Session Inv")
@@ -343,11 +346,12 @@ def resize_image(image, scale_percent):
     dim = (width, height)
     return cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
 
-def find_center(image=None, DEBUG=False):
+def find_center(DEBUG=False):
     x1,y1,x2,y2 = get_window_rect()
     true_center = [math.floor((x2-x1)/2), math.floor((y2-y1)/2)]
 
     if DEBUG:
+        image = screen_image([x1, y1, x2, y2])
         image = cv2.circle(image, (math.floor((x2-x1)/2), math.floor((y2-y1)/2)), radius=5, color=(0, 0, 255), thickness=-1)
         image = resize_image(image, 70)
         cv2.imshow("Find Center", np.hstack([image]))
@@ -381,27 +385,73 @@ def click_here(points, rad=15, image=None, DEBUG=False):
     b = random.uniform(0.01, 0.05)
     pyautogui.click(duration=b)
 
+# Should clamp n between minn and maxn
+def clamp(n, minn, maxn):
+    return max(min(math.floor(maxn - 10), n), math.floor(minn + 10))
+
 def pick_point_in_circle(point, rad=15):
     # Pick a point inside the circle defined by the center and the radius
     x_mouse = math.floor(random.uniform(point[0]-rad, point[0]+rad))
     y_mouse = math.floor(random.uniform(point[1]-rad, point[1]+rad))
     return [x_mouse, y_mouse]
 
-def move_mouse(point, DEBUG=False):
+def keep_point_on_screen(point):
     x1, y1, x2, y2 = get_window_rect()
-    b = random.uniform(0.07, 0.21)
-    # account for the location of the top left corner since that will offset the required position
-    pyautogui.moveTo(point[0] + x1, point[1] + y1, duration=b)
-    b = random.uniform(0.07, 0.21)
+    # Assume the point was generated with the image in mind, not the monitor
+    # Prevent the mouse from leaving the client area
+    print('CLAMP x y')
+    x = clamp(point[0], x1, x2)
+    y = clamp(point[1], y1, y2)
+    print(x, x1, x2)
+    print(y, y1, y2)
+    return [x, y]
 
-def control_camera(drag_to, rad=40, DEBUG=False):
+# Move mouse to a point on the screen
+def move_mouse(point, DEBUG=False):
+    b = random.uniform(0.07, 0.31)
+    # Make sure the point is within the bounds of the client screen
+    [x, y] = keep_point_on_screen(point)
+    # Move the mouse
+    if DEBUG:
+        center = find_center()
+        move_to = [x, y]
+        debug_image = screen_image()
+        debug_image = cv2.circle(debug_image, center, radius=5, color=(0,0,255), thickness=-1)
+        debug_image = cv2.circle(debug_image, move_to, radius=5, color=(0,255,100), thickness=-1)
+        debug_view(debug_image, "Center vs move point")
+
+    pyautogui.moveTo(x, y, duration=b)
+
+def control_camera(drag_to, rad=15, DEBUG=False):
+    rect = get_window_rect()
     # Move the mouse somewhere around the center of the client screen
-    point = find_center()
-    move_mouse(pick_point_in_circle(point, rad))
+    center = find_center(DEBUG)
+    print('CENTER ', center)
+    print('DRAG TO ', drag_to)
+    # Move mouse to center of the client screen
+    move_to = pick_point_in_circle(center, rad)
+    print('MOVING MOUSE TO ', move_to)
+    move_mouse(move_to, DEBUG=DEBUG)
 
     # Hold middle mouse and drag
-    b = random.uniform(0.1, 0.21)
-    pyautogui.dragRel(drag_to, button='middle', duration=b)
+    b = random.uniform(0.6, 1.0)
+    if DEBUG:
+        # Move the mouse back to wherever it was
+        move_mouse(move_to, b)
+    [x, y] = keep_point_on_screen(drag_to)
+    pyautogui.dragTo([x, y], button='middle', duration=b)
+
+def pan_right(DEBUG=False):
+    point = find_center(DEBUG)
+    point = [point[0] + 200, point[1]]
+    print('PAN RIGHT TO ', point)
+    control_camera(point)
+
+def pan_left(DEBUG=False):
+    point = find_center(DEBUG)
+    point = [point[0] - 200, point[1]]
+    print('PAN LEFT TO ', point)
+    control_camera(point)
 
 # Locates and clicks the logout button at the bottom of inv, then clicks the actual logout button
 def click_logout(FAST=False, DEBUG=False):
@@ -428,6 +478,8 @@ def debug_view(img, title="Debug Screenshot", scale=60):
     image = resize_image(image, scale)
     cv2.imshow(title, np.hstack([image]))
     cv2.waitKey(0)
+    # Wait for the image to close
+    time.sleep(0.5)
 
 # Grab the first screenshot, remove the username from the top left of the client, grab the inventory position
 def init_session(DEBUG=False):
@@ -435,7 +487,9 @@ def init_session(DEBUG=False):
     if id:
         globals()['winiD'] = id
         image = isolate_min(screen_image())
-        grab_inventory(copy.deepcopy(image), DEBUG=DEBUG)
+        if DEBUG:
+            debug_view(image)
+        grab_inventory(copy.deepcopy(image), DEBUG=True)
         image = isolate_playspace(image)
         return image
     else:
@@ -467,7 +521,14 @@ if __name__ == "__main__":
     if id:
         print('Get screenshot of window')
         # Some initial setup
-        base_image = init_session()
+        base_image = init_session(True)
+        screenshot_check = screen_image([0, 0, 1920, 1040])
+        rect = get_window_rect()
+        print(rect)
+        screenshot_check = cv2.rectangle(screenshot_check, rect, color=(0,255,0), thickness=3)
+        debug_view(screenshot_check)
+        screenshot_check = screen_image(get_window_rect())
+        debug_view(screenshot_check)
         # cv2.imshow("First screenshot", np.hstack([image]))
         # cv2.waitKey(0)
         # find_center(image, DEBUG=True)
@@ -514,14 +575,18 @@ if __name__ == "__main__":
 
         # Drag middle mouse from near-center to a random poing
         rand = [random.randrange(-200,200), random.randrange(-200,200)]
-        control_camera(pick_point_in_circle(rand, rad=100))
+        # control_camera(pick_point_in_circle(rand, rad=100))
 
         # Find Yellow
         # click_info = locate_color(base_image, boundaries=[([0, 245, 245], [10, 255, 255])], DEBUG=True)
         # print(click_info)
         # click_here(click_info, image, DEBUG=DEBUG)
-        click_logout()
+        # click_logout()
         # click_logout(FAST=True)
+
+        pan_left(True)
+        time.sleep(1)
+        pan_right(True)
         
         # find_inventory(image, DEBUG=True)
         # find_chat(image, DEBUG=True)
