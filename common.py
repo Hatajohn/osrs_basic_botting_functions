@@ -12,68 +12,112 @@ import cv2
 import copy
 import os
 
-#Globals
-# pylint: disable-next=global-statement
-runelite = 'RuneLite'
-winiD = -1
-window_x = 1920
-window_y = 1080
-tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
-can_see_inv = False
+# Classes -----------------------------------------------------------
+# The bot brain handles knowing information pertinent to the bot functioning
+# Currently it handles the window name, tesseract path, client location and id
+class bot_brain():
 
-#Functions ---------------------------------------------------------
-def find_window(DEBUG=False):  # find window name returns PID of the window, needs to be run first to establish the PID
-    try:
-        win32gui.EnumWindows(enum_window_callback, None)
-    except Exception:
-        if DEBUG:
-            # print('Window enum fails after it works for some reason, I dont know what I am doing.')
-            # Example on how to move and resize a window if needed, for debug it 
-            win32gui.MoveWindow(winiD, 0, 0, int(window_x/2), window_y, True)
-    if globals()['winiD'] != -1:
-        winiD = globals()['winiD']
-        # Mention the installed location of Tesseract-OCR in your system
-        pytesseract.pytesseract.tesseract_cmd = tesseract_path
-        # win32gui.SetActiveWindow(winiD)
-        if DEBUG:
-            left, top, right, bottom = get_window_rect()
-            print('Window handle: %i'%(winiD))
-            print('left %d top %d right %d bottom %d'%(left, top, right, bottom))
-        return winiD
-    else:
-        return False
+    def __init__(self, DEBUG=False):
+        self.id = -1
+        self.runelite = 'RuneLite'
+        self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
+        self.win_rect = []
+        self.inventory_rect = []
+        self._DEBUG = DEBUG
 
-# Returns left, right, top, bottom
-def get_window_rect(wrong=False, DEBUG=False):
-    rect = win32gui.GetWindowRect(winiD)
-    if(DEBUG):
-        print('GET WINDOW RECT: ', rect)
-    # If the window isnt on the main monitor we need to move it so everything can work
-    if wrong:
-        return [rect[0], rect[1], rect[2], rect[3]]
-    return [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
+        self.find_window()
+        image = screen_image(self.win_rect)
+        if self._DEBUG:
+            debug_view(image)
+        self.grab_inventory(copy.deepcopy(image))
 
-#Callback function for EnumWindows, once it finds the window its looking for, sets the global to the PID
-def enum_window_callback(hwnd, extra):
-    if 'RuneLite' in win32gui.GetWindowText(hwnd) and win32gui.IsWindowVisible(hwnd):
-        globals()['winiD'] = hwnd
-        return False
-    
+    def find_window(self):  # find window name returns PID of the window, needs to be run first to establish the PID
+        win32gui.EnumWindows(self.enum_window_callback, None)
+        if self.id != None:
+            self.get_window_rect()
+            # Mention the installed location of Tesseract-OCR in your system
+            pytesseract.pytesseract.tesseract_cmd = self.tesseract_path
+            # win32gui.SetActiveWindow(winiD)
+            if self._DEBUG:
+                print('Window handle: %i'%(self.id))
+                print('Window rect: ', self.win_rect)
+                debug_view(screen_image(self.win_rect))
+        else:
+            raise RuneLiteNotFoundException('RuneLite cannot be found!')
+
+    #Callback function for EnumWindows, once it finds the window its looking for, sets the global to the PID
+    def enum_window_callback(self, hwnd, extra):
+        if 'RuneLite' in win32gui.GetWindowText(hwnd) and win32gui.IsWindowVisible(hwnd):
+            self.id = hwnd
+
+    # Returns left, right, top, bottom
+    def get_window_rect(self):
+        rect = win32gui.GetWindowRect(self.id)
+        if(self._DEBUG):
+            print('GET WINDOW RECT: ', rect)
+        # If the window isnt on the main monitor we need to move it so everything can work- not implemented
+        self.win_rect = [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
+
+    def grab_inventory(self, img):
+        if self._DEBUG:
+            debug_view(img)
+        image = copy.deepcopy(img)
+        try:
+            self.find_inventory(image)
+            inventory = [self.win_rect[0], self.win_rect[1], self.win_rect[2]-self.win_rect[0], self.win_rect[3]-self.win_rect[1]]
+            # Need to account for the fact that the image typically sent to grab_inventory is of the client only
+            image = screen_image(inventory, 'Session_Inventory.png')
+            if self._DEBUG:
+                debug_view(image, "Session Inventory")
+                screenshot_check = screen_image(self.id, [0, 0, 1920, 1040])
+                screenshot_check = cv2.rectangle(screenshot_check, inventory, color=(0,255,0), thickness=2)
+                debug_view(screenshot_check, title='True inventory position')
+        except:
+            return False
+
+    # Locate the inventory on the client screen and returns the corners
+    def find_inventory(self, image, threshold=0.7):
+        image_gray = cv2.cvtColor(copy.deepcopy(image), cv2.COLOR_BGR2GRAY)
+        template = cv2.imread('images/ui_icons.png', 0)
+        w, h = template.shape[::-1]
+        pt = None
+        res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
+
+        loc = np.where(res >= threshold)
+        # print('LOC: ', len(loc))
+        for pt in zip(*loc[::-1]):
+            cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
+            # cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
+        try:
+            #182x255
+            self.inventory_rect = [pt[0]+20, pt[1]+35, 182, 255]
+            if self._DEBUG:
+                cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
+                print(self.inventory_rect)
+                debug_view(image_gray)
+                debug_view(image)
+        except:
+            return []
+
+class RuneLiteNotFoundException(Exception):
+    pass
+
+# Functions ---------------------------------------------------------
 # Expects a tuple[x1,y1,x2,y2]
-def screen_image(rect=None, name='screenshot.png', DEBUG=False):
+def screen_image(rect=None, isolate=False, name='screenshot.png'):
     if rect == None:
-        [left, top, right, bottom] = get_window_rect()
+        [left, top, right, bottom] = [0, 0, 1920, 1080]
     else:
         [left, top, right, bottom] = rect
     #bbox has a different order of dimensions than GetWindowRect, right+left,etc, because right and bottom are w/h, not locations
-    myScreenshot = ImageGrab.grab(bbox=(left, top, right+left, bottom+top))
-    myScreenshot.save('images/' + name)
+    my_screenshot = ImageGrab.grab(bbox=(left, top, right+left, bottom+top))
+    my_screenshot.save('images/' + name)
     # Get the image via cv2 so I don't have to worry about whatever format it wants
     return cv2.imread('images/screenshot.png')
 
-def get_action_text(DEBUG=False):
+def get_action_text(bot, DEBUG=False):
     scale = 300
-    left, top, right, bottom = get_window_rect()
+    left, top, right, bottom = bot.get_window_rect()
     # I don't identify the locaiton of the fishing/mining/woodcutting text, make sure it's dragged to the top,left area
     screen_image([left+25, top+50, 100, 30], 'Session_Action.png')
     img = resize_image(cv2.imread('images/Session_Action.png'), scale)
@@ -170,76 +214,11 @@ def get_action_text(DEBUG=False):
         result = 1
     return result
 
-# Covers username top left
-def isolate_min(image):
-    image = cv2.rectangle(image, pt1=(0, 0), pt2=(200, 25), color=(0, 0, 0), thickness=-1)
-    return image
-
 # Block the locations of the username in the client title, the chatbox, and also block the inventory from the image
-def isolate_playspace(image):
-    # print('ISOLATE PLAYSPACE')
-    left, top, right, bottom = get_window_rect()
-    # 0, 0, 1920, 1040
-    # Rectangle points (this took me a minute because im deficient):
-    #   top -> left side of screen
-    #   bottom -> right side of screen
-    #   right -> bottom of the screen
-    #   left -> top of the screen
-
+def isolate_playspace(image, bot):
     # Cover the inventory
-    x1 = globals()['x1']
-    y1 = globals()['y1']
-    x2 = globals()['x2']
-    y2 = globals()['y2']
-    # print(x1, y1, x2, y2)
-    image = cv2.rectangle(image, (x1, y1), (x2, y2), color=(0, 0, 0), thickness=-1)
+    image = cv2.rectangle(image, bot.inventory_rect, color=(0, 0, 0), thickness=-1)
     return image
-
-def grab_inventory(img, DEBUG=False):
-    if DEBUG:
-        debug_view(img)
-    image = copy.deepcopy(img)
-    try:
-        [x1, y1, x2, y2] = find_inventory(image, DEBUG=DEBUG)
-        [left, top, right, bottom] = get_window_rect()
-        # Need to account for the fact that the image typically sent to grab_inventory is of the client only
-        image = screen_image([x1+left, y1+top, x2-x1, y2-y1], 'Session_Inventory.png', DEBUG=DEBUG)
-
-        if DEBUG:
-            debug_view(image, "Session Inventory")
-            screenshot_check = screen_image([0, 0, 1920, 1040])
-            screenshot_check = cv2.rectangle(screenshot_check, [x1+left, y1+top, x2-x1, y2-y1], color=(0,255,0), thickness=2)
-            debug_view(screenshot_check, title='True inventory position')
-    except:
-        return False
-
-# Locate the inventory on the client screen and returns the corners
-def find_inventory(image, threshold=0.7, DEBUG=False):
-    image_gray = cv2.cvtColor(copy.deepcopy(image), cv2.COLOR_BGR2GRAY)
-    template = cv2.imread('images/ui_icons.png', 0)
-    w, h = template.shape[::-1]
-    pt = None
-    res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
-
-    loc = np.where(res >= threshold)
-    # print('LOC: ', len(loc))
-    for pt in zip(*loc[::-1]):
-        cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
-        # cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
-    try:
-        x1, y1, x2, y2 = pt[0]+20, pt[1]+35, pt[0] + 200, pt[1] + 293
-        if DEBUG:
-            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            print(x1, y1, x2, y2)
-            debug_view(image_gray)
-            debug_view(image)
-        globals()['x1'] = x1
-        globals()['y1'] = y1
-        globals()['x2'] = x2
-        globals()['y2'] = y2
-        return [x1, y1, x2, y2]
-    except:
-        return []
 
 # Locate the chat area on the client screen and returns the corners
 def find_chat(image, threshold=0.7, DEBUG=False):
@@ -510,7 +489,6 @@ def debug_view(img, title="Debug Screenshot", scale=60):
 def init_session(DEBUG=False):
     id = find_window()
     if id:
-        globals()['winiD'] = id
         image = isolate_min(screen_image())
         if DEBUG:
             debug_view(image)
@@ -535,117 +513,110 @@ def hit_escape():
 
 #Main
 if __name__ == "__main__":
-    print('Get window dimensions and id')
-    globals()['runelite'] = 'RuneLite'
-    globals()['window_x'] = 1920
-    globals()['window_y'] = 1040
+    bot = bot_brain(True)
 
     # print('Did I do it right? ', os.path.exists(tesseract_path))
 
-    id = find_window()
-    if id:
-        print('Get screenshot of window')
-        # Some initial setup
-        base_image = init_session(DEBUG=False)
-        screenshot_check = screen_image([0, 0, 1920, 1040])
-        rect = get_window_rect(DEBUG=False)
-        rect_w = get_window_rect(wrong=True)
-        screenshot_check = cv2.rectangle(screenshot_check, rect, color=(0,255,0), thickness=3)
-        screenshot_check = cv2.rectangle(screenshot_check, rect_w, color=(0,0,255), thickness=3)
-        # debug_view(screenshot_check)
-        screenshot_check = screen_image(get_window_rect())
-        # debug_view(screenshot_check)
-        print(find_center(False))
-        # cv2.imshow("First screenshot", np.hstack([image]))
-        # cv2.waitKey(0)
-        # find_center(image, DEBUG=True)
+    print('Get screenshot of window')
+    # Some initial setup
+    base_image = init_session(DEBUG=False)
+    screenshot_check = screen_image([0, 0, 1920, 1040])
+    rect = get_window_rect(DEBUG=False)
+    rect_w = get_window_rect(wrong=True)
+    screenshot_check = cv2.rectangle(screenshot_check, rect, color=(0,255,0), thickness=3)
+    screenshot_check = cv2.rectangle(screenshot_check, rect_w, color=(0,0,255), thickness=3)
+    # debug_view(screenshot_check)
+    screenshot_check = screen_image(get_window_rect())
+    # debug_view(screenshot_check)
+    print(find_center(False))
+    # cv2.imshow("First screenshot", np.hstack([image]))
+    # cv2.waitKey(0)
+    # find_center(image, DEBUG=True)
 
-        # RGB color=(200,10,200) opacity 255
-        # Arrays in boundaries are actually in B, G, R format
+    # RGB color=(200,10,200) opacity 255
+    # Arrays in boundaries are actually in B, G, R format
 
-        # Colors
-        # click_here([find_center()], image=copy.deepcopy(base_image))
-        # time.sleep(0.6)
-        # hit_escape()
-        # time.sleep(0.6)
-        # refresh_session()
-        #click_info = locate_color(copy.deepcopy(globals()['client']), boundaries=[([216, 215, 0], [236, 235, 10])], DEBUG=True)
+    # Colors
+    # click_here([find_center()], image=copy.deepcopy(base_image))
+    # time.sleep(0.6)
+    # hit_escape()
+    # time.sleep(0.6)
+    # refresh_session()
+    #click_info = locate_color(copy.deepcopy(globals()['client']), boundaries=[([216, 215, 0], [236, 235, 10])], DEBUG=True)
 
-        # Fish
-        # click_info = locate_image(image, r'Angler_Spot.png', name='Find Fishing Spots', DEBUG=True)
-        # fishing_text_loc = locate_image(copy.deepcopy(base_image), r'Fishing_text.png', area='screen', name='Locate fishing text', DEBUG=DEBUG)
-        # not_fishing_loc = locate_image(copy.deepcopy(base_image), r'Not_fishing_text.png', area='screen', name='Locate Not-fishing text', DEBUG=DEBUG)
+    # Fish
+    # click_info = locate_image(image, r'Angler_Spot.png', name='Find Fishing Spots', DEBUG=True)
+    # fishing_text_loc = locate_image(copy.deepcopy(base_image), r'Fishing_text.png', area='screen', name='Locate fishing text', DEBUG=DEBUG)
+    # not_fishing_loc = locate_image(copy.deepcopy(base_image), r'Not_fishing_text.png', area='screen', name='Locate Not-fishing text', DEBUG=DEBUG)
 
-        # while(not click_info):
-        #    image = screen_image()
-        #    # Scan for image
+    # while(not click_info):
+    #    image = screen_image()
+    #    # Scan for image
 
-            # Get location for image
-        DEBUG1 = False
-        DEBUG2 = False
-        # debug_view(base_image)
-        click_info = locate_image(copy.deepcopy(base_image), r'infernal_eel_spot.png', name='Find Fishing Spots', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
-        print('I see %d eel spots'%(len(click_info)))
-        #    attempt += 1
-        #    print(attempt)
-        # base_image = refresh_session()
-        inv = cv2.imread('images/Session_Inventory.png')
-        click_info = locate_image(copy.deepcopy(inv), r'infernal_eel_fish.png', name='Find Fish in Inv', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
-        if len(click_info) == 0:
-            print('I have no eels')
-        else:
-            print('I have %d eels'%(len(click_info)))
-        click_info = locate_image(copy.deepcopy(inv), r'imcando_hammer.png', name='Find Imcando Hammer in Inv', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
-        print('I have %d hammer'%(len(click_info)))
-
-        print('We are doing an action: ', get_action_text() is 0)
-
-        # Drag middle mouse from near-center to a random poing
-        rand = [random.randrange(-200,200), random.randrange(-200,200)]
-        # control_camera(pick_point_in_circle(rand, rad=100))
-
-        # Find Yellow
-        # click_info = locate_color(base_image, boundaries=[([0, 245, 245], [10, 255, 255])], DEBUG=True)
-        # print(click_info)
-        # click_here(click_info, image, DEBUG=DEBUG)
-        click_logout(DEBUG=True)
-        # click_logout(FAST=True)
-
-        click_info = locate_image(copy.deepcopy(inv), r'knife.png', name='Find Magic Trees', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
-        if len(click_info) == 0:
-            print('I don\'t have a knife')
-        else:
-            print('I see %d knives'%(len(click_info)))
-        click_info = locate_image(copy.deepcopy(inv), r'magic_logs.png', name='Find magic logs in inv', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
-        if len(click_info) == 0:
-            print('I have no logs')
-        else:
-            print('I have %d logs'%(len(click_info)))
-
-        if False:
-            pan_left()
-            time.sleep(1)
-            pan_right()
-            time.sleep(1)
-            pan_up()
-            time.sleep(1)
-            pan_down()
-            time.sleep(1)
-
-            point = find_center()
-            rect = get_window_rect()
-            point = [point[0] - math.floor(rect[2]/2 * 0.90), point[1] - math.floor(rect[3]/2 * 0.90)]
-            pan_to(point=point)
-        
-        # find_inventory(image, DEBUG=True)
-        # find_chat(image, DEBUG=True)
-        # Click on a fishing spot
-                
-        # image = isolate_playspace(image)
-        # image = isolate_inventory(image)
-        # image = resize_image(image, 75)0
-
-        # cv2.imshow("Screenshot", np.hstack([resize_image(base_image, 50)]))
-        # cv2.waitKey(0)
+        # Get location for image
+    DEBUG1 = False
+    DEBUG2 = False
+    # debug_view(base_image)
+    click_info = locate_image(copy.deepcopy(base_image), r'infernal_eel_spot.png', name='Find Fishing Spots', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
+    print('I see %d eel spots'%(len(click_info)))
+    #    attempt += 1
+    #    print(attempt)
+    # base_image = refresh_session()
+    inv = cv2.imread('images/Session_Inventory.png')
+    click_info = locate_image(copy.deepcopy(inv), r'infernal_eel_fish.png', name='Find Fish in Inv', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
+    if len(click_info) == 0:
+        print('I have no eels')
     else:
-        print('RuneLite not found!')
+        print('I have %d eels'%(len(click_info)))
+    click_info = locate_image(copy.deepcopy(inv), r'imcando_hammer.png', name='Find Imcando Hammer in Inv', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
+    print('I have %d hammer'%(len(click_info)))
+
+    print('We are doing an action: ', get_action_text() is 0)
+
+    # Drag middle mouse from near-center to a random poing
+    rand = [random.randrange(-200,200), random.randrange(-200,200)]
+    # control_camera(pick_point_in_circle(rand, rad=100))
+
+    # Find Yellow
+    # click_info = locate_color(base_image, boundaries=[([0, 245, 245], [10, 255, 255])], DEBUG=True)
+    # print(click_info)
+    # click_here(click_info, image, DEBUG=DEBUG)
+    # click_logout(DEBUG=True)
+    # click_logout(FAST=True)
+
+    click_info = locate_image(copy.deepcopy(inv), r'knife.png', name='Find Magic Trees', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
+    if len(click_info) == 0:
+        print('I don\'t have a knife')
+    else:
+        print('I see %d knives'%(len(click_info)))
+    click_info = locate_image(copy.deepcopy(inv), r'magic_logs.png', name='Find magic logs in inv', DEBUG_1=DEBUG1, DEBUG_2=DEBUG2)
+    if len(click_info) == 0:
+        print('I have no logs')
+    else:
+        print('I have %d logs'%(len(click_info)))
+
+    if False:
+        pan_left()
+        time.sleep(1)
+        pan_right()
+        time.sleep(1)
+        pan_up()
+        time.sleep(1)
+        pan_down()
+        time.sleep(1)
+
+        point = find_center()
+        rect = get_window_rect()
+        point = [point[0] - math.floor(rect[2]/2 * 0.90), point[1] - math.floor(rect[3]/2 * 0.90)]
+        pan_to(point=point)
+    
+    # find_inventory(image, DEBUG=True)
+    # find_chat(image, DEBUG=True)
+    # Click on a fishing spot
+            
+    # image = isolate_playspace(image)
+    # image = isolate_inventory(image)
+    # image = resize_image(image, 75)0
+
+    # cv2.imshow("Screenshot", np.hstack([resize_image(base_image, 50)]))
+    # cv2.waitKey(0)
