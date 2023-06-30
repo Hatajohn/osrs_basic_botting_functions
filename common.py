@@ -13,6 +13,7 @@ import copy
 import os
 
 # Classes -----------------------------------------------------------
+
 # The bot brain handles knowing information pertinent to the bot functioning
 # Currently it handles the window name, tesseract path, client location and id
 class bot_brain():
@@ -23,12 +24,11 @@ class bot_brain():
         self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
         self.win_rect = []
         self.inventory_rect = []
+        self.inventory_global = []
         self._DEBUG = DEBUG
 
         self.find_window()
         image = screen_image(self.win_rect)
-        if self._DEBUG:
-            debug_view(image)
         self.grab_inventory(copy.deepcopy(image))
 
     def find_window(self):  # find window name returns PID of the window, needs to be run first to establish the PID
@@ -59,18 +59,14 @@ class bot_brain():
         self.win_rect = [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
 
     def grab_inventory(self, img):
-        if self._DEBUG:
-            debug_view(img)
         image = copy.deepcopy(img)
         try:
             self.find_inventory(image)
-            inventory = [self.win_rect[0], self.win_rect[1], self.win_rect[2]-self.win_rect[0], self.win_rect[3]-self.win_rect[1]]
             # Need to account for the fact that the image typically sent to grab_inventory is of the client only
-            image = screen_image(inventory, 'Session_Inventory.png')
             if self._DEBUG:
                 debug_view(image, "Session Inventory")
-                screenshot_check = screen_image(self.id, [0, 0, 1920, 1040])
-                screenshot_check = cv2.rectangle(screenshot_check, inventory, color=(0,255,0), thickness=2)
+                screenshot_check = screen_image()
+                screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
                 debug_view(screenshot_check, title='True inventory position')
         except:
             return False
@@ -91,6 +87,7 @@ class bot_brain():
         try:
             #182x255
             self.inventory_rect = [pt[0]+20, pt[1]+35, 182, 255]
+            self.inventory_global = [self.inventory_rect[0] + self.win_rect[0], self.inventory_rect[1] + self.win_rect[1], self.inventory_rect[2], self.inventory_rect[3]]
             if self._DEBUG:
                 cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
                 print(self.inventory_rect)
@@ -102,7 +99,9 @@ class bot_brain():
 class RuneLiteNotFoundException(Exception):
     pass
 
+
 # Functions ---------------------------------------------------------
+
 # Expects a tuple[x1,y1,x2,y2]
 def screen_image(rect=None, isolate=False, name='screenshot.png'):
     if rect == None:
@@ -117,9 +116,8 @@ def screen_image(rect=None, isolate=False, name='screenshot.png'):
 
 def get_action_text(bot, DEBUG=False):
     scale = 300
-    left, top, right, bottom = bot.get_window_rect()
     # I don't identify the locaiton of the fishing/mining/woodcutting text, make sure it's dragged to the top,left area
-    screen_image([left+25, top+50, 100, 30], 'Session_Action.png')
+    screen_image([bot.win_rect[0]+25, bot.win_rect[1]+50, 100, 30], 'Session_Action.png')
     img = resize_image(cv2.imread('images/Session_Action.png'), scale)
     if DEBUG:
         debug_view(img)
@@ -513,7 +511,9 @@ def hit_escape():
 
 #Main
 if __name__ == "__main__":
-    bot = bot_brain(True)
+    DEBUG = True
+    bot = bot_brain(DEBUG)
+    print('We are doing an action: ', get_action_text(bot, DEBUG) is 0)
 
     # print('Did I do it right? ', os.path.exists(tesseract_path))
 
