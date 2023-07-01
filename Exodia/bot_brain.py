@@ -15,12 +15,11 @@ import bot_env as screen
 
 # The bot brain handles knowing information pertinent to the bot functioning
 # Currently it handles the window name, tesseract path, client location and id
-class bot_brain():
+class BotBrain():
 
     def __init__(self, DEBUG=False):
         self.id = -1
         self.runelite = 'RuneLite'
-        self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
         # Client dimensions on the monitor
         self.win_rect = []
         # Inventory location in a client screenshot
@@ -61,7 +60,7 @@ class bot_brain():
             if self._DEBUG:
                 print('Window handle: %i'%(self.id))
                 print('Window rect: ', self.win_rect)
-                debug_view(screen.screen_image(self.win_rect))
+                screen.debug_view(screen.screen_image(self.win_rect))
         else:
             raise RuneLiteNotFoundException('RuneLite cannot be found!')
 
@@ -87,10 +86,10 @@ class bot_brain():
             self.find_inventory(image)
             # Need to account for the fact that the image typically sent to grab_inventory is of the client only
             if self._DEBUG:
-                debug_view(image, "Session Inventory")
+                screen.debug_view(image, "Session Inventory")
                 screenshot_check = screen.screen_image()
                 screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
-                debug_view(screenshot_check, title='True inventory position')
+                screen.debug_view(screenshot_check, title='True inventory position')
         except:
             return False
 
@@ -115,8 +114,8 @@ class bot_brain():
             if self._DEBUG:
                 cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
                 print(self.inventory_rect)
-                debug_view(image_gray)
-                debug_view(image)
+                screen.debug_view(image_gray)
+                screen.debug_view(image)
         except:
             return []
         
@@ -131,10 +130,10 @@ class bot_brain():
             print('TRUE CENTER ', true_center)
             image = screen.screen_image(self.win_rect)
             image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
-            debug_view(image, title='IMAGE CENTER')
+            screen.debug_view(image, title='IMAGE CENTER')
             image = screen.screen_image([0, 0, 1920, 1040])
             image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
-            debug_view(image, title='TRUE CENTER')
+            screen.debug_view(image, title='TRUE CENTER')
 
         self.local_center = image_center
         self.global_center = true_center
@@ -270,7 +269,7 @@ def click_here(points, center, rect, rad=15, DEBUG=False):
         print('Moving mouse to: ', x_mouse, y_mouse)
         image = cv2.circle(image, (point[0] + rect[0], point[1] + rect[1]), radius=rad, color=(0, 0, 255), thickness=2)
         image = cv2.circle(image, (x_mouse, y_mouse), radius=2, color=(0, 255, 0), thickness=2)
-        debug_view(image)
+        screen.debug_view(image)
 
     move_mouse([x_mouse, y_mouse])
     b = random.uniform(0.01, 0.05)
@@ -286,15 +285,17 @@ def pick_point_in_circle(point, rad=15):
     y_mouse = math.floor(random.uniform(point[1]-rad, point[1]+rad))
     return [x_mouse, y_mouse]
 
-def keep_point_on_screen(point):
-    x1, y1, x2, y2 = get_window_rect()
+def keep_point_on_screen(point, x, y, w, h, DEBUG=False):
     # Assume the point was generated with the image in mind, not the monitor
     # Prevent the mouse from leaving the client area
     print('CLAMP x y')
-    x = clamp(point[0], x1, x2)
-    y = clamp(point[1], y1, y2)
-    print(x, x1, x2)
-    print(y, y1, y2)
+    x = clamp(point[0], x, x+w)
+    y = clamp(point[1], y, y+h)
+    
+    if DEBUG:
+        print(point[0], x, x+w)
+        print(point[1], y, y+h)
+
     return [x, y]
 
 # Move mouse to a point on the screen
@@ -305,7 +306,7 @@ def move_mouse(point, duration=0, DEBUG=False):
         debug_image = screen.screen_image([0, 0, 1920, 1040])
         debug_image = cv2.circle(debug_image, point, radius=10, color=(0,255,0), thickness=-1)
         print('XY: ', point)
-        debug_view(debug_image, "Center vs move point")
+        screen.debug_view(debug_image, "Center vs move point")
 
     pyautogui.moveTo(point, duration=b)
 
@@ -377,34 +378,6 @@ def click_logout(FAST=False, DEBUG=False):
     except:
         print('Could not find logout button')
 
-def debug_view(img, title="Debug Screenshot", scale=60):
-    image = copy.deepcopy(img)
-    image = resize_image(image, scale)
-    cv2.imshow(title, np.hstack([image]))
-    cv2.waitKey(0)
-    # Wait for the image to close
-    time.sleep(0.5)
-
-# Grab the first screenshot, remove the username from the top left of the client, grab the inventory position
-def init_session(DEBUG=False):
-    id = find_window()
-    if id:
-        image = isolate_min(screen.screen_image())
-        if DEBUG:
-            debug_view(image)
-        grab_inventory(copy.deepcopy(image), DEBUG=DEBUG)
-        image = isolate_playspace(image)
-        return image
-    else:
-        return False
-
-def refresh_session(DEBUG=False):
-    if DEBUG:
-        time.sleep(1)
-    image = isolate_min(screen.screen_image())
-    grab_inventory(copy.deepcopy(image), DEBUG=DEBUG)
-    image = isolate_playspace(image)
-    return image
 
 def hit_escape():
     pyautogui.keyDown('escape')
@@ -414,7 +387,7 @@ def hit_escape():
 #Main
 if __name__ == "__main__":
     DEBUG = True
-    bot = bot_brain(DEBUG)
+    bot = BotEyes(DEBUG)
     print('We are doing an action: ', get_action_text(bot, DEBUG) is 0)
 
     # print('Did I do it right? ', os.path.exists(tesseract_path))
