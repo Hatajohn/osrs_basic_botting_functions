@@ -1,16 +1,15 @@
 #imports
 import numpy as np
 import win32gui
-from PIL import Image, ImageGrab
+import cv2
 import pytesseract
 import pyautogui
 import math
 import time
 import sys
 import random
-import cv2
 import copy
-import os
+import bot_env as screen
 
 # Classes -----------------------------------------------------------
 
@@ -22,16 +21,37 @@ class bot_brain():
         self.id = -1
         self.runelite = 'RuneLite'
         self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
+        # Client dimensions on the monitor
         self.win_rect = []
+        # Inventory location in a client screenshot
         self.inventory_rect = []
+        # Inventory location on monitor
         self.inventory_global = []
+        # Center of the client
+        self.local_center = []
+        self.global_center = []
+
+        # Debug flag, bot_brain(true) will show images of each step being performed
         self._DEBUG = DEBUG
+        # Time period for updates, each game tick is 0.6 seconds but it probably isnt practical 
+        # to try to sync the bot with the game w/o some sort of reading of the game client info
+        self._t = 0.6
 
-        self.find_window()
-        image = screen_image(self.win_rect)
-        self.grab_inventory(copy.deepcopy(image))
+        # Bot needs this information before it can be ran
+        self._find_window()
+        self.image = screen.screen_image(self.win_rect)
+        self.grab_inventory(copy.deepcopy(self.image))
+        self.find_center()
 
-    def find_window(self):  # find window name returns PID of the window, needs to be run first to establish the PID
+    
+    def update(self):
+        self.get_window_rect()
+        self.image = screen.screen_image(self.win_rect)
+        self.grab_inventory(copy.deepcopy(self.image))
+        self.find_center()
+
+
+    def _find_window(self):  # find window name returns PID of the window, needs to be run first to establish the PID
         win32gui.EnumWindows(self.enum_window_callback, None)
         if self.id != None:
             self.get_window_rect()
@@ -41,14 +61,16 @@ class bot_brain():
             if self._DEBUG:
                 print('Window handle: %i'%(self.id))
                 print('Window rect: ', self.win_rect)
-                debug_view(screen_image(self.win_rect))
+                debug_view(screen.screen_image(self.win_rect))
         else:
             raise RuneLiteNotFoundException('RuneLite cannot be found!')
+
 
     #Callback function for EnumWindows, once it finds the window its looking for, sets the global to the PID
     def enum_window_callback(self, hwnd, extra):
         if 'RuneLite' in win32gui.GetWindowText(hwnd) and win32gui.IsWindowVisible(hwnd):
             self.id = hwnd
+
 
     # Returns left, right, top, bottom
     def get_window_rect(self):
@@ -58,6 +80,7 @@ class bot_brain():
         # If the window isnt on the main monitor we need to move it so everything can work- not implemented
         self.win_rect = [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
 
+
     def grab_inventory(self, img):
         image = copy.deepcopy(img)
         try:
@@ -65,11 +88,12 @@ class bot_brain():
             # Need to account for the fact that the image typically sent to grab_inventory is of the client only
             if self._DEBUG:
                 debug_view(image, "Session Inventory")
-                screenshot_check = screen_image()
+                screenshot_check = screen.screen_image()
                 screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
                 debug_view(screenshot_check, title='True inventory position')
         except:
             return False
+
 
     # Locate the inventory on the client screen and returns the corners
     def find_inventory(self, image, threshold=0.7):
@@ -95,6 +119,25 @@ class bot_brain():
                 debug_view(image)
         except:
             return []
+        
+    # A function that sets the local and global centers. This can be used in other functions since the character is always semi-centered
+    def find_center(self):
+        #win_rect is top-left (x, y) then width and height
+        image_center = [math.floor(self.win_rect[2]/2), math.floor(self.win_rect[3]/2)]
+        true_center = [image_center[0] + self.win_rect[0], image_center[1] + self.win_rect[1]]
+
+        if self._DEBUG:
+            print('IMAGE CENTER ', image_center)
+            print('TRUE CENTER ', true_center)
+            image = screen.screen_image(self.win_rect)
+            image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
+            debug_view(image, title='IMAGE CENTER')
+            image = screen.screen_image([0, 0, 1920, 1040])
+            image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
+            debug_view(image, title='TRUE CENTER')
+
+        self.local_center = image_center
+        self.global_center = true_center
 
 class RuneLiteNotFoundException(Exception):
     pass
@@ -102,125 +145,15 @@ class RuneLiteNotFoundException(Exception):
 
 # Functions ---------------------------------------------------------
 
-# Expects a tuple[x1,y1,x2,y2]
-def screen_image(rect=None, isolate=False, name='screenshot.png'):
-    if rect == None:
-        [left, top, right, bottom] = [0, 0, 1920, 1080]
-    else:
-        [left, top, right, bottom] = rect
-    #bbox has a different order of dimensions than GetWindowRect, right+left,etc, because right and bottom are w/h, not locations
-    my_screenshot = ImageGrab.grab(bbox=(left, top, right+left, bottom+top))
-    my_screenshot.save('images/' + name)
-    # Get the image via cv2 so I don't have to worry about whatever format it wants
-    return cv2.imread('images/screenshot.png')
-
-def get_action_text(bot, DEBUG=False):
-    scale = 300
-    # I don't identify the locaiton of the fishing/mining/woodcutting text, make sure it's dragged to the top,left area
-    screen_image([bot.win_rect[0]+25, bot.win_rect[1]+50, 100, 30], 'Session_Action.png')
-    img = resize_image(cv2.imread('images/Session_Action.png'), scale)
-    if DEBUG:
-        debug_view(img)
-
-    # Need to mask for green and red 
-    boundaries=[([0, 250, 0], [10, 255, 10])]
-    boundaries_not=[([0, 0, 250], [10, 10, 255])]
-    for (lower, upper) in boundaries:
-        # create NumPy arrays from the boundaries
-        lower = np.array(lower, dtype="uint8")
-        upper = np.array(upper, dtype="uint8")
-        img_g = copy.deepcopy(img)
-        # find the colors within the specified boundaries and apply the mask
-        mask_g = cv2.inRange(img_g, lower, upper)
-        output = cv2.bitwise_and(img_g, img_g, mask=mask_g)
-        ret, thresh_g = cv2.threshold(mask_g, 40, 255, 0)
-
-    for (lower, upper) in boundaries_not:
-        # create NumPy arrays from the boundaries
-        lower = np.array(lower, dtype="uint8")
-        upper = np.array(upper, dtype="uint8")
-        img_r = copy.deepcopy(img)
-        # find the colors within the specified boundaries and apply the mask
-        mask_r = cv2.inRange(img_r, lower, upper)
-        output = cv2.bitwise_and(img_r, img_r, mask=mask_r)
-        ret, thresh_r = cv2.threshold(mask_r, 40, 255, 0)
-    
-    # Specify structure shape and kernel size.
-    # Kernel size increases or decreases the area
-    # of the rectangle to be detected.
-    # A smaller value like (10, 10) will detect
-    # each word instead of a sentence.
-    rect_kernel_g = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))
-    rect_kernel_r = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 20))
-    
-    # Applying dilation on the threshold image
-    dilation_g = cv2.dilate(thresh_g, rect_kernel_g, iterations = 1)
-    dilation_r = cv2.dilate(thresh_r, rect_kernel_r, iterations = 1)
-    
-    # Finding contours
-    contours_g, hierarchy = cv2.findContours(dilation_g, cv2.RETR_EXTERNAL,
-                                                    cv2.CHAIN_APPROX_NONE)
-    contours_r, hierarchy = cv2.findContours(dilation_r, cv2.RETR_EXTERNAL,
-                                                    cv2.CHAIN_APPROX_NONE)
-    if DEBUG:
-        draw_contour = cv2.drawContours(copy.deepcopy(img), contours_g, 0, color=(255,0,0), thickness=2)
-        debug_view(draw_contour, "Contours Fishing")
-        draw_contour = cv2.drawContours(copy.deepcopy(img), contours_r, 0, color=(255,0,0), thickness=2)
-        debug_view(draw_contour, "Contours NOT Fishing")
-
-    # Creating a copy of image
-    im2 = img.copy()
-    im3 = img.copy()
-    
-    # Looping through the identified contours
-    # Then rectangular part is cropped and passed on
-    # to pytesseract for extracting text from it
-    working = False
-    not_working = False
-
-    for cnt in contours_g:
-        x, y, w, h = cv2.boundingRect(cnt)
-        # Cropping the text block for giving input to OCR
-        cropped = im2[y:y + h, x:x + w]
-        text = pytesseract.image_to_string(cropped)
-        working = True
-
-        if DEBUG:
-            # Drawing a rectangle on copied image
-            rect = cv2.rectangle(im2, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            print('(GREEN) WE ARE: %s'%(text))
-            debug_view(rect)
-
-    for cnt in contours_r:
-        x, y, w, h = cv2.boundingRect(cnt)
-        # Cropping the text block for giving input to OCR
-        cropped = im3[y:y + h, x:x + w]
-        text = pytesseract.image_to_string(cropped)
-        not_working = True
-
-        if DEBUG:
-            # Drawing a rectangle on copied image
-            rect = cv2.rectangle(im3, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            print('(RED) WE ARE: %s'%(text))
-            debug_view(rect)
-
-    # 2 means there is no action text, or it failed to find anything, this distinction might not be necessary
-    result = 2
-    if working:
-        result = 0
-    elif not_working:
-        result = 1
-    return result
-
 # Block the locations of the username in the client title, the chatbox, and also block the inventory from the image
-def isolate_playspace(image, bot):
+def isolate_playspace(bot, image):
     # Cover the inventory
     image = cv2.rectangle(image, bot.inventory_rect, color=(0, 0, 0), thickness=-1)
     return image
 
 # Locate the chat area on the client screen and returns the corners
-def find_chat(image, threshold=0.7, DEBUG=False):
-    image_gray = cv2.cvtColor(resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
+def find_chat(bot, image, threshold=0.7, DEBUG=False):
+    image_gray = cv2.cvtColor(screen.resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
     template = cv2.imread('images/chat_template.png', 0)
     w, h = template.shape[::-1]
     pt = None
@@ -316,36 +249,8 @@ def locate_image(img_rgb, filename, threshold=0.7, name='Screenshot', DEBUG_1=Fa
         print('Locate image failed!')
         return []
 
-# Resizes a given image by a integer percentage (like 70), helpful for viewing the entirety of a screenshot
-def resize_image(image, scale_percent):
-    width = int(image.shape[1] * scale_percent / 100)
-    height = int(image.shape[0] * scale_percent / 100)
-    dim = (width, height)
-    return cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
-
-def find_center(DEBUG=False):
-    x1,y1,x2,y2 = get_window_rect()
-    print('FIND CENTER: ', x1, y1, x2, y2)
-    image_center = [math.floor(x2/2), math.floor(y2/2)]
-    true_center = [image_center[0] + x1, image_center[1] + y1]
-
-    if DEBUG:
-        print('IMAGE CENTER ', image_center)
-        print('TRUE CENTER ', true_center)
-        image = screen_image([x1, y1, x2, y2])
-        image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
-        debug_view(image, title='IMAGE CENTER')
-        image = screen_image([0, 0, 1920, 1040])
-        image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
-        debug_view(image, title='TRUE CENTER')
-
-    return true_center
-
-# takes an array of points, selects the point closest to the center of the client screen
-def click_here(points, rad=15, DEBUG=False):
-    #pick a point closest to the center of the screen?
-    center = find_center()
-    rect = get_window_rect()
+# takes an array of points, the client center, the win_rect, then moves and clicks the mouse at about the specified point
+def click_here(points, center, rect, rad=15, DEBUG=False):
     _dist = sys.maxsize
     point = None
     for p in points:
@@ -361,7 +266,7 @@ def click_here(points, rad=15, DEBUG=False):
     y_mouse += rect[1]
 
     if DEBUG:
-        image = screen_image([0, 0, 1920, 1040])
+        image = screen.screen_image([0, 0, 1920, 1040])
         print('Moving mouse to: ', x_mouse, y_mouse)
         image = cv2.circle(image, (point[0] + rect[0], point[1] + rect[1]), radius=rad, color=(0, 0, 255), thickness=2)
         image = cv2.circle(image, (x_mouse, y_mouse), radius=2, color=(0, 255, 0), thickness=2)
@@ -397,11 +302,8 @@ def move_mouse(point, duration=0, DEBUG=False):
     b = random.uniform(0.07, 0.31)
     # Move the mouse
     if DEBUG:
-        center = find_center()
-        debug_image = screen_image([0, 0, 1920, 1040])
-        debug_image = cv2.circle(debug_image, center, radius=10, color=(0,0,255), thickness=-1)
+        debug_image = screen.screen_image([0, 0, 1920, 1040])
         debug_image = cv2.circle(debug_image, point, radius=10, color=(0,255,0), thickness=-1)
-        print('CENTER: ', center)
         print('XY: ', point)
         debug_view(debug_image, "Center vs move point")
 
@@ -456,7 +358,7 @@ def pan_to(point, DEBUG=False):
 
 # Locates and clicks the logout button at the bottom of inv, then clicks the actual logout button
 def click_logout(FAST=False, DEBUG=False):
-    image = screen_image()
+    image = screen.screen_image()
     click_info = locate_image(image, r'logout_button.png', name='Find logout button')
     # DOES NOT YET ACCOUNT FOR THE WORLD SWITCHER BEING OPEN!!!
     if not FAST:
@@ -468,7 +370,7 @@ def click_logout(FAST=False, DEBUG=False):
         
     time.sleep(random.uniform(0.03, 0.09))
     # Small pause before grabbing a new image and clicking logout
-    image = screen_image()
+    image = screen.screen_image()
     click_info = locate_image(image, r'logout_button2.png', name='Find logout button')
     try:
         click_here(click_info)
@@ -487,7 +389,7 @@ def debug_view(img, title="Debug Screenshot", scale=60):
 def init_session(DEBUG=False):
     id = find_window()
     if id:
-        image = isolate_min(screen_image())
+        image = isolate_min(screen.screen_image())
         if DEBUG:
             debug_view(image)
         grab_inventory(copy.deepcopy(image), DEBUG=DEBUG)
@@ -499,7 +401,7 @@ def init_session(DEBUG=False):
 def refresh_session(DEBUG=False):
     if DEBUG:
         time.sleep(1)
-    image = isolate_min(screen_image())
+    image = isolate_min(screen.screen_image())
     grab_inventory(copy.deepcopy(image), DEBUG=DEBUG)
     image = isolate_playspace(image)
     return image
@@ -520,13 +422,13 @@ if __name__ == "__main__":
     print('Get screenshot of window')
     # Some initial setup
     base_image = init_session(DEBUG=False)
-    screenshot_check = screen_image([0, 0, 1920, 1040])
+    screenshot_check = screen.screen_image([0, 0, 1920, 1040])
     rect = get_window_rect(DEBUG=False)
     rect_w = get_window_rect(wrong=True)
     screenshot_check = cv2.rectangle(screenshot_check, rect, color=(0,255,0), thickness=3)
     screenshot_check = cv2.rectangle(screenshot_check, rect_w, color=(0,0,255), thickness=3)
     # debug_view(screenshot_check)
-    screenshot_check = screen_image(get_window_rect())
+    screenshot_check = screen.screen_image(get_window_rect())
     # debug_view(screenshot_check)
     print(find_center(False))
     # cv2.imshow("First screenshot", np.hstack([image]))
