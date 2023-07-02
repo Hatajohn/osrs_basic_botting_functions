@@ -25,7 +25,7 @@ class BotArms():
                 _dist = dist
                 point = p
         # Pick a point inside the click area
-        [x_mouse , y_mouse] = pick_point_in_circle(point, rad)
+        [x_mouse , y_mouse] = env.pick_point_in_circle(point, rad)
         x_mouse += rect[0]
         y_mouse += rect[1]
 

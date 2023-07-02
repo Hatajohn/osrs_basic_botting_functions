@@ -8,15 +8,24 @@ import copy
 import pytesseract
 
 class BotEyes():
-    def __init__(self, DEBUG=False):
+    def __init__(self, win_rect=[], DEBUG=False):
         # Relative path to the tesseract executable
         self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
 
-        # Inventory location in a client screenshot
+        # Inventory location in a client screenshot -> easier for image recognition and future screenshots
         self.inventory_rect = []
 
-        # Inventory location on monitor
+        # Inventory location on monitor -> easier for click locations
         self.inventory_global = []
+
+        # Image of current inventory -> easier for image recognition
+        self.curr_inventory = []
+
+        # Client rect -> pass from BotBrain object
+        self.client_rect = win_rect
+
+        # Image of client
+        self.curr_client = []
 
         # Center of the client
         self.local_center = []
@@ -29,7 +38,8 @@ class BotEyes():
     def grab_inventory(self, img):
             image = copy.deepcopy(img)
             try:
-                self.find_inventory(image)
+                if self.inventory_rect == []:
+                    self.find_inventory(image)
                 # Need to account for the fact that the image typically sent to grab_inventory is of the client only
                 if self._DEBUG:
                     screen.debug_view(image, "Session Inventory")
@@ -41,7 +51,9 @@ class BotEyes():
 
 
     # Locate the inventory on the client screen and returns the corners
-    def find_inventory(self, image, threshold=0.7):
+    def find_inventory(self, threshold=0.7):
+        self.check_client(self.client_rect)
+        image = copy.deepcopy(self.curr_client)
         image_gray = cv2.cvtColor(copy.deepcopy(image), cv2.COLOR_BGR2GRAY)
         template = cv2.imread('images/ui_icons.png', 0)
         w, h = template.shape[::-1]
@@ -56,7 +68,7 @@ class BotEyes():
         try:
             #182x255
             self.inventory_rect = [pt[0]+20, pt[1]+35, 182, 255]
-            self.inventory_global = [self.inventory_rect[0] + self.win_rect[0], self.inventory_rect[1] + self.win_rect[1], self.inventory_rect[2], self.inventory_rect[3]]
+            self.inventory_global = [self.inventory_rect[0] + self.client_rect[0], self.inventory_rect[1] + self.client_rect[1], self.inventory_rect[2], self.inventory_rect[3]]
             if self._DEBUG:
                 cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
                 print(self.inventory_rect)
@@ -66,8 +78,28 @@ class BotEyes():
             return []
         
 
+    # Updates the inventory image
+    def check_inventory(self):
+        self.curr_inventory = screen.screen_image(rect=self.inventory_global, DEBUG=self._DEBUG)
+
+
+    # Updates the client image
+    def check_client(self):
+        self.curr_client = screen.screen_image(rect=self.client_rect, DEBUG=self._DEBUG)
+        
+
+    # Block the inventory in the given image
+    def update(self):
+        # Cover the inventory, only call after init
+        if self.curr_client != [] and self.inventory_global != []:
+            self.check_client()
+            self.check_inventory()
+            # Place a black rectangle covering the inventory
+            self.curr_client = cv2.rectangle(self.curr_client, self.inventory_rect, color=(0, 0, 0), thickness=-1)
+
+
     # Locate the chat area on the client screen and returns the corners
-    def find_chat(self, image, threshold=0.7, DEBUG=False):
+    def find_chat(self, image, threshold=0.7):
         image_gray = cv2.cvtColor(screen.resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
         template = cv2.imread('images/chat_template.png', 0)
         w, h = template.shape[::-1]
@@ -79,22 +111,22 @@ class BotEyes():
             rect = cv2.rectangle(image, pt, (pt[0] + w, pt[1] + h), (0, 0, 0), 2)
             cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
         x1, y1, x2, y2 = pt[0]+20, pt[1]+35, pt[0] + 200, pt[1] + 290
-        if DEBUG:
+        if self._DEBUG:
             cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
         return x1, y1, x2, y2
 
 
     # A function that sets the local and global centers. This can be used in other functions since the character is always semi-centered
-    # Requires BotBrain to assign win_rect, otherwise just finds the global center of a rectangle
-    def find_center(self, win_rect):
-        #win_rect is top-left (x, y) then width and height
-        image_center = [math.floor(win_rect[2]/2), math.floor(win_rect[3]/2)]
-        true_center = [image_center[0] + win_rect[0], image_center[1] + win_rect[1]]
+    # Requires BotBrain to assign win_rect in init, otherwise just finds the global center of a rectangle
+    def find_center(self):
+        #self.client_rect is top-left (x, y) then width and height
+        image_center = [math.floor(self.client_rect[2]/2), math.floor(self.client_rect[3]/2)]
+        true_center = [image_center[0] + self.client_rect[0], image_center[1] + self.client_rect[1]]
 
         if self._DEBUG:
             print('IMAGE CENTER ', image_center)
             print('TRUE CENTER ', true_center)
-            image = screen.screen_image(win_rect)
+            image = screen.screen_image(self.client_rect)
             image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
             screen.debug_view(image, title='IMAGE CENTER')
             image = screen.screen_image([0, 0, 1920, 1040])
@@ -154,7 +186,7 @@ class BotEyes():
         
 
     # Similar to using 'substring in string', but with images
-    def locate_image(img_rgb, filename, threshold=0.7, name='Screenshot', DEBUG_1=False, DEBUG_2=False):
+    def locate_image(self, img_rgb, filename, threshold=0.7, name='Screenshot'):
         try:
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
             template = cv2.imread('images/' + filename, 0)
@@ -167,15 +199,15 @@ class BotEyes():
             mask = np.zeros(img_rgb.shape[:2], np.uint8)
             for pt in zip(*loc[::-1]):
                 # Add a circle to mark a match
-                if DEBUG_2:
+                if self._DEBUG:
                     cv2.rectangle(img_rgb, pt, (pt[0] + w, pt[1] + h), (255, 0, 0), thickness=1)
                 if mask[pt[1] + int(round(h/2)), pt[0] + int(round(w/2))] != 255:
                     mask[pt[1]:pt[1]+h, pt[0]:pt[0]+w] = 255
                     # An array of points
                     items.append([pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)])
-                    if DEBUG_1:
+                    if self._DEBUG:
                         cv2.circle(img_rgb, (pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)), radius=min(math.floor(w/3), math.floor(h/3)), color=(0,255,0), thickness=1)
-            if DEBUG_2:
+            if self._DEBUG:
                 cv2.imshow(name, np.hstack([img_rgb]))
                 cv2.waitKey(0)
                 time.sleep(0.5)

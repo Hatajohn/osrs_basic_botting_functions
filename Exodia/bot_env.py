@@ -7,19 +7,31 @@ import random
 import numpy as np
 
 
-# Expects a tuple[x1,y1,x2,y2]
-def screen_image(rect=None, isolate=False, name='BotEnv_Screenshot', DEBUG=False):
+# Expects a tuple[x1,y1,x2,y2], requires a value for cover_name if viewing an image in monitor
+def screen_image(rect=None, block=False, cover_name=None, name='BotEnv_Screenshot', DEBUG=False):
     if rect == None:
         [left, top, right, bottom] = [0, 0, 1920, 1080]
     else:
         [left, top, right, bottom] = rect
+
     #bbox has a different order of dimensions than GetWindowRect, right+left,etc, because right and bottom are w/h, not locations
     my_screenshot = ImageGrab.grab(bbox=(left, top, right+left, bottom+top))
     if DEBUG:
         my_screenshot.save('images/Screen_Image_Debug.png')
-    image = np.array(my_screenshot.getdata(), dtype = 'uint8').reshape((my_screenshot.size[1], my_screenshot.size[0], 3))
+
+    # Convert to a format cv2 can use
+    image = cv2.cvtColor(np.asarray(my_screenshot), cv2.COLOR_RGB2BGR)
     if DEBUG:
-        debug_view(image, title='Screen_Image_Debug.png')
+        debug_view(image, title='Post cvtColor reformat')
+    # Cover the client name if given the top left corner- the first two indices of rect
+    if block:
+        if cover_name != []:
+            image = block_name(image, cover_name)
+        else:
+            image = block_name(image)
+
+        if DEBUG:
+            debug_view(image, title='Post client name block')
     # Get the image via cv2 so I don't have to worry about whatever format it wants
 
     # return image for cv2 -> probably want to figure out how to do this without saving the image
@@ -32,6 +44,13 @@ def resize_image(image, scale_percent):
     height = int(image.shape[0] * scale_percent / 100)
     dim = (width, height)
     return cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+
+
+# Given the client image, covers the client name
+def block_name(image, corner=None):
+    if corner != None:
+        return cv2.rectangle(image, [corner[0], corner[1], 500, 20], color=(0, 0, 0), thickness=-1)
+    return cv2.rectangle(image, [0, 0, 500, 25], color=(0, 0, 0), thickness=-1)
 
 
 # Opens a scaled-down view of a given image for debugging
@@ -76,21 +95,3 @@ def pick_point_in_circle(point, rad=15):
     y = int(r * math.sin(alpha) + point[1])
 
     return (x, y)
-
-
-#Main
-if __name__ == "__main__":
-    monitor_x = 1920
-    monitor_y = 1080
-    dots = 10000
-    center = (math.floor(monitor_x/2), math.floor(monitor_y/2))
-    rad = 300
-
-    image = screen_image()
-
-    # 'max' dots in the center of the screen distributed randomly with bias
-    for i in range(0, dots):
-        point = pick_point_in_circle(center, rad=rad)
-        cv2.circle(image, center, radius=rad, color=(0, 255, 0), thickness=1)
-        cv2.circle(image, point, radius=1, color=(0, 0, 255), thickness=1)
-    debug_view(image)
