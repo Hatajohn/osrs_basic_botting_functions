@@ -14,14 +14,12 @@ class BotBrain():
 
         # Debug flag, bot_brain(true) will show images of each step being performed
         self._DEBUG = DEBUG
-        # Time period for updates, each game tick is 0.6 seconds but it probably isnt practical 
-        # to try to sync the bot with the game w/o some sort of reading of the game client info
-        self._t = 0.6
 
         # Bot needs this information before it can be ran
         self._find_window()
 
-    
+
+    # Update function for the brain, updates the location of the client dimensions
     def update(self):
         self.get_window_rect()
 
@@ -56,5 +54,6 @@ class BotBrain():
         # If the window isnt on the main monitor we need to move it so everything can work- not implemented
 
 
+# Exception to throw when the bot is constructed while RuneLite isnt open
 class RuneLiteNotFoundException(Exception):
     pass
