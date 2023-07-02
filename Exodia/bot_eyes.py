@@ -12,7 +12,101 @@ class BotEyes():
         # Relative path to the tesseract executable
         self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
 
-    def locate_color(image, boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=False):
+        # Inventory location in a client screenshot
+        self.inventory_rect = []
+
+        # Inventory location on monitor
+        self.inventory_global = []
+
+        # Center of the client
+        self.local_center = []
+        self.global_center = []
+
+        # Debug flag
+        self._DEBUG=DEBUG
+
+
+    def grab_inventory(self, img):
+            image = copy.deepcopy(img)
+            try:
+                self.find_inventory(image)
+                # Need to account for the fact that the image typically sent to grab_inventory is of the client only
+                if self._DEBUG:
+                    screen.debug_view(image, "Session Inventory")
+                    screenshot_check = screen.screen_image()
+                    screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
+                    screen.debug_view(screenshot_check, title='True inventory position')
+            except:
+                return False
+
+
+    # Locate the inventory on the client screen and returns the corners
+    def find_inventory(self, image, threshold=0.7):
+        image_gray = cv2.cvtColor(copy.deepcopy(image), cv2.COLOR_BGR2GRAY)
+        template = cv2.imread('images/ui_icons.png', 0)
+        w, h = template.shape[::-1]
+        pt = None
+        res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
+
+        loc = np.where(res >= threshold)
+        # print('LOC: ', len(loc))
+        for pt in zip(*loc[::-1]):
+            cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
+            # cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
+        try:
+            #182x255
+            self.inventory_rect = [pt[0]+20, pt[1]+35, 182, 255]
+            self.inventory_global = [self.inventory_rect[0] + self.win_rect[0], self.inventory_rect[1] + self.win_rect[1], self.inventory_rect[2], self.inventory_rect[3]]
+            if self._DEBUG:
+                cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
+                print(self.inventory_rect)
+                screen.debug_view(image_gray)
+                screen.debug_view(image)
+        except:
+            return []
+        
+
+    # Locate the chat area on the client screen and returns the corners
+    def find_chat(self, image, threshold=0.7, DEBUG=False):
+        image_gray = cv2.cvtColor(screen.resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
+        template = cv2.imread('images/chat_template.png', 0)
+        w, h = template.shape[::-1]
+        pt = None
+        res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
+        loc = np.where(res >= threshold)
+        # There should be only one match
+        for pt in zip(*loc[::-1]):
+            rect = cv2.rectangle(image, pt, (pt[0] + w, pt[1] + h), (0, 0, 0), 2)
+            cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
+        x1, y1, x2, y2 = pt[0]+20, pt[1]+35, pt[0] + 200, pt[1] + 290
+        if DEBUG:
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        return x1, y1, x2, y2
+
+
+    # A function that sets the local and global centers. This can be used in other functions since the character is always semi-centered
+    # Requires BotBrain to assign win_rect, otherwise just finds the global center of a rectangle
+    def find_center(self, win_rect):
+        #win_rect is top-left (x, y) then width and height
+        image_center = [math.floor(win_rect[2]/2), math.floor(win_rect[3]/2)]
+        true_center = [image_center[0] + win_rect[0], image_center[1] + win_rect[1]]
+
+        if self._DEBUG:
+            print('IMAGE CENTER ', image_center)
+            print('TRUE CENTER ', true_center)
+            image = screen.screen_image(win_rect)
+            image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
+            screen.debug_view(image, title='IMAGE CENTER')
+            image = screen.screen_image([0, 0, 1920, 1040])
+            image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
+            screen.debug_view(image, title='TRUE CENTER')
+
+        self.local_center = image_center
+        self.global_center = true_center
+
+
+    # Locates and draws contours around colors defined by the boundaries param
+    def locate_color(self, image, boundaries=[([180, 0, 180], [220, 20, 220])]):
         # define the list of boundaries
         # loop over the boundaries
         for (lower, upper) in boundaries:
@@ -26,7 +120,7 @@ class BotEyes():
             ret, thresh = cv2.threshold(mask, 40, 255, 0)
             contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
-        if DEBUG:
+        if self._DEBUG:
                 cv2.imwrite("images/Locate_Image_DebugPRE.png", image)
 
         if len(contours) != 0:
@@ -49,7 +143,7 @@ class BotEyes():
             x_center, y_center = (math.floor(x+w/2), math.floor(y+h/2))
             click_radius = math.floor(min(w, h)/2)
 
-            if DEBUG:
+            if self._DEBUG:
                 cv2.imwrite("images/Locate_Image_DebugPOST.png", image)
                 print('Length of contours: %d'%(len(contours)))
                 print(x, y, w, h)
@@ -59,6 +153,7 @@ class BotEyes():
             return []
         
 
+    # Similar to using 'substring in string', but with images
     def locate_image(img_rgb, filename, threshold=0.7, name='Screenshot', DEBUG_1=False, DEBUG_2=False):
         try:
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
@@ -92,17 +187,18 @@ class BotEyes():
             print('Locate image failed!')
             return []
         
-
-    def get_action_text(client_rect, DEBUG=False):
+        
+    # Needs to be adjusted to find the action text and read it - not implemented
+    def get_action_text(self, client_rect):
         scale = 300
-        # I don't identify the locaiton of the fishing/mining/woodcutting text since I havent trained on the osrs font, 
+        # I don't identify the locaiton of the fishing/mining/woodcutting text since I havent trained on the osrs font,
         # make sure it's dragged to the top-left area!
         screen.screen_image([client_rect[0]+25, client_rect[1]+50, 100, 30], 'Session_Action.png')
         img = screen.resize_image(cv2.imread('images/Session_Action.png'), scale)
-        if DEBUG:
+        if self._DEBUG:
             screen.debug_view(img)
 
-        # Need to mask for green and red 
+        # Need to mask for green and red
         boundaries=[([0, 250, 0], [10, 255, 10])]
         boundaries_not=[([0, 0, 250], [10, 10, 255])]
         for (lower, upper) in boundaries:
@@ -142,13 +238,13 @@ class BotEyes():
                                                         cv2.CHAIN_APPROX_NONE)
         contours_r, hierarchy = cv2.findContours(dilation_r, cv2.RETR_EXTERNAL,
                                                         cv2.CHAIN_APPROX_NONE)
-        if DEBUG:
+        if self._DEBUG:
             draw_contour = cv2.drawContours(copy.deepcopy(img), contours_g, 0, color=(255,0,0), thickness=2)
             screen.debug_view(draw_contour, "Contours Fishing")
             draw_contour = cv2.drawContours(copy.deepcopy(img), contours_r, 0, color=(255,0,0), thickness=2)
             screen.debug_view(draw_contour, "Contours NOT Fishing")
 
-        # Creating a copy of image
+        # Creating a copy of image for text areas from red and green contours, helps with detection
         im2 = img.copy()
         im3 = img.copy()
         
@@ -165,7 +261,7 @@ class BotEyes():
             text = pytesseract.image_to_string(cropped)
             working = True
 
-            if DEBUG:
+            if self._DEBUG:
                 # Drawing a rectangle on copied image
                 rect = cv2.rectangle(im2, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 print('(GREEN) WE ARE: %s'%(text))
@@ -178,7 +274,7 @@ class BotEyes():
             text = pytesseract.image_to_string(cropped)
             not_working = True
 
-            if DEBUG:
+            if self._DEBUG:
                 # Drawing a rectangle on copied image
                 rect = cv2.rectangle(im3, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 print('(RED) WE ARE: %s'%(text))

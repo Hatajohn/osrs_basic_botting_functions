@@ -22,13 +22,6 @@ class BotBrain():
         self.runelite = 'RuneLite'
         # Client dimensions on the monitor
         self.win_rect = []
-        # Inventory location in a client screenshot
-        self.inventory_rect = []
-        # Inventory location on monitor
-        self.inventory_global = []
-        # Center of the client
-        self.local_center = []
-        self.global_center = []
 
         # Debug flag, bot_brain(true) will show images of each step being performed
         self._DEBUG = DEBUG
@@ -38,24 +31,16 @@ class BotBrain():
 
         # Bot needs this information before it can be ran
         self._find_window()
-        self.image = screen.screen_image(self.win_rect)
-        self.grab_inventory(copy.deepcopy(self.image))
-        self.find_center()
 
     
     def update(self):
         self.get_window_rect()
-        self.image = screen.screen_image(self.win_rect)
-        self.grab_inventory(copy.deepcopy(self.image))
-        self.find_center()
 
 
     def _find_window(self):  # find window name returns PID of the window, needs to be run first to establish the PID
         win32gui.EnumWindows(self.enum_window_callback, None)
         if self.id != None:
             self.get_window_rect()
-            # Mention the installed location of Tesseract-OCR in your system
-            pytesseract.pytesseract.tesseract_cmd = self.tesseract_path
             # win32gui.SetActiveWindow(winiD)
             if self._DEBUG:
                 print('Window handle: %i'%(self.id))
@@ -79,64 +64,6 @@ class BotBrain():
         # If the window isnt on the main monitor we need to move it so everything can work- not implemented
         self.win_rect = [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
 
-
-    def grab_inventory(self, img):
-        image = copy.deepcopy(img)
-        try:
-            self.find_inventory(image)
-            # Need to account for the fact that the image typically sent to grab_inventory is of the client only
-            if self._DEBUG:
-                screen.debug_view(image, "Session Inventory")
-                screenshot_check = screen.screen_image()
-                screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
-                screen.debug_view(screenshot_check, title='True inventory position')
-        except:
-            return False
-
-
-    # Locate the inventory on the client screen and returns the corners
-    def find_inventory(self, image, threshold=0.7):
-        image_gray = cv2.cvtColor(copy.deepcopy(image), cv2.COLOR_BGR2GRAY)
-        template = cv2.imread('images/ui_icons.png', 0)
-        w, h = template.shape[::-1]
-        pt = None
-        res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
-
-        loc = np.where(res >= threshold)
-        # print('LOC: ', len(loc))
-        for pt in zip(*loc[::-1]):
-            cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
-            # cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
-        try:
-            #182x255
-            self.inventory_rect = [pt[0]+20, pt[1]+35, 182, 255]
-            self.inventory_global = [self.inventory_rect[0] + self.win_rect[0], self.inventory_rect[1] + self.win_rect[1], self.inventory_rect[2], self.inventory_rect[3]]
-            if self._DEBUG:
-                cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
-                print(self.inventory_rect)
-                screen.debug_view(image_gray)
-                screen.debug_view(image)
-        except:
-            return []
-        
-    # A function that sets the local and global centers. This can be used in other functions since the character is always semi-centered
-    def find_center(self):
-        #win_rect is top-left (x, y) then width and height
-        image_center = [math.floor(self.win_rect[2]/2), math.floor(self.win_rect[3]/2)]
-        true_center = [image_center[0] + self.win_rect[0], image_center[1] + self.win_rect[1]]
-
-        if self._DEBUG:
-            print('IMAGE CENTER ', image_center)
-            print('TRUE CENTER ', true_center)
-            image = screen.screen_image(self.win_rect)
-            image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
-            screen.debug_view(image, title='IMAGE CENTER')
-            image = screen.screen_image([0, 0, 1920, 1040])
-            image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
-            screen.debug_view(image, title='TRUE CENTER')
-
-        self.local_center = image_center
-        self.global_center = true_center
 
 class RuneLiteNotFoundException(Exception):
     pass
@@ -166,223 +93,6 @@ def find_chat(bot, image, threshold=0.7, DEBUG=False):
         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
     return x1, y1, x2, y2
 
-def locate_color(image, boundaries=[([180, 0, 180], [220, 20, 220])], DEBUG=False):
-    #Remove the username from the window, the chatbox, and the inventory from the image
-    image = isolate_playspace(image)
-
-    # define the list of boundaries
-    # loop over the boundaries
-    for (lower, upper) in boundaries:
-        # create NumPy arrays from the boundaries
-        lower = np.array(lower, dtype="uint8")
-        upper = np.array(upper, dtype="uint8")
-
-        # find the colors within the specified boundaries and apply the mask
-        mask = cv2.inRange(image, lower, upper)
-        output = cv2.bitwise_and(image, image, mask=mask)
-        ret, thresh = cv2.threshold(mask, 40, 255, 0)
-        contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-    if DEBUG:
-            cv2.imwrite("images/Locate_Image_DebugPRE.png", image)
-
-    if len(contours) != 0:
-        # find the biggest countour by the area -> usually implies the closest contour to the camera
-        c = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(c)
-
-        # The biggest contour will be drawn with a green outline
-        image = cv2.rectangle(image, pt1=(x, y), pt2=(x+w, y+h), color=(0, 255, 0), thickness=2)
-        image = cv2.drawContours(image, contours, 0, color=(0,255,0), thickness=2)
-        mask = np.zeros(image.shape[:2], np.uint8)
-        for cont in contours:
-            x_c, y_c, w_c, h_c = cv2.boundingRect(cont)
-            if mask[y_c + int(round(h_c/2)), x_c + int(round(w_c/2))] != 255:
-                mask[y_c:y_c+h_c,x_c:x_c+w_c] = 255
-                if(x != x_c or y != y_c or w != w_c or h != h_c):
-                    # Other contours will be highlighted with the opposite color of upper for visibility
-                    image = cv2.rectangle(image, pt1=(x_c, y_c), pt2=(x_c+w_c, y_c+h_c), color=(0,0,255), thickness=2)
-        # Center of the contour
-        x_center, y_center = (math.floor(x+w/2), math.floor(y+h/2))
-        click_radius = math.floor(min(w, h)/2)
-
-        if DEBUG:
-            cv2.imwrite("images/Locate_Image_DebugPOST.png", image)
-            print('Length of contours: %d'%(len(contours)))
-            print(x, y, w, h)
-
-        return [x_center, y_center]
-    else:
-        return []
-    
-def locate_image(img_rgb, filename, threshold=0.7, name='Screenshot', DEBUG_1=False, DEBUG_2=False):
-    try:
-        img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
-        template = cv2.imread('images/' + filename, 0)
-        w, h = template.shape[::-1]
-        pt = None
-        res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
-        loc = np.where(res >= threshold)
-        items = []
-        # Add a mask to remove duplicate matches
-        mask = np.zeros(img_rgb.shape[:2], np.uint8)
-        for pt in zip(*loc[::-1]):
-            # Add a circle to mark a match
-            if DEBUG_2:
-                cv2.rectangle(img_rgb, pt, (pt[0] + w, pt[1] + h), (255, 0, 0), thickness=1)
-            if mask[pt[1] + int(round(h/2)), pt[0] + int(round(w/2))] != 255:
-                mask[pt[1]:pt[1]+h, pt[0]:pt[0]+w] = 255
-                # An array of points
-                items.append([pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)])
-                if DEBUG_1:
-                    cv2.circle(img_rgb, (pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)), radius=min(math.floor(w/3), math.floor(h/3)), color=(0,255,0), thickness=1)
-        if DEBUG_2:
-            cv2.imshow(name, np.hstack([img_rgb]))
-            cv2.waitKey(0)
-            time.sleep(0.5)
-        if len(items) > 0:
-            return items
-        print('Locate image could not find the image')
-        return []
-    except:
-        print('Locate image failed!')
-        return []
-
-# takes an array of points, the client center, the win_rect, then moves and clicks the mouse at about the specified point
-def click_here(points, center, rect, rad=15, DEBUG=False):
-    _dist = sys.maxsize
-    point = None
-    for p in points:
-        dist = math.dist(p, center)
-        if DEBUG:
-            print(p[0], p[1], dist)
-        if dist < _dist:
-            _dist = dist
-            point = p
-    # Pick a point inside the click area
-    [x_mouse , y_mouse] = pick_point_in_circle(point, rad)
-    x_mouse += rect[0]
-    y_mouse += rect[1]
-
-    if DEBUG:
-        image = screen.screen_image([0, 0, 1920, 1040])
-        print('Moving mouse to: ', x_mouse, y_mouse)
-        image = cv2.circle(image, (point[0] + rect[0], point[1] + rect[1]), radius=rad, color=(0, 0, 255), thickness=2)
-        image = cv2.circle(image, (x_mouse, y_mouse), radius=2, color=(0, 255, 0), thickness=2)
-        screen.debug_view(image)
-
-    move_mouse([x_mouse, y_mouse])
-    b = random.uniform(0.01, 0.05)
-    pyautogui.click(duration=b)
-
-# Should clamp n between minn and maxn
-def clamp(n, minn, maxn):
-    return max(min(math.floor(maxn - 10), n), math.floor(minn + 10))
-
-def pick_point_in_circle(point, rad=15):
-    # Pick a point inside the circle defined by the center and the radius
-    x_mouse = math.floor(random.uniform(point[0]-rad, point[0]+rad))
-    y_mouse = math.floor(random.uniform(point[1]-rad, point[1]+rad))
-    return [x_mouse, y_mouse]
-
-def keep_point_on_screen(point, x, y, w, h, DEBUG=False):
-    # Assume the point was generated with the image in mind, not the monitor
-    # Prevent the mouse from leaving the client area
-    print('CLAMP x y')
-    x = clamp(point[0], x, x+w)
-    y = clamp(point[1], y, y+h)
-    
-    if DEBUG:
-        print(point[0], x, x+w)
-        print(point[1], y, y+h)
-
-    return [x, y]
-
-# Move mouse to a point on the screen
-def move_mouse(point, duration=0, DEBUG=False):
-    b = random.uniform(0.07, 0.31)
-    # Move the mouse
-    if DEBUG:
-        debug_image = screen.screen_image([0, 0, 1920, 1040])
-        debug_image = cv2.circle(debug_image, point, radius=10, color=(0,255,0), thickness=-1)
-        print('XY: ', point)
-        screen.debug_view(debug_image, "Center vs move point")
-
-    pyautogui.moveTo(point, duration=b)
-
-def control_camera(drag_to, rad=15, DEBUG=False):
-    # Move the mouse somewhere around the center of the client screen
-    center = find_center()
-    print('CENTER ', center)
-    print('DRAG TO ', drag_to)
-    # Move mouse to center of the client screen
-    move_to = pick_point_in_circle(center, rad)
-    print('MOVING MOUSE TO CENTER ', move_to)
-    move_mouse(center)
-    # Hold middle mouse and drag
-    b = random.uniform(0.6, 1.0)
-    print('DRAGGING TO ', drag_to)
-    pyautogui.dragTo(drag_to, button='middle', duration=b)
-
-
-def pan_right(DEBUG=False):
-    point = find_center()
-    rect = get_window_rect()
-    point = [point[0] + math.floor(rect[2]/2 * 0.90), point[1]]
-    print('PAN RIGHT TO ', point)
-    control_camera(point, DEBUG=DEBUG)
-
-def pan_left(DEBUG=False):
-    point = find_center()
-    rect = get_window_rect()
-    point = [point[0] - math.floor(rect[2]/2 * 0.90), point[1]]
-    print('PAN LEFT TO ', point)
-    control_camera(point, DEBUG=DEBUG)
-
-def pan_up(DEBUG=False):
-    point = find_center()
-    rect = get_window_rect()
-    point = [point[0], point[1] + math.floor(rect[3]/2 * 0.90)]
-    print('PAN LEFT TO ', point)
-    control_camera(point, DEBUG=DEBUG)
-
-def pan_down(DEBUG=False):
-    point = find_center()
-    rect = get_window_rect()
-    point = [point[0], point[1] - math.floor(rect[3]/2 * 0.90)]
-    print('PAN LEFT TO ', point)
-    control_camera(point, DEBUG=DEBUG)
-
-def pan_to(point, DEBUG=False):
-    print('PAN TO ', point)
-    control_camera(point, DEBUG=DEBUG)
-
-# Locates and clicks the logout button at the bottom of inv, then clicks the actual logout button
-def click_logout(FAST=False, DEBUG=False):
-    image = screen.screen_image()
-    click_info = locate_image(image, r'logout_button.png', name='Find logout button')
-    # DOES NOT YET ACCOUNT FOR THE WORLD SWITCHER BEING OPEN!!!
-    if not FAST:
-        click_here(click_info, DEBUG=DEBUG)
-        time.sleep(random.uniform(0.6, 1.8))
-    else:
-        # Hit ESC and click the logout button asap
-        hit_escape()
-        
-    time.sleep(random.uniform(0.03, 0.09))
-    # Small pause before grabbing a new image and clicking logout
-    image = screen.screen_image()
-    click_info = locate_image(image, r'logout_button2.png', name='Find logout button')
-    try:
-        click_here(click_info)
-    except:
-        print('Could not find logout button')
-
-
-def hit_escape():
-    pyautogui.keyDown('escape')
-    time.sleep(random.uniform(0.03, 0.09))
-    pyautogui.keyUp('escape')
 
 #Main
 if __name__ == "__main__":
