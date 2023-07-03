@@ -37,6 +37,11 @@ class BotEyes():
         self._DEBUG=DEBUG
 
 
+    # Force debugging at any point
+    def force_debug(self, DEBUG=False):
+        self._DEBUG=DEBUG
+
+
     # Update the rect and associated values
     def setRect(self, new_rect):
         self.client_rect = new_rect

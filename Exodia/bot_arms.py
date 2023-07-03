@@ -93,37 +93,47 @@ class BotArms():
         self.move_mouse(center)
         # Hold middle mouse and drag
         b = random.uniform(0.6, 1.0)
-        print('DRAGGING TO ', drag_to)
+        drag_to = env.pick_point_in_circle(drag_to)
+        print('DRAGGING TO ', drag_to, rad=rad)
         pyautogui.dragTo(drag_to, button='middle', duration=b)
 
 
-    def pan_right(self, center, win_rect):
-        point = [center[0] + math.floor(win_rect[2]/2 * 0.90), center[1]]
+    # Pan functions take the global client center and the window dimensions of the client
+    def pan_right(self, center, win_rect, rand=False):
+        if rand:
+            r = random.randrange(0.15, 0.90)
+            point = [center[0] + math.floor(win_rect[2]/2 * r), center[1]]
+        else:
+            point = [center[0] + math.floor(win_rect[2]/2 * 0.90), center[1]]
         print('PAN RIGHT TO ', point)
-        self.control_camera(point)
+        self.control_camera(center, point, rad=20)
 
 
-    def pan_left(self, center, win_rect):
-        point = [center[0] - math.floor(win_rect[2]/2 * 0.90), center[1]]
+    def pan_left(self, center, win_rect, rand=False):
+        if rand:
+            r = random.randrange(0.15, 0.90)
+            point = [center[0] - math.floor(win_rect[2]/2 * r), center[1]]
+        else:
+            point = [center[0] - math.floor(win_rect[2]/2 * 0.90), center[1]]
         print('PAN LEFT TO ', point)
-        self.control_camera(point)
+        self.control_camera(center, point, rad=20)
 
 
     def pan_up(self, center, win_rect):
         point = [center[0], center[1] - math.floor(win_rect[3]/2 * 0.90), center[1]]
         print('PAN UP TO ', point)
-        self.control_camera(point)
+        self.control_camera(center, point)
 
 
     def pan_down(self, center, win_rect):
         point = [center[0], center[1] + math.floor(win_rect[3]/2 * 0.90), center[1]]
         print('PAN DOWN TO ', point)
-        self.control_camera(point)
+        self.control_camera(center, point)
 
 
-    def pan_to(self, point):
+    def pan_to(self, point, center):
         print('PAN TO ', point)
-        self.control_camera(point)
+        self.control_camera(center, point)
 
 
     # THIS DOES NOT WORK

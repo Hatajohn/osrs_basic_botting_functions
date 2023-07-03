@@ -3,6 +3,7 @@ import bot_env as env
 import bot_eyes as eyes
 import bot_arms as arms
 import bot_brain as brain
+import bot_actions as actions
 import time
 import random
 
@@ -11,10 +12,7 @@ import random
 # Locates and clicks the logout button at the bottom of inv, then clicks the actual logout button
 #Main
 if __name__ == "__main__":
-    bot_b = brain.BotBrain()
-    bot_e = eyes.BotEyes()
-    bot_e.setRect(bot_b.win_rect)
-    bot_a = arms.BotArms()
+    [bot_b, bot_e, bot_a] = actions.simple_init()
     FAST = False
     DEBUG = False
 
@@ -61,8 +59,8 @@ if __name__ == "__main__":
         except:
             print('Could not find: ', icon)
 
-    click_info = bot_e.locate_image(bot_e.curr_client, filename=r'login_button.png', name='LOGIN')
-    bot_a.click_here(click_info, center=bot_e.local_center, rect=bot_b.win_rect)
+    # click_info = bot_e.locate_image(bot_e.curr_client, filename=r'login_button.png', name='LOGIN')
+    # bot_a.click_here(click_info, center=bot_e.local_center, rect=bot_b.win_rect)
 
     # NEED TO CONSIDER WRITING A CLASS/MODULE TO HANDLE COMPOUND ACTIONS- actions that require all of the objects to contribute, like shift+click dropping
     # Add recognizing items in inv rather than have to check what should be there
