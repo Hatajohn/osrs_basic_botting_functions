@@ -21,8 +21,7 @@ def screen_image(rect=None, block=False, cover_name=None, name='BotEnv_Screensho
 
     # Convert to a format cv2 can use
     image = cv2.cvtColor(np.asarray(my_screenshot), cv2.COLOR_RGB2BGR)
-    if DEBUG:
-        debug_view(image, title='Post cvtColor reformat')
+
     # Cover the client name if given the top left corner- the first two indices of rect
     if block:
         if cover_name != []:
@@ -35,7 +34,7 @@ def screen_image(rect=None, block=False, cover_name=None, name='BotEnv_Screensho
     # Get the image via cv2 so I don't have to worry about whatever format it wants
 
     # return image for cv2 -> probably want to figure out how to do this without saving the image
-    return image
+    return image    
 
 
 # Resizes a given image by a integer percentage (like 70), helpful for viewing the entirety of a screenshot
@@ -61,21 +60,6 @@ def debug_view(img, title="Debug Screenshot", scale=60):
     cv2.waitKey(0)
     # Wait for the image to close
     time.sleep(0.5)
-
-
-def get_choices(rad=15, num_segs=50):
-    choices = []
-
-     # Weighted segs
-    seg = float(rad)/num_segs
-    _num_segs = num_segs
-
-    # It can't be perfect
-    for i in range(7, num_segs):
-        # seg being 'segment radius', decrease the number of segments per group as the radius expands
-        choices = choices + [i] * max(_num_segs-i, 0)
-        _num_segs - 1
-    return choices
 
 
 # Divides a circle into tiered areas-> visualize an archery target

@@ -5,6 +5,7 @@ import win32gui
 import cv2
 import time
 
+
 def find_and_crop_client(bot, DEBUG=True):
     image = env.screen_image(block=True, cover_name=[bot.win_rect[0], bot.win_rect[1]], DEBUG=DEBUG)
     image = cv2.rectangle(image, bot.win_rect, color=(0,255,0), thickness=2)

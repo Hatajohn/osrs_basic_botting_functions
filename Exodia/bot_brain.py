@@ -21,7 +21,7 @@ class BotBrain():
 
     # Update function for the brain, updates the location of the client dimensions
     def update(self):
-        self.get_window_rect()
+        return self.get_window_rect()
 
 
     def _find_window(self):  # find window name returns PID of the window, needs to be run first to establish the PID
@@ -33,6 +33,7 @@ class BotBrain():
                 print('Window handle: %i'%(self.id))
                 print('Window rect: ', self.win_rect)
                 screen.debug_view(screen.block_name(screen.screen_image(self.win_rect)), title='Find window ID debug')
+            return True
         else:
             raise RuneLiteNotFoundException('RuneLite cannot be found!')
 
@@ -45,13 +46,17 @@ class BotBrain():
 
     # Returns left, right, top, bottom
     def get_window_rect(self):
-        rect = win32gui.GetWindowRect(self.id)
-        self.win_rect = [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
-        if(self._DEBUG):
-            print('GET WINDOW RECT: ', self.win_rect)
-            image = screen.screen_image(self.win_rect)
-            screen.debug_view(image, title='BotBrain Debug get_window_rect')
-        # If the window isnt on the main monitor we need to move it so everything can work- not implemented
+        try:
+            rect = win32gui.GetWindowRect(self.id)
+            self.win_rect = [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
+            if(self._DEBUG):
+                print('GET WINDOW RECT: ', self.win_rect)
+                image = screen.screen_image(self.win_rect)
+                screen.debug_view(image, title='BotBrain Debug get_window_rect')
+            # If the window isnt on the main monitor we need to move it so everything can work- not implemented
+            return True
+        except:
+            return False
 
 
 # Exception to throw when the bot is constructed while RuneLite isnt open

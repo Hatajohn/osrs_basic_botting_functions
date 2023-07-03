@@ -7,52 +7,65 @@ import bot_env as screen
 import copy
 import pytesseract
 
+
+# This class handles object recognition and the images required for the rest of the bot to function
 class BotEyes():
     def __init__(self, win_rect=[], DEBUG=False):
         # Relative path to the tesseract executable
         self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
 
         # Inventory location in a client screenshot -> easier for image recognition and future screenshots
-        self.inventory_rect = []
+        self.inventory_rect = None
 
         # Inventory location on monitor -> easier for click locations
-        self.inventory_global = []
+        self.inventory_global = None
 
         # Image of current inventory -> easier for image recognition
-        self.curr_inventory = []
+        self.curr_inventory = None
 
         # Client rect -> pass from BotBrain object
         self.client_rect = win_rect
 
         # Image of client
-        self.curr_client = []
+        self.curr_client = None
 
         # Center of the client
-        self.local_center = []
-        self.global_center = []
+        self.local_center = None
+        self.global_center = None
 
         # Debug flag
         self._DEBUG=DEBUG
 
 
-    def grab_inventory(self, img):
-            image = copy.deepcopy(img)
-            try:
-                if self.inventory_rect == []:
-                    self.find_inventory(image)
-                # Need to account for the fact that the image typically sent to grab_inventory is of the client only
-                if self._DEBUG:
-                    screen.debug_view(image, "Session Inventory")
-                    screenshot_check = screen.screen_image()
-                    screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
-                    screen.debug_view(screenshot_check, title='True inventory position')
-            except:
-                return False
+    # Update the rect and associated values
+    def setRect(self, new_rect):
+        self.client_rect = new_rect
+        self.find_center()
+        self.find_inventory()
+        self.grab_inventory()
+        self.check_inventory()
+        
+
+    # Grab 
+    def grab_inventory(self):
+        image = copy.deepcopy(self.curr_client)
+        try:
+            if self.inventory_rect == []:
+                self.find_inventory(image)
+            # Need to account for the fact that the image typically sent to grab_inventory is of the client only
+            if self._DEBUG:
+                screen.debug_view(image, "Session Inventory")
+                screenshot_check = screen.screen_image()
+                screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
+                screen.debug_view(screenshot_check, title='True inventory position')
+            
+        except:
+            return False
 
 
     # Locate the inventory on the client screen and returns the corners
     def find_inventory(self, threshold=0.7):
-        self.check_client(self.client_rect)
+        self.check_client()
         image = copy.deepcopy(self.curr_client)
         image_gray = cv2.cvtColor(copy.deepcopy(image), cv2.COLOR_BGR2GRAY)
         template = cv2.imread('images/ui_icons.png', 0)
@@ -85,17 +98,16 @@ class BotEyes():
 
     # Updates the client image
     def check_client(self):
-        self.curr_client = screen.screen_image(rect=self.client_rect, DEBUG=self._DEBUG)
+        self.curr_client = screen.block_name(screen.screen_image(rect=self.client_rect, DEBUG=self._DEBUG))
         
 
     # Block the inventory in the given image
     def update(self):
-        # Cover the inventory, only call after init
-        if self.curr_client != [] and self.inventory_global != []:
-            self.check_client()
-            self.check_inventory()
-            # Place a black rectangle covering the inventory
-            self.curr_client = cv2.rectangle(self.curr_client, self.inventory_rect, color=(0, 0, 0), thickness=-1)
+        # Cover the inventory, only call after init, assume it wont be called prior
+        self.check_client()
+        self.check_inventory()
+        # Place a black rectangle covering the inventory
+        self.curr_client = cv2.rectangle(self.curr_client, self.inventory_rect, color=(0, 0, 0), thickness=-1)
 
 
     # Locate the chat area on the client screen and returns the corners
@@ -186,7 +198,8 @@ class BotEyes():
         
 
     # Similar to using 'substring in string', but with images
-    def locate_image(self, img_rgb, filename, threshold=0.7, name='Screenshot'):
+    def locate_image(self, img_og, inv=False, filename='', threshold=0.8, name='Screenshot'):
+        img_rgb = copy.deepcopy(img_og)
         try:
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
             template = cv2.imread('images/' + filename, 0)
@@ -204,13 +217,11 @@ class BotEyes():
                 if mask[pt[1] + int(round(h/2)), pt[0] + int(round(w/2))] != 255:
                     mask[pt[1]:pt[1]+h, pt[0]:pt[0]+w] = 255
                     # An array of points
-                    items.append([pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)])
+                    items.append([pt[0] + math.floor(w/2) + (self.inventory_global[0] if inv else 0), pt[1] + math.floor(h/2) + (self.inventory_global[1] if inv else 0)])
                     if self._DEBUG:
                         cv2.circle(img_rgb, (pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)), radius=min(math.floor(w/3), math.floor(h/3)), color=(0,255,0), thickness=1)
             if self._DEBUG:
-                cv2.imshow(name, np.hstack([img_rgb]))
-                cv2.waitKey(0)
-                time.sleep(0.5)
+                screen.debug_view(img_rgb, 'View image')
             if len(items) > 0:
                 return items
             print('Locate image could not find the image')
