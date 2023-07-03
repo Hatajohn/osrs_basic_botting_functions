@@ -64,6 +64,6 @@ def scan_for(b_brain, b_eyes, b_arms, target, in_inventory=False, attempts = 10,
         if click_info != [] and attempt < attempts:
             b_arms.click_here(click_info, center=b_eyes.local_center, rect=b_brain.win_rect)
 
-    # Go through the inventory and dorp everything or drop specific items
+    # Go through the inventory and drop everything or drop specific items
     def clear_inventory():
         pass
