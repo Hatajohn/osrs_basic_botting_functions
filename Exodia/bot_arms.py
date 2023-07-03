@@ -10,12 +10,18 @@ import sys
 
 # This file is for the mouse movements and actions required for the bot to interact with the client
 class BotArms():
+
+
+    # Constructor
     def __init__(self, DEBUG=False):
         self._DEBUG=DEBUG
         pass
 
+
     # takes an array of points, the client center, the win_rect, then moves and clicks the mouse at about the specified point
     def click_here(self, points, center, rect, rad=15):
+        if points == []:
+            return
         _dist = sys.maxsize
         point = None
         for p in points:
@@ -41,9 +47,11 @@ class BotArms():
         b = random.uniform(0.05, 0.09)
         time.sleep(b)
 
+
     # Should clamp n between minn and maxn
     def clamp(self, n, minn, maxn):
         return max(min(math.floor(maxn - 10), n), math.floor(minn + 10))
+
 
     def keep_point_on_screen(self, point, x, y, w, h):
         # Assume the point was generated with the image in mind, not the monitor
@@ -57,6 +65,7 @@ class BotArms():
             print(point[1], y, y+h)
 
         return [x, y]
+
 
     # Move mouse to a point on the screen
     def move_mouse(self, point, rad=11, duration=0):

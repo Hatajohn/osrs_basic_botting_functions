@@ -224,7 +224,7 @@ class BotEyes():
                 screen.debug_view(img_rgb, 'View image')
             if len(items) > 0:
                 return items
-            print('Locate image could not find the image')
+            print('Locate image could not find the image ', filename)
             return []
         except:
             print('Locate image failed!')

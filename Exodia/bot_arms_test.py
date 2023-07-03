@@ -60,3 +60,6 @@ if __name__ == "__main__":
             bot_a.click_here(click_info, center=bot_e.local_center, rect=bot_b.win_rect)
         except:
             print('Could not find: ', icon)
+
+    click_info = bot_e.locate_image(bot_e.curr_client, filename=r'login_button.png', name='LOGIN')
+    bot_a.click_here(click_info, center=bot_e.local_center, rect=bot_b.win_rect)
