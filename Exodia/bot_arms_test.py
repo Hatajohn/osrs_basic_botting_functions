@@ -63,3 +63,7 @@ if __name__ == "__main__":
 
     click_info = bot_e.locate_image(bot_e.curr_client, filename=r'login_button.png', name='LOGIN')
     bot_a.click_here(click_info, center=bot_e.local_center, rect=bot_b.win_rect)
+
+    # NEED TO CONSIDER WRITING A CLASS/MODULE TO HANDLE COMPOUND ACTIONS- actions that require all of the objects to contribute, like shift+click dropping
+    # Add recognizing items in inv rather than have to check what should be there
+    # Figure out how to handle the inv -> know when it's full/empty/etc
