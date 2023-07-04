@@ -1,6 +1,6 @@
 # Imports
-import bot_env as env
-import bot_brain as brain
+import bot_env as Env
+import bot_brain as Brain
 import win32gui
 import cv2
 import time

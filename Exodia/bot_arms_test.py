@@ -1,8 +1,5 @@
 # Import
-import bot_env as env
-import bot_eyes as eyes
-import bot_arms as arms
-import bot_brain as brain
+import bot_env as Env
 import bot_actions as actions
 import time
 import random
@@ -23,8 +20,8 @@ if __name__ == "__main__":
     random.shuffle(icons)
 
     corner = [bot_b.win_rect[0], bot_b.win_rect[1]]
-    image = env.screen_image(bot_b.win_rect, cover_name=corner)
-    env.debug_view(image, title='Bot Arms Test init')
+    image = Env.screen_image(bot_b.win_rect, cover_name=corner)
+    Env.debug_view(image, title='Bot Arms Test init')
 
     bot_e.update() # - > refresh inventory and client view
 
