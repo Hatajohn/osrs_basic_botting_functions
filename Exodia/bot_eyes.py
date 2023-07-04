@@ -3,7 +3,7 @@ import numpy as np
 import math
 import time
 import cv2
-import bot_env as screen
+import bot_env as Env
 import copy
 import pytesseract
 
@@ -23,8 +23,9 @@ class BotEyes():
         # Image of current inventory -> easier for image recognition
         self.curr_inventory = None
 
-        # Client rect -> pass from BotBrain object
+        # Client rect -> pass from BotBrain object, add a bit for the gap made by the top and right sides
         self.client_rect = win_rect
+        self.chat_rect = None
 
         # Image of client
         self.curr_client = None
@@ -41,15 +42,45 @@ class BotEyes():
     def force_debug(self, DEBUG=False):
         self._DEBUG=DEBUG
 
+    
+     # Updates the inventory image
+    def check_inventory(self):
+        self.curr_inventory = Env.screen_image(rect=self.inventory_global, DEBUG=self._DEBUG)
+
+
+    # Updates the client image
+    def check_client(self):
+        self.curr_client = Env.screen_image(rect=self.client_rect, DEBUG=self._DEBUG)
+        
+
+    # Block the inventory in the given image
+    def update(self):
+        # Cover the inventory, only call after init, assume it wont be called prior
+        self.check_inventory()
+        self.check_client()
+
+        # Place a black rectangle covering the inventory and chat
+        self.curr_client = cv2.rectangle(self.curr_client, self.inventory_rect, color=(0, 0, 0), thickness=-1)
+        self.curr_client = cv2.rectangle(self.curr_client, self.chat_rect, color=(0, 0, 0), thickness=-1)
+
+        # If we are in debug mode, see what the client image currently looks like
+        if self._DEBUG:
+            print('Chat rect vs client_rect ', self.chat_rect, self.inventory_rect, self.client_rect)
+            Env.debug_view(self.curr_client, 'UPDATE CLIENT')
+
 
     # Update the rect and associated values
     def setRect(self, new_rect):
+        # Adjust for top and side bars
         self.client_rect = new_rect
+
+        # Localized chat position, not global position
+        self.chat_rect = [0, self.client_rect[3]-30, 520, 30]
         self.find_center()
         self.find_inventory()
         self.grab_inventory()
-        self.check_inventory()
-        
+        self.update()
+            
 
     # Grab 
     def grab_inventory(self):
@@ -59,10 +90,10 @@ class BotEyes():
                 self.find_inventory(image)
             # Need to account for the fact that the image typically sent to grab_inventory is of the client only
             if self._DEBUG:
-                screen.debug_view(image, "Session Inventory")
-                screenshot_check = screen.screen_image()
+                Env.debug_view(image, "Session Inventory")
+                screenshot_check = Env.screen_image()
                 screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
-                screen.debug_view(screenshot_check, title='True inventory position')
+                Env.debug_view(screenshot_check, title='True inventory position')
             
         except:
             return False
@@ -90,34 +121,15 @@ class BotEyes():
             if self._DEBUG:
                 cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
                 print(self.inventory_rect)
-                screen.debug_view(image_gray)
-                screen.debug_view(image)
+                Env.debug_view(image_gray)
+                Env.debug_view(image)
         except:
             return []
-        
-
-    # Updates the inventory image
-    def check_inventory(self):
-        self.curr_inventory = screen.screen_image(rect=self.inventory_global, DEBUG=self._DEBUG)
-
-
-    # Updates the client image
-    def check_client(self):
-        self.curr_client = screen.block_name(screen.screen_image(rect=self.client_rect, DEBUG=self._DEBUG))
-        
-
-    # Block the inventory in the given image
-    def update(self):
-        # Cover the inventory, only call after init, assume it wont be called prior
-        self.check_client()
-        self.check_inventory()
-        # Place a black rectangle covering the inventory
-        self.curr_client = cv2.rectangle(self.curr_client, self.inventory_rect, color=(0, 0, 0), thickness=-1)
 
 
     # Locate the chat area on the client screen and returns the corners
     def find_chat(self, image, threshold=0.7):
-        image_gray = cv2.cvtColor(screen.resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
+        image_gray = cv2.cvtColor(Env.resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
         template = cv2.imread('images/chat_template.png', 0)
         w, h = template.shape[::-1]
         pt = None
@@ -143,18 +155,18 @@ class BotEyes():
         if self._DEBUG:
             print('IMAGE CENTER ', image_center)
             print('TRUE CENTER ', true_center)
-            image = screen.screen_image(self.client_rect)
+            image = Env.screen_image(self.client_rect)
             image = cv2.circle(image, center=image_center, radius=10, color=(255, 100, 100), thickness=-1)
-            screen.debug_view(image, title='IMAGE CENTER')
-            image = screen.screen_image([0, 0, 1920, 1040])
+            Env.debug_view(image, title='IMAGE CENTER')
+            image = Env.screen_image([0, 0, 1920, 1040])
             image = cv2.circle(image, center=true_center, radius=10, color=(100, 100, 255), thickness=-1)
-            screen.debug_view(image, title='TRUE CENTER')
+            Env.debug_view(image, title='TRUE CENTER')
 
         self.local_center = image_center
         self.global_center = true_center
 
 
-    # Locates and draws contours around colors defined by the boundaries param
+    # Locates and draws contours around colors defined by the boundaries param - only returns one point
     def locate_color(self, image, boundaries=[([180, 0, 180], [220, 20, 220])]):
         # define the list of boundaries
         # loop over the boundaries
@@ -197,7 +209,7 @@ class BotEyes():
                 print('Length of contours: %d'%(len(contours)))
                 print(x, y, w, h)
 
-            return [x_center, y_center]
+            return [[x_center, y_center]]
         else:
             return []
         
@@ -226,7 +238,7 @@ class BotEyes():
                     if self._DEBUG:
                         cv2.circle(img_rgb, (pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)), radius=min(math.floor(w/3), math.floor(h/3)), color=(0,255,0), thickness=1)
             if self._DEBUG:
-                screen.debug_view(img_rgb, 'View image')
+                Env.debug_view(img_rgb, 'View image')
             if len(items) > 0:
                 return items
             print('Locate image could not find the image ', filename)
@@ -237,14 +249,16 @@ class BotEyes():
         
         
     # Needs to be adjusted to find the action text and read it - not implemented
-    def get_action_text(self, client_rect):
+    def get_action_text(self):
+        self.update()
         scale = 300
         # I don't identify the locaiton of the fishing/mining/woodcutting text since I havent trained on the osrs font,
         # make sure it's dragged to the top-left area!
-        screen.screen_image([client_rect[0]+25, client_rect[1]+50, 100, 30], 'Session_Action.png')
-        img = screen.resize_image(cv2.imread('images/Session_Action.png'), scale)
+        action = Env.screen_image([self.client_rect[0]+5, self.client_rect[1]+10, 100, 30])
+        img = Env.resize_image(copy.deepcopy(action), scale)
+
         if self._DEBUG:
-            screen.debug_view(img)
+            Env.debug_view(img)
 
         # Need to mask for green and red
         boundaries=[([0, 250, 0], [10, 255, 10])]
@@ -288,9 +302,9 @@ class BotEyes():
                                                         cv2.CHAIN_APPROX_NONE)
         if self._DEBUG:
             draw_contour = cv2.drawContours(copy.deepcopy(img), contours_g, 0, color=(255,0,0), thickness=2)
-            screen.debug_view(draw_contour, "Contours Fishing")
+            Env.debug_view(draw_contour, "Contours Acting")
             draw_contour = cv2.drawContours(copy.deepcopy(img), contours_r, 0, color=(255,0,0), thickness=2)
-            screen.debug_view(draw_contour, "Contours NOT Fishing")
+            Env.debug_view(draw_contour, "Contours NOT Acting")
 
         # Creating a copy of image for text areas from red and green contours, helps with detection
         im2 = img.copy()
@@ -313,7 +327,7 @@ class BotEyes():
                 # Drawing a rectangle on copied image
                 rect = cv2.rectangle(im2, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 print('(GREEN) WE ARE: %s'%(text))
-                screen.debug_view(rect)
+                Env.debug_view(rect)
 
         for cnt in contours_r:
             x, y, w, h = cv2.boundingRect(cnt)
@@ -326,7 +340,7 @@ class BotEyes():
                 # Drawing a rectangle on copied image
                 rect = cv2.rectangle(im3, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 print('(RED) WE ARE: %s'%(text))
-                screen.debug_view(rect)
+                Env.debug_view(rect)
 
         # 2 means there is no action text, or it failed to find anything, this distinction might not be necessary
         result = 2

@@ -9,7 +9,7 @@ import random
 # Locates and clicks the logout button at the bottom of inv, then clicks the actual logout button
 #Main
 if __name__ == "__main__":
-    [bot_b, bot_e, bot_a] = actions.simple_init()
+    [bot_b, bot_e, bot_a] = actions.bot_init()
     FAST = False
     DEBUG = False
 

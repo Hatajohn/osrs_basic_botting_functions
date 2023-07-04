@@ -1,6 +1,6 @@
-#imports
+#importsEnv
 import win32gui
-import bot_env as screen
+import bot_env as Env
 
 # The bot brain handles knowing information pertinent to the bot functioning
 # Currently it handles finding RuneLite's PID, tesseract path, client location/dimensions
@@ -32,7 +32,7 @@ class BotBrain():
             if self._DEBUG:
                 print('Window handle: %i'%(self.id))
                 print('Window rect: ', self.win_rect)
-                screen.debug_view(screen.block_name(screen.screen_image(self.win_rect)), title='Find window ID debug')
+                Env.debug_view(Env.block_name(Env.screen_image(self.win_rect)), title='Find window ID debug')
             return True
         else:
             raise RuneLiteNotFoundException('RuneLite cannot be found!')
@@ -48,11 +48,12 @@ class BotBrain():
     def get_window_rect(self):
         try:
             rect = win32gui.GetWindowRect(self.id)
-            self.win_rect = [rect[0], rect[1], rect[2]-rect[0], rect[3]-rect[1]]
+            # [left, top+ 24, right - 40, bottom - 24] -> correct for margins
+            self.win_rect = [rect[0], rect[1] + 24, rect[2]-rect[0] - 40, rect[3]-rect[1] - 24]
             if(self._DEBUG):
                 print('GET WINDOW RECT: ', self.win_rect)
-                image = screen.screen_image(self.win_rect)
-                screen.debug_view(image, title='BotBrain Debug get_window_rect')
+                image = Env.screen_image(self.win_rect)
+                Env.debug_view(image, title='BotBrain Debug get_window_rect')
             # If the window isnt on the main monitor we need to move it so everything can work- not implemented
             return True
         except:

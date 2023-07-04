@@ -104,6 +104,7 @@ class BotArms():
         pyautogui.moveTo(point, duration=b)
 
 
+    # Need to address this -> I personally do not drag from the center of my screen, I just full send
     def control_camera(self, center, drag_to, rad=15):
         # Move the mouse somewhere around the center of the client screen
         print('CENTER ', center)
@@ -113,15 +114,15 @@ class BotArms():
         self.move_mouse(center)
         # Hold middle mouse and drag
         b = random.uniform(0.6, 1.0)
-        drag_to = Env.pick_point_in_circle(drag_to)
-        print('DRAGGING TO ', drag_to, rad=rad)
+        drag_to = Env.pick_point_in_circle(drag_to, rad=rad)
+        print('DRAGGING TO ', drag_to)
         pyautogui.dragTo(drag_to, button='middle', duration=b)
 
 
     # Pan functions take the global client center and the window dimensions of the client
-    def pan_right(self, center, win_rect, rand=False):
+    def pan_right(self, center, win_rect, y_var=0, rand=False):
         if rand:
-            r = random.randrange(0.15, 0.90)
+            r = random.uniform(0.15, 0.90)
             point = [center[0] + math.floor(win_rect[2]/2 * r), center[1]]
         else:
             point = [center[0] + math.floor(win_rect[2]/2 * 0.90), center[1]]
@@ -129,9 +130,9 @@ class BotArms():
         self.control_camera(center, point, rad=20)
 
 
-    def pan_left(self, center, win_rect, rand=False):
+    def pan_left(self, center, win_rect, y_var=0, rand=False):
         if rand:
-            r = random.randrange(0.15, 0.90)
+            r = random.uniform(0.15, 0.90)
             point = [center[0] - math.floor(win_rect[2]/2 * r), center[1]]
         else:
             point = [center[0] - math.floor(win_rect[2]/2 * 0.90), center[1]]
