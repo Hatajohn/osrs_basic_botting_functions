@@ -20,23 +20,18 @@ def scan_for(b_brain, b_eyes, b_arms, target, in_inventory=False, attempts = 10,
     if target is None:
         raise Exception('We cannot scan for nothing!')
 
-    # Check each type passed to the function
-    errors = []
-    if (type(b_brain) is not brain):
+    # Check each type passed to the function -> probably dont need this?
+    if type(b_brain) is not brain:
         error = TypeError().__traceback__
         BaseException(error).add_note('Brain is the wrong type')
-        errors.append(error)
-    if (type(b_eyes) is not eyes):
+        raise error
+    if type(b_eyes) is not eyes:
         error = TypeError().__traceback__
         BaseException(error).add_note('Eyes is the wrong type')
-        errors.append(error)
-    if (type(b_arms) is not brain):
+        raise error
+    if type(b_arms) is not brain:
         error = TypeError().__traceback__
         BaseException(error).add_note('Arms is the wrong type')
-        errors.append(error)
-
-    # Raise all errors found, idk if this works the way I think it does
-    for error in errors:
         raise error
     
     if DEBUG:
@@ -62,8 +57,9 @@ def scan_for(b_brain, b_eyes, b_arms, target, in_inventory=False, attempts = 10,
             attempt += 1
         # If we found the target
         if click_info != [] and attempt < attempts:
+            print('I found the target')
             b_arms.click_here(click_info, center=b_eyes.local_center, rect=b_brain.win_rect)
 
-    # Go through the inventory and drop everything or drop specific items
-    def clear_inventory():
-        pass
+# Go through the inventory and drop everything or drop specific items
+def clear_inventory(b_eyes, b_arms):
+    pass
