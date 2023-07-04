@@ -17,9 +17,13 @@ class BotArms():
         self._DEBUG=DEBUG
         pass
 
+    def force_debug(self, debug):
+        self._DEBUG = debug
 
-    # takes an array of points, the client center, the win_rect, then moves and clicks the mouse at about the specified point
-    def click_here(self, points, center, rect, rad=15):
+
+    # takes an array of points, a center point used to find the closest distance, 
+    # the win_rect, and then moves and clicks the mouse at about the specified point
+    def click_here(self, points, center, rad=15):
         if points == []:
             return
         _dist = sys.maxsize
@@ -31,9 +35,14 @@ class BotArms():
             if dist < _dist:
                 _dist = dist
                 point = p
-        # Pick a point inside the click area
-        x = point[0] + rect[0]
-        y = point[1] + rect[1]
+
+        # Pick a point and click at
+        self.click_at(point, rad=rad)
+
+
+    # Move and click the mouse at a given position  
+    def click_at(self, point, rad=15):
+        [x, y] = point
 
         if self._DEBUG:
             image = Env.screen_image([0, 0, 1920, 1040])
@@ -44,7 +53,7 @@ class BotArms():
         self.move_mouse([x, y])
         b = random.uniform(0.05, 0.09)
         pyautogui.click(duration=b)
-        b = random.uniform(0.05, 0.09)
+        b = random.uniform(0.05, 0.18)
         time.sleep(b)
 
 

@@ -90,7 +90,6 @@ class BotEyes():
                 self.find_inventory(image)
             # Need to account for the fact that the image typically sent to grab_inventory is of the client only
             if self._DEBUG:
-                Env.debug_view(image, "Session Inventory")
                 screenshot_check = Env.screen_image()
                 screenshot_check = cv2.rectangle(screenshot_check, self.inventory_global, color=(0,255,0), thickness=2)
                 Env.debug_view(screenshot_check, title='True inventory position')
@@ -209,7 +208,7 @@ class BotEyes():
                 print('Length of contours: %d'%(len(contours)))
                 print(x, y, w, h)
 
-            return [[x_center, y_center]]
+            return [[x_center + self.client_rect[0], y_center + self.client_rect[1]]]
         else:
             return []
         
@@ -234,7 +233,7 @@ class BotEyes():
                 if mask[pt[1] + int(round(h/2)), pt[0] + int(round(w/2))] != 255:
                     mask[pt[1]:pt[1]+h, pt[0]:pt[0]+w] = 255
                     # An array of points
-                    items.append([pt[0] + math.floor(w/2) + (self.inventory_global[0] if inv else 0), pt[1] + math.floor(h/2) + (self.inventory_global[1] if inv else 0)])
+                    items.append([pt[0] + math.floor(w/2) + (self.inventory_global[0] if inv else self.client_rect[0]), pt[1] + math.floor(h/2) + (self.inventory_global[1] if inv else self.client_rect[1])])
                     if self._DEBUG:
                         cv2.circle(img_rgb, (pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)), radius=min(math.floor(w/3), math.floor(h/3)), color=(0,255,0), thickness=1)
             if self._DEBUG:
