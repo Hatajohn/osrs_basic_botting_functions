@@ -1,5 +1,5 @@
-# Imports
-import bot_env as env
+# Importsenv
+import bot_env as Env
 import cv2
 import pyautogui
 import time
@@ -36,16 +36,36 @@ class BotArms():
         y = point[1] + rect[1]
 
         if self._DEBUG:
-            image = env.screen_image([0, 0, 1920, 1040])
+            image = Env.screen_image([0, 0, 1920, 1040])
             print('Moving mouse to: ', x, y)
             image = cv2.circle(image, (x, y), radius=rad, color=(0, 0, 255), thickness=2)
-            env.debug_view(image, title='Moving the mouse here')
+            Env.debug_view(image, title='Moving the mouse here')
 
         self.move_mouse([x, y])
         b = random.uniform(0.05, 0.09)
         pyautogui.click(duration=b)
         b = random.uniform(0.05, 0.09)
         time.sleep(b)
+
+
+    # Go through the inventory and drop all items based on points passed
+    def drop_all(self, points, rect, rad=12):
+        if points == []:
+            return
+        pyautogui.keyDown('shift')
+
+        random.shuffle(points) # -> Need to come up with an algo for click order
+        
+        for p in points:
+            # Adjust for global coordinates
+            x = p[0] + rect[0]
+            y = p[1] + rect[1]
+            self.move_mouse([x, y], rad)
+            b = random.uniform(0.05, 0.09)
+            pyautogui.click(duration=b)
+            b = random.uniform(0.05, 0.09)
+            time.sleep(b)
+        pyautogui.keyUp('shift')
 
 
     # Should clamp n between minn and maxn
@@ -68,19 +88,19 @@ class BotArms():
 
 
     # Move mouse to a point on the screen
-    def move_mouse(self, point, rad=11, duration=0):
+    def move_mouse(self, point, rad=11):
         b = random.uniform(0.07, 0.284)
         # Move the mouse
         if self._DEBUG:
-            debug_image = env.screen_image([0, 0, 1920, 1040])
+            debug_image = Env.screen_image([0, 0, 1920, 1040])
             debug_image = cv2.circle(debug_image, point, radius=10, color=(0,255,0), thickness=-1)
             print('XY: ', point)
-            env.debug_view(debug_image, "Center vs move point")
+            Env.debug_view(debug_image, "Center vs move point")
         position = pyautogui.position()
         dist = math.dist(position, point)
         rad += int(dist % 5)
         print(rad)
-        point = env.pick_point_in_circle(point, rad)
+        point = Env.pick_point_in_circle(point, rad)
         pyautogui.moveTo(point, duration=b)
 
 
@@ -93,7 +113,7 @@ class BotArms():
         self.move_mouse(center)
         # Hold middle mouse and drag
         b = random.uniform(0.6, 1.0)
-        drag_to = env.pick_point_in_circle(drag_to)
+        drag_to = Env.pick_point_in_circle(drag_to)
         print('DRAGGING TO ', drag_to, rad=rad)
         pyautogui.dragTo(drag_to, button='middle', duration=b)
 

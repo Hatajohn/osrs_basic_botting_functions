@@ -61,13 +61,6 @@ def scan_for(b_brain, b_eyes, b_arms, target, attempts = 10, DEBUG=False):
             b_arms.click_here(click_info, center=b_eyes.local_center, rect=b_brain.win_rect)
 
 
-# Go through the inventory and drop everything or drop specific items (target)
-def clear_inventory(b_eyes, b_arms, target=None):
-    pass
-    # I need a way to track what is in each inventory slot -> I can math out where each spot should be and check
-    # if that spot is empty
-
-
 # This will be useful for when I need to 'use' one item on another
 def find_adjacent_item(b_eyes, b_arms, target_1, target_2):
     targets_1 = b_eyes.locate_image(b_eyes.curr_client, filename=target_1, inv=True, name=('Scanning for %s'%(target_1)))
