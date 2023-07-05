@@ -4,8 +4,6 @@
 import bot_brain as Brain
 import bot_eyes as Eyes
 import bot_arms as Arms
-import sys
-import math
 import time
 import random
 
@@ -101,6 +99,6 @@ if __name__ == "__main__":
         time.sleep(2)
         scan_for(bot_e, bot_a, method='color', bounds=bounds)
 
+    # Example for 'use_item_on'
     use_item_on(bot_e, bot_a, r'knife.png', r'magic_logs.png')
-    # 1621x526
-    # 1622x564
+    # use_item_on(bot_e, bot_a, r'magic_logs.png', r'knife.png')
