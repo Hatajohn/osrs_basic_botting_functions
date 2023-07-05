@@ -55,7 +55,7 @@ class BotLegs():
         last_time = time.time()
         delta_time = 0
         # Something else needs to stop this
-        while(not self.flag):
+        while(end > self._max):
             curr_time = time.time()
             # If we have passed the time period, we need to update each object legs is watching
             if delta_time > self._t:
@@ -65,9 +65,6 @@ class BotLegs():
             end += time.time() - last_time
             delta_time += curr_time - last_time
             print(end)
-            if end > self._max:
-                print('DONE')
-                self.flag = True
 
 
 
