@@ -12,23 +12,27 @@ def keep_fishing(bot_e, bot_a, bot_l, state):
     if action != 0:
         # Figure out why we are not fishing
         eels_inv = bot_e.locate_image(bot_e.curr_inventory, filename=r'infernal_eel_fish.png', inv=True, name='Checking inventory')
-        state = 'idle' if len(eels_inv) == 0 else 'cracking'
         print(len(eels_inv), state)
+        if len(eels_inv) == 0:
+            state = 'idle'
 
-        if len(eels_inv) == 22 or state == 'cracking':
+        if len(eels_inv) == 22:
             # Inv is full, crack the eels
             print('Crack the eels')
             Actions.use_item_on(bot_e, bot_a, r'imcando_hammer.png', r'infernal_eel_fish.png')
             state = 'cracking'
+        elif len(eels_inv) > 0 and state == 'cracking':
+            print('Cracking eels, %d to go!'%(len(eels_inv)))
         else:
-            wait = random.randint(1,15)
+            wait = random.randint(1,10)
             
-            if wait > 13:
+            if wait < 9:
                 print('Waiting ', wait)
-                time.sleep(random.randint(1,15))
+                time.sleep(wait)
             else:
-                print('WAITING LONGER')
-                time.sleep(random.randint(20,60))
+                wait = random.randint(15,25)
+                print('WAITING LONGER: ', wait)
+                time.sleep(wait)
                 
             print('Looking for eels')
             Actions.scan_for(bot_e, bot_a, r'infernal_eel_spot.png', method='color', bounds=[([235, 255, 0], [250, 255, 0])])
@@ -65,12 +69,7 @@ if __name__ == "__main__":
             cycles += 1
             bot_b.update()
             bot_e.update()
-            new_state = keep_fishing(bot_e, bot_a, bot_l, state)
-            if new_state == 'cracking':
-                _interval = interval
-                interval = 1000
-            if new_state != 'cracking':
-                interval = _interval
+            state = keep_fishing(bot_e, bot_a, bot_l, state)
             last_time = time.time()
             print('Cycles: ', cycles)
         end += time.time() - last_time

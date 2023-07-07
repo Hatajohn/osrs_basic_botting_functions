@@ -1,5 +1,6 @@
 # Importsenv
 import bot_env as Env
+import numpy as np
 import cv2
 import pyautogui
 import time
@@ -105,12 +106,48 @@ class BotArms():
             debug_image = cv2.circle(debug_image, point, radius=10, color=(0,255,0), thickness=-1)
             print('XY: ', point)
             Env.debug_view(debug_image, "Center vs move point")
+        
+        # Get current position in order to determine how much variance to add to the ending position
         position = pyautogui.position()
         dist = math.dist(position, point)
         rad += int(dist % 5)
         print(rad)
         point = Env.pick_point_in_circle(point, rad)
-        pyautogui.moveTo(point, duration=b)
+
+        # pyautogui.moveTo(point, duration=b)
+
+        cp = random.randint(3, 5)  # Number of control points. Must be at least 2.
+        x1, y1 = position   # Starting position
+        x2, y2 = point      # Ending position
+
+        # Distribute control points between start and destination evenly.
+        x = np.linspace(x1, x2, num=cp, dtype='int')
+        y = np.linspace(y1, y2, num=cp, dtype='int')
+
+        # Randomise inner points a bit (+-RND at most).
+        RND = 10
+        xr = [random.randint(-RND, RND) for k in range(cp)]
+        yr = [random.randint(-RND, RND) for k in range(cp)]
+        xr[0] = yr[0] = xr[-1] = yr[-1] = 0
+        x += xr
+        y += yr
+
+        # Approximate using Bezier spline.
+        degree = 3 if cp > 3 else cp - 1  # Degree of b-spline. 3 is recommended.
+                                        # Must be less than number of control points.
+        tck, u = interpolate.splprep([x, y], k=degree)
+        # Move upto a certain number of points
+        u = np.linspace(0, 1, num=2+int(math.dist(x1,y1,x2,y2)/50.0))
+        points = interpolate.splev(u, tck)
+
+        # Move mouse.
+        duration = 0.1
+        timeout = duration / len(points[0])
+        point_list=zip(*(i.astype(int) for i in points))
+        for point in point_list:
+            pyautogui.moveTo(*point)
+            time.sleep(timeout)
+        
 
 
     # Need to address this -> I personally do not drag from the center of my screen, I just full send
