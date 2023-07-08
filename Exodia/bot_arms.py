@@ -2,6 +2,7 @@
 import bot_env as Env
 import numpy as np
 import cv2
+from scipy import interpolate
 import pyautogui
 import time
 import math
