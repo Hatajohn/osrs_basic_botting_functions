@@ -12,7 +12,7 @@ import pytesseract
 class BotEyes():
     def __init__(self, win_rect=[], DEBUG=False):
         # Relative path to the tesseract executable
-        self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
+        self.tesseract_path = r'..\\..\\..\\Tesseract-OCR\\tesseract.exe'
 
         # Inventory location in a client screenshot -> easier for image recognition and future screenshots
         self.inventory_rect = None
