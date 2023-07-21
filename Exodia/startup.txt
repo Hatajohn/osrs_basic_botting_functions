@@ -1,5 +1,3 @@
 python -m venv exodia
 .\exodia\Scripts\Activate.ps1
 pip install -r requirements.txt
-# When finished
-deactivate
