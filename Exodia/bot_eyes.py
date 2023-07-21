@@ -166,7 +166,8 @@ class BotEyes():
 
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
-    def locate_color(self, image, boundaries=[([180, 0, 180], [220, 20, 220])]):
+    def locate_color(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], multi=True):
+        _image = copy.deepcopy(image)
         # define the list of boundaries
         # loop over the boundaries
         for (lower, upper) in boundaries:
@@ -175,15 +176,21 @@ class BotEyes():
             upper = np.array(upper, dtype="uint8")
 
             # find the colors within the specified boundaries and apply the mask
-            mask = cv2.inRange(image, lower, upper)
-            output = cv2.bitwise_and(image, image, mask=mask)
+            mask = cv2.inRange(_image, lower, upper)
+            output = cv2.bitwise_and(_image, _image, mask=mask)
             ret, thresh = cv2.threshold(mask, 40, 255, 0)
-            contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if self._DEBUG:
-                cv2.imwrite("images/Locate_Image_DebugPRE.png", image)
+                cv2.imwrite("images/Locate_Image_DebugPRE.png", _image)
 
         if len(contours) != 0:
+
+            if self._DEBUG:
+                _image2 = copy.deepcopy(image)
+                cv2.drawContours(_image2, contours, -1, color=(0, 0, 255), thickness=2)
+                Env.debug_view(_image2, 'Drawn contours')
+
             # find the biggest countour by the area -> usually implies the closest contour to the camera
             c = max(contours, key=cv2.contourArea)
             x, y, w, h = cv2.boundingRect(c)
@@ -192,13 +199,30 @@ class BotEyes():
             image = cv2.rectangle(image, pt1=(x, y), pt2=(x+w, y+h), color=(0, 255, 0), thickness=2)
             image = cv2.drawContours(image, contours, 0, color=(0,255,0), thickness=2)
             mask = np.zeros(image.shape[:2], np.uint8)
+            avg_x = 0
+            avg_y = 0
+            count = 0
+
             for cont in contours:
-                x_c, y_c, w_c, h_c = cv2.boundingRect(cont)
-                if mask[y_c + int(round(h_c/2)), x_c + int(round(w_c/2))] != 255:
-                    mask[y_c:y_c+h_c,x_c:x_c+w_c] = 255
-                    if(x != x_c or y != y_c or w != w_c or h != h_c):
-                        # Other contours will be highlighted with the opposite color of upper for visibility
-                        image = cv2.rectangle(image, pt1=(x_c, y_c), pt2=(x_c+w_c, y_c+h_c), color=(0,0,255), thickness=2)
+                for cont_p in cont:
+                    print(cont_p)
+                    count += 1
+                    avg_x += cont_p[0][0]
+                    avg_y += cont_p[0][1]
+                    
+                if multi:
+                    x_c, y_c, w_c, h_c = cv2.boundingRect(cont)
+                    if mask[y_c + int(round(h_c/2)), x_c + int(round(w_c/2))] != 255:
+                        mask[y_c:y_c+h_c,x_c:x_c+w_c] = 255
+                        if(x != x_c or y != y_c or w != w_c or h != h_c):
+                            # Other contours will be highlighted with the opposite color of upper for visibility
+                            image = cv2.rectangle(image, pt1=(x_c, y_c), pt2=(x_c+w_c, y_c+h_c), color=(0,0,255), thickness=2)
+            
+            if count > 0:
+                avg_x = math.floor(avg_x/count)
+                avg_y = math.floor(avg_y/count)
+                print([avg_x, avg_y])
+
             # Center of the contour
             x_center, y_center = (math.floor(x+w/2), math.floor(y+h/2))
             click_radius = math.floor(min(w, h)/2)
@@ -207,8 +231,14 @@ class BotEyes():
                 cv2.imwrite("images/Locate_Image_DebugPOST.png", image)
                 print('Length of contours: %d'%(len(contours)))
                 print(x, y, w, h)
+                _image = copy.deepcopy(image)
+                _image = cv2.circle(_image, [avg_x, avg_y], 10, color=(0, 0, 255), thickness=3)
+                Env.debug_view(_image, title='Found color')
+                print([x_center + self.client_rect[0], y_center + self.client_rect[1]])
 
-            return [[x_center + self.client_rect[0], y_center + self.client_rect[1]]]
+            if multi:
+                return [[x_center + self.client_rect[0], y_center + self.client_rect[1]]]
+            return [[avg_x, avg_y]]
         else:
             return []
         

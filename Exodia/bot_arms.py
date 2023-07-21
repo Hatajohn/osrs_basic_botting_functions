@@ -98,7 +98,7 @@ class BotArms():
         return [x, y]
 
 
-    # Move mouse to a point on the screen
+    # Move mouse to a point on the screen using Bezier curves
     def move_mouse(self, point, rad=11):
         b = random.uniform(0.07, 0.284)
         # Move the mouse
@@ -117,7 +117,7 @@ class BotArms():
 
         # pyautogui.moveTo(point, duration=b)
 
-        cp = random.randint(3, 5)  # Number of control points. Must be at least 2.
+        cp = random.randint(3, 10)  # Number of control points. Must be at least 2.
         x1, y1 = position   # Starting position
         x2, y2 = point      # Ending position
 
@@ -142,11 +142,11 @@ class BotArms():
         points = interpolate.splev(u, tck)
 
         # Move mouse.
-        duration = 0.1
+        duration = random.uniform(0.18, 0.96)
         timeout = duration / len(points[0])
         point_list=zip(*(i.astype(int) for i in points))
         for point in point_list:
-            pyautogui.moveTo(*point)
+            pyautogui.moveTo(*point, duration/len(cp))
             time.sleep(timeout)
         
 
