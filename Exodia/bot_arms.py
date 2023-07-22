@@ -147,10 +147,9 @@ class BotArms():
 
         # Move mouse.
         duration = random.uniform(0.18, 0.96)
-        timeout = duration / len(points[0])
         point_list=zip(*(i.astype(int) for i in points))
         for point in point_list:
-            pyautogui.moveTo(*point, duration/cp)
+            pyautogui.moveTo(*point, duration=duration/len(points))
         
 
 
