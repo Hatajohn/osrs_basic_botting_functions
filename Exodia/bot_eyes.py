@@ -252,7 +252,7 @@ class BotEyes():
         
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
-    def locate_cluster(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=25):
+    def locate_cluster(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=25, draw_contours=True, draw_clusters=True, draw_lines=True):
         _image = copy.deepcopy(image)
         # define the list of boundaries
         # loop over the boundaries
@@ -281,17 +281,21 @@ class BotEyes():
             # Grab the unique cluster labels
             unique_clusters = np.unique(clustering.labels_)
             # Create {unique_cluster} arrays of empty arrays to represent each cluster
-            clusters = [[]] * len(unique_clusters)
+            clusters = [[] for _ in range(len(unique_clusters))]
 
             # Points and cluster labels should be parallel, assign 
             for c in range(0, len(points)):
-                clusters[clustering.labels_[c]].append(points[c])
+                index = clustering.labels_[c]
+                to_append = points[c]
+                # print(clusters[index])
+                clusters[index].append(to_append[:])
 
             # Create an array of zeros
             com_clusters = [0] * len(unique_clusters)
 
+            # Find the center of mass for all clusters
             for c in range(0, len(clusters)):
-                print('Cluster ', c, ': ', len(clusters[c]))
+                # print('Cluster ', c, ': ', len(clusters[c]))
                 avg_x = 0
                 avg_y = 0
                 # Sum of all points in the cluster
@@ -299,13 +303,13 @@ class BotEyes():
                     avg_x += _c[0]
                     avg_y += _c[1]
                 # Divide by the number of points to get the average
-                avg_x /= len(clusters[c])
-                avg_y /= len(clusters[c])
+                avg_x = math.floor(avg_x / len(clusters[c]))
+                avg_y = math.floor(avg_y / len(clusters[c]))
                 # Save the center of mass for cluster c
-                com_clusters[c] = [math.floor(avg_x), math.floor(avg_y)]
+                com_clusters[c] = [avg_x, avg_y]
 
             # Draws the cluster points for debugging
-            if self._DEBUG:
+            if self._DEBUG and draw_clusters:
                 print(clustering)
                 print(clustering.labels_)
                 # Find all of the unique cluster labels
@@ -329,14 +333,14 @@ class BotEyes():
                 Env.debug_view(c_image, 'Clustering') 
 
             # Draws the contours for debugging
-            if self._DEBUG:
+            if self._DEBUG and draw_contours:
                 _image2 = copy.deepcopy(image)
                 cv2.drawContours(_image2, contours, -1, color=(0, 0, 255), thickness=2)
                 Env.debug_view(_image2, 'Drawn contours')
             
             # Big number, find the com closest to the center of the screen
             dist = 999999
-            if self._DEBUG:
+            if self._DEBUG and draw_lines:
                 com_image = copy.deepcopy(image)
             closest_com = []
             for com in com_clusters:
@@ -345,12 +349,13 @@ class BotEyes():
                     cv2.line(com_image, self.global_center, com, color=(0, 0, 255), thickness=2)
                 _dist = math.dist(self.global_center, com)
                 closest_com = com if _dist < dist else closest_com
-            if self._DEBUG:
+                dist = _dist if _dist < dist else dist
+            if self._DEBUG and draw_lines:
                 cv2.line(com_image, self.global_center, closest_com, color=(0, 255, 0), thickness=2)
                 print(closest_com) 
                 Env.debug_view(com_image, 'Cluster cms to center')
 
-            return [com_clusters]
+            return [closest_com]
         else:
             return []
         
