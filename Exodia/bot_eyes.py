@@ -250,6 +250,7 @@ class BotEyes():
         else:
             return []
         
+
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
     def locate_cluster(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=25):
         _image = copy.deepcopy(image)
@@ -266,29 +267,44 @@ class BotEyes():
             ret, thresh = cv2.threshold(mask, 40, 255, 0)
             contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        if self._DEBUG:
-                cv2.imwrite("images/Locate_Image_DebugPRE.png", _image)
-
         if len(contours) != 0:
-            # CLUSTERING STARTS HERE
             points = []
             # Pull all of the points out of the contours
             for cont in contours:
                 for cont_p in cont:
                     points.append([cont_p[0][0], cont_p[0][1]])
-
+            # Convert to np array
             X = np.array(points)
+
             # Cluster the points from the contours
             clustering = DBSCAN(eps=cluster_dist, min_samples=2).fit(X)
+            # Grab the unique cluster labels
             unique_clusters = np.unique(clustering.labels_)
+            # Create {unique_cluster} arrays of empty arrays to represent each cluster
             clusters = [[]] * len(unique_clusters)
-            # points and cluster labels should be parallel, assign 
+
+            # Points and cluster labels should be parallel, assign 
             for c in range(0, len(points)):
                 clusters[clustering.labels_[c]].append(points[c])
 
+            # Create an array of zeros
+            com_clusters = [0] * len(unique_clusters)
+
             for c in range(0, len(clusters)):
                 print('Cluster ', c, ': ', len(clusters[c]))
+                avg_x = 0
+                avg_y = 0
+                # Sum of all points in the cluster
+                for _c in clusters[c]:
+                    avg_x += _c[0]
+                    avg_y += _c[1]
+                # Divide by the number of points to get the average
+                avg_x /= len(clusters[c])
+                avg_y /= len(clusters[c])
+                # Save the center of mass for cluster c
+                com_clusters[c] = [math.floor(avg_x), math.floor(avg_y)]
 
+            # Draws the cluster points for debugging
             if self._DEBUG:
                 print(clustering)
                 print(clustering.labels_)
@@ -304,47 +320,37 @@ class BotEyes():
                 colored_array = np.array([integer_to_color[x] for x in clustering.labels_])
                 print(colored_array)
 
+                # Grab each assigned color for each point and place a dot on the image
                 for ca in range(0, len(X)):
                     ce = X[ca]
                     b, g, r = colored_array[ca]
-                    
                     cv2.circle(img=c_image, center=[ce[0], ce[1]], radius=1, color=(int(b), int(g), int(r)), thickness=2)
+                # Show the clusters
                 Env.debug_view(c_image, 'Clustering') 
 
-            # CLUSTERING ENDS HERE
-
+            # Draws the contours for debugging
             if self._DEBUG:
                 _image2 = copy.deepcopy(image)
                 cv2.drawContours(_image2, contours, -1, color=(0, 0, 255), thickness=2)
                 Env.debug_view(_image2, 'Drawn contours')
-
-            # find the biggest countour by the area -> usually implies the closest contour to the camera
-            c = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(c)
-
-            # The biggest contour will be drawn with a green outline
-            image = cv2.rectangle(image, pt1=(x, y), pt2=(x+w, y+h), color=(0, 255, 0), thickness=2)
-            image = cv2.drawContours(image, contours, 0, color=(0,255,0), thickness=2)
-            mask = np.zeros(image.shape[:2], np.uint8)
-            avg_x = 0
-            avg_y = 0
-            count = 0
-
-
-            # Center of the contour
-            x_center, y_center = (math.floor(x+w/2), math.floor(y+h/2))
-            click_radius = math.floor(min(w, h)/2)
-
+            
+            # Big number, find the com closest to the center of the screen
+            dist = 999999
             if self._DEBUG:
-                cv2.imwrite("images/Locate_Image_DebugPOST.png", image)
-                print('Length of contours: %d'%(len(contours)))
-                print(x, y, w, h)
-                _image = copy.deepcopy(image)
-                _image = cv2.circle(_image, [avg_x, avg_y], 10, color=(0, 0, 255), thickness=3)
-                Env.debug_view(_image, title='Found color')
-                print([x_center + self.client_rect[0], y_center + self.client_rect[1]])
+                com_image = copy.deepcopy(image)
+            closest_com = []
+            for com in com_clusters:
+                if self._DEBUG:
+                    cv2.circle(img=com_image, center=com, radius=5, color=(0, 0, 255), thickness=2)
+                    cv2.line(com_image, self.global_center, com, color=(0, 0, 255), thickness=2)
+                _dist = math.dist(self.global_center, com)
+                closest_com = com if _dist < dist else closest_com
+            if self._DEBUG:
+                cv2.line(com_image, self.global_center, closest_com, color=(0, 255, 0), thickness=2)
+                print(closest_com) 
+                Env.debug_view(com_image, 'Cluster cms to center')
 
-            return [[x_center + self.client_rect[0], y_center + self.client_rect[1]]]
+            return [com_clusters]
         else:
             return []
         
