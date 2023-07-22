@@ -190,9 +190,6 @@ class BotEyes():
             ret, thresh = cv2.threshold(mask, 40, 255, 0)
             contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        if self._DEBUG:
-                cv2.imwrite("images/Locate_Image_DebugPRE.png", _image)
-
         if len(contours) != 0:
             if self._DEBUG:
                 _image2 = copy.deepcopy(image)
@@ -236,7 +233,6 @@ class BotEyes():
             click_radius = math.floor(min(w, h)/2)
 
             if self._DEBUG:
-                cv2.imwrite("images/Locate_Image_DebugPOST.png", image)
                 print('Length of contours: %d'%(len(contours)))
                 print(x, y, w, h)
                 _image = copy.deepcopy(image)

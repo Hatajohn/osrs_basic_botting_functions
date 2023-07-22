@@ -7,3 +7,5 @@
 .vscode/launch.json
 Exodia/Lib/*
 images/*
+Exodia/pyvenv.cfg
+Exodia/Scripts/*
