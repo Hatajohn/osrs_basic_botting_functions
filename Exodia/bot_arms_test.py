@@ -14,21 +14,21 @@ if __name__ == "__main__":
     DEBUG = False
 
     icons = [r'inventory_icon.png', r'gear_icon.png', r'prayer_icon.png', r'standard_spells_icon.png',
-             r'combat_styles_icon.png', r'tasks_icon.png', r'stats_icon.png', r'emotes_icon.png',
-             r'settings_icon.png', r'friends_list_icon.png', r'account_mgmt_icon.png', r'grouping_icon.png',
-             r'music_icon.png']
+            r'combat_styles_icon.png', r'tasks_icon.png', r'stats_icon.png', r'emotes_icon.png',
+            r'settings_icon.png', r'friends_list_icon.png', r'account_mgmt_icon.png', r'grouping_icon.png',
+            r'music_icon.png']
     random.shuffle(icons)
 
     corner = [bot_b.win_rect[0], bot_b.win_rect[1]]
-    image = Env.screen_image(bot_b.win_rect, cover_name=corner)
-    Env.debug_view(image, title='Bot Arms Test init')
+    image = Env.screen_image(bot_b.win_rect, name=corner)
+    # Env.debug_view(image, title='Bot Arms Test init')
 
     bot_e.update() # - > refresh inventory and client view
 
     click_info = bot_e.locate_image(bot_e.curr_client, filename=r'logout_button.png', name='Find logout button')
     # DOES NOT YET ACCOUNT FOR THE WORLD SWITCHER BEING OPEN!!!
     if not FAST:
-        bot_a.click_here(click_info, center=bot_e.local_center, rect=bot_b.win_rect)
+        bot_a.click_at(click_info[0])
     else:
         # Hit ESC and click the logout button asap
         bot_a.hit_escape()

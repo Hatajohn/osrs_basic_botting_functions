@@ -17,7 +17,12 @@ class BotArms():
     # Constructor
     def __init__(self, DEBUG=False):
         self._DEBUG=DEBUG
-        pass
+        # Any duration less than this is rounded to 0.0 to instantly move the mouse.
+        pyautogui.MINIMUM_DURATION = 0  # Default: 0.1
+        # Minimal number of seconds to sleep between mouse moves.
+        pyautogui.MINIMUM_SLEEP = 0.01  # Default: 0.05
+        # The number of seconds to pause after EVERY public function call.
+        pyautogui.PAUSE = 0  # Default: 0.1
 
     def force_debug(self, debug):
         self._DEBUG = debug
@@ -44,15 +49,14 @@ class BotArms():
 
     # Move and click the mouse at a given position  
     def click_at(self, point, rad=15):
-        [x, y] = point
-
         if self._DEBUG:
+            [x, y] = point
             image = Env.screen_image([0, 0, 1920, 1040])
             print('Moving mouse to: ', x, y)
             image = cv2.circle(image, (x, y), radius=rad, color=(0, 0, 255), thickness=2)
             Env.debug_view(image, title='Moving the mouse here')
 
-        self.move_mouse([x, y])
+        self.move_mouse(point)
         b = random.uniform(0.05, 0.09)
         pyautogui.click(duration=b)
         b = random.uniform(0.05, 0.18)
@@ -117,7 +121,7 @@ class BotArms():
 
         # pyautogui.moveTo(point, duration=b)
 
-        cp = random.randint(3, 10)  # Number of control points. Must be at least 2.
+        cp = random.randint(3, 20)  # Number of control points. Must be at least 2.
         x1, y1 = position   # Starting position
         x2, y2 = point      # Ending position
 
@@ -126,7 +130,7 @@ class BotArms():
         y = np.linspace(y1, y2, num=cp, dtype='int')
 
         # Randomise inner points a bit (+-RND at most).
-        RND = 10
+        RND = 20
         xr = [random.randint(-RND, RND) for k in range(cp)]
         yr = [random.randint(-RND, RND) for k in range(cp)]
         xr[0] = yr[0] = xr[-1] = yr[-1] = 0
@@ -138,7 +142,7 @@ class BotArms():
                                         # Must be less than number of control points.
         tck, u = interpolate.splprep([x, y], k=degree)
         # Move upto a certain number of points
-        u = np.linspace(0, 1, num=2+int(math.dist(x1,y1,x2,y2)/50.0))
+        u = np.linspace(0, 1, num=2+int(math.dist([x1,y1],[x2,y2])/50.0))
         points = interpolate.splev(u, tck)
 
         # Move mouse.
@@ -146,8 +150,7 @@ class BotArms():
         timeout = duration / len(points[0])
         point_list=zip(*(i.astype(int) for i in points))
         for point in point_list:
-            pyautogui.moveTo(*point, duration/len(cp))
-            time.sleep(timeout)
+            pyautogui.moveTo(*point, duration/cp)
         
 
 
