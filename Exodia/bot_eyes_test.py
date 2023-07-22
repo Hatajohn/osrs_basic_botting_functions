@@ -22,7 +22,8 @@ if __name__ == "__main__":
     yellow = [([0, 230, 230], [30, 255, 255])]
 
     # Color order is BGR for some reason
-    point = bot_e.locate_color(bot_e.curr_client, boundaries=yellow, multi=True)
+    # point = bot_e.locate_color(bot_e.curr_client, boundaries=cyan, multi=True)
+    point = bot_e.locate_cluster(bot_e.curr_client, boundaries=cyan)
     temp_client = copy.deepcopy(bot_e.curr_client)
     temp_client = cv2.circle(temp_client, point[0], 10, color=(0, 0, 255), thickness=3)
     Env.debug_view(temp_client)

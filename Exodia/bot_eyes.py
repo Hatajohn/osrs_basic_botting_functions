@@ -1,7 +1,8 @@
 #imports
 import numpy as np
+from sklearn.cluster import DBSCAN
 import math
-import time
+import random
 import cv2
 import bot_env as Env
 import copy
@@ -43,7 +44,7 @@ class BotEyes():
         self._DEBUG=DEBUG
 
     
-     # Updates the inventory image
+    # Updates the inventory image
     def check_inventory(self):
         self.curr_inventory = Env.screen_image(rect=self.inventory_global, DEBUG=self._DEBUG)
 
@@ -164,9 +165,17 @@ class BotEyes():
         self.local_center = image_center
         self.global_center = true_center
 
+    def random_color(self):
+        return math.floor(255 * random.random())
+    
+    def cluster_color(self, integer):
+        # Generate a random color in the RGB format
+        r, g, b = self.random_color(), self.random_color(), self.random_color()
+        # It's just how it is
+        return [b, g, r]
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
-    def locate_color(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], multi=True):
+    def locate_color(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], multi=True, cluster_dist=25):
         _image = copy.deepcopy(image)
         # define the list of boundaries
         # loop over the boundaries
@@ -185,7 +194,6 @@ class BotEyes():
                 cv2.imwrite("images/Locate_Image_DebugPRE.png", _image)
 
         if len(contours) != 0:
-
             if self._DEBUG:
                 _image2 = copy.deepcopy(image)
                 cv2.drawContours(_image2, contours, -1, color=(0, 0, 255), thickness=2)
@@ -239,6 +247,104 @@ class BotEyes():
             if multi:
                 return [[x_center + self.client_rect[0], y_center + self.client_rect[1]]]
             return [[avg_x, avg_y]]
+        else:
+            return []
+        
+    # Locates and draws contours around colors defined by the boundaries param - only returns one point
+    def locate_cluster(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=25):
+        _image = copy.deepcopy(image)
+        # define the list of boundaries
+        # loop over the boundaries
+        for (lower, upper) in boundaries:
+            # create NumPy arrays from the boundaries
+            lower = np.array(lower, dtype="uint8")
+            upper = np.array(upper, dtype="uint8")
+
+            # find the colors within the specified boundaries and apply the mask
+            mask = cv2.inRange(_image, lower, upper)
+            output = cv2.bitwise_and(_image, _image, mask=mask)
+            ret, thresh = cv2.threshold(mask, 40, 255, 0)
+            contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if self._DEBUG:
+                cv2.imwrite("images/Locate_Image_DebugPRE.png", _image)
+
+        if len(contours) != 0:
+            # CLUSTERING STARTS HERE
+            points = []
+            # Pull all of the points out of the contours
+            for cont in contours:
+                for cont_p in cont:
+                    points.append([cont_p[0][0], cont_p[0][1]])
+
+            X = np.array(points)
+            # Cluster the points from the contours
+            clustering = DBSCAN(eps=cluster_dist, min_samples=2).fit(X)
+            unique_clusters = np.unique(clustering.labels_)
+            clusters = [[]] * len(unique_clusters)
+            # points and cluster labels should be parallel, assign 
+            for c in range(0, len(points)):
+                clusters[clustering.labels_[c]].append(points[c])
+
+            for c in range(0, len(clusters)):
+                print('Cluster ', c, ': ', len(clusters[c]))
+
+            if self._DEBUG:
+                print(clustering)
+                print(clustering.labels_)
+                # Find all of the unique cluster labels
+                c_image = copy.deepcopy(image)
+
+                # Create a dictionary to map each unique cluster label to a random color
+                integer_to_color = {integer: self.cluster_color(integer) for integer in unique_clusters}
+
+                print(unique_clusters)
+
+                # Convert each cluster label in the array to its corresponding color
+                colored_array = np.array([integer_to_color[x] for x in clustering.labels_])
+                print(colored_array)
+
+                for ca in range(0, len(X)):
+                    ce = X[ca]
+                    b, g, r = colored_array[ca]
+                    
+                    cv2.circle(img=c_image, center=[ce[0], ce[1]], radius=1, color=(int(b), int(g), int(r)), thickness=2)
+                Env.debug_view(c_image, 'Clustering') 
+
+            # CLUSTERING ENDS HERE
+
+            if self._DEBUG:
+                _image2 = copy.deepcopy(image)
+                cv2.drawContours(_image2, contours, -1, color=(0, 0, 255), thickness=2)
+                Env.debug_view(_image2, 'Drawn contours')
+
+            # find the biggest countour by the area -> usually implies the closest contour to the camera
+            c = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(c)
+
+            # The biggest contour will be drawn with a green outline
+            image = cv2.rectangle(image, pt1=(x, y), pt2=(x+w, y+h), color=(0, 255, 0), thickness=2)
+            image = cv2.drawContours(image, contours, 0, color=(0,255,0), thickness=2)
+            mask = np.zeros(image.shape[:2], np.uint8)
+            avg_x = 0
+            avg_y = 0
+            count = 0
+
+
+            # Center of the contour
+            x_center, y_center = (math.floor(x+w/2), math.floor(y+h/2))
+            click_radius = math.floor(min(w, h)/2)
+
+            if self._DEBUG:
+                cv2.imwrite("images/Locate_Image_DebugPOST.png", image)
+                print('Length of contours: %d'%(len(contours)))
+                print(x, y, w, h)
+                _image = copy.deepcopy(image)
+                _image = cv2.circle(_image, [avg_x, avg_y], 10, color=(0, 0, 255), thickness=3)
+                Env.debug_view(_image, title='Found color')
+                print([x_center + self.client_rect[0], y_center + self.client_rect[1]])
+
+            return [[x_center + self.client_rect[0], y_center + self.client_rect[1]]]
         else:
             return []
         
