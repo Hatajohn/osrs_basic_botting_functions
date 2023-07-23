@@ -150,7 +150,8 @@ class BotEyes():
     def find_center(self):
         #self.client_rect is top-left (x, y) then width and height
         image_center = [math.floor(self.client_rect[2]/2), math.floor(self.client_rect[3]/2)]
-        true_center = [image_center[0] + self.client_rect[0], image_center[1] + self.client_rect[1]]
+        # Adding 50 so it reflects the character's position rather than the center of the client
+        true_center = [image_center[0] + self.client_rect[0], image_center[1] + self.client_rect[1] + 50]
 
         if self._DEBUG:
             print('IMAGE CENTER ', image_center)
@@ -248,8 +249,11 @@ class BotEyes():
         
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
-    def locate_cluster(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=25, draw_contours=True, draw_clusters=True, draw_lines=True):
-        _image = copy.deepcopy(image)
+    def locate_cluster(self, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=25, draw_contours=True, draw_clusters=True, draw_lines=True):
+        # Obtain current information of the client
+        self.update()
+
+        _image = copy.deepcopy(self.curr_client)
         # define the list of boundaries
         # loop over the boundaries
         for (lower, upper) in boundaries:
@@ -361,7 +365,7 @@ class BotEyes():
         img_rgb = copy.deepcopy(img_og)
         try:
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
-            template = cv2.imread('images/' + filename, 0)
+            template = cv2.imread('Exodia/images/' + filename, 0)
             w, h = template.shape[::-1]
             pt = None
             res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)

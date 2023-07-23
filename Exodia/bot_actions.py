@@ -91,7 +91,7 @@ def click_on_color(bot_arms, bot_eyes, color, shade=20):
     print(color_lower)
     print(color_upper)
     # purple = [([240, 0, 160], [255, 0, 200])]
-    point = bot_eyes.locate_cluster(bot_eyes.curr_client, boundaries=[(color_lower, color_upper)])
+    point = bot_eyes.locate_cluster(boundaries=[(color_lower, color_upper)])
     # locate cluster will return the point closest to the center of the client
     bot_arms.click_at(point)
 
