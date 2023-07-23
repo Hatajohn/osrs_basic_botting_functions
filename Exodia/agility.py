@@ -23,7 +23,7 @@ if __name__ == "__main__":
     # SEERS
     # Wall
     Actions.click_on_color(bot_a, bot_e, purple)
-    # step 1, 12 ticks min
+    # step 1, 12 ticks minm
     wait_ticks(10)
     # Jump
     Actions.click_on_color(bot_a, bot_e, purple)

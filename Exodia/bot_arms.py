@@ -61,6 +61,7 @@ class BotArms():
 
         self.move_mouse(point)
         b = random.uniform(0.05, 0.09)
+        time.sleep(b)
         pyautogui.click()
         b = random.uniform(0.05, 0.18)
         time.sleep(b)
@@ -152,9 +153,10 @@ class BotArms():
         duration = 0.1
         timeout = duration / len(points[0])
         point_list=zip(*(i.astype(int) for i in points))
+        pick_tween = random.choice([pyautogui.easeInQuad, pyautogui.easeOutQuad, pyautogui.easeOutElastic, pyautogui.easeInBounce, pyautogui.easeInElastic])
         for point in point_list:
             #print('Moving to ', *point, ' with duration ', duration)
-            pyautogui.moveTo(*point)
+            pyautogui.moveTo(*point, tween=pick_tween)
             time.sleep(timeout)
         
 

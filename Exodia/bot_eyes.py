@@ -151,7 +151,7 @@ class BotEyes():
         #self.client_rect is top-left (x, y) then width and height
         image_center = [math.floor(self.client_rect[2]/2), math.floor(self.client_rect[3]/2)]
         # Adding 50 so it reflects the character's position rather than the center of the client
-        true_center = [image_center[0] + self.client_rect[0], image_center[1] + self.client_rect[1] + 50]
+        true_center = [image_center[0] + self.client_rect[0] - 20, image_center[1] + self.client_rect[1] + 25]
 
         if self._DEBUG:
             print('IMAGE CENTER ', image_center)
@@ -313,7 +313,7 @@ class BotEyes():
                 print(clustering)
                 print(clustering.labels_)
                 # Find all of the unique cluster labels
-                c_image = copy.deepcopy(image)
+                c_image = copy.deepcopy(self.curr_client)
 
                 # Create a dictionary to map each unique cluster label to a random color
                 integer_to_color = {integer: self.cluster_color(integer) for integer in unique_clusters}
@@ -334,14 +334,14 @@ class BotEyes():
 
             # Draws the contours for debugging
             if self._DEBUG and draw_contours:
-                _image2 = copy.deepcopy(image)
+                _image2 = copy.deepcopy(self.curr_client)
                 cv2.drawContours(_image2, contours, -1, color=(0, 0, 255), thickness=2)
                 Env.debug_view(_image2, 'Drawn contours')
             
             # Big number, find the com closest to the center of the screen
             dist = 999999
             if self._DEBUG and draw_lines:
-                com_image = copy.deepcopy(image)
+                com_image = copy.deepcopy(self.curr_client)
             closest_com = []
             for com in com_clusters:
                 if self._DEBUG:

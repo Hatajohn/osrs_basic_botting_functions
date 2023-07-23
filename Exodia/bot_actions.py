@@ -111,11 +111,10 @@ if __name__ == "__main__":
     purple = [255, 0, 183]
     yellow = [0, 255, 255]
     cyan = [255, 255, 0]
-    # bot_e.force_debug(True)
-    # bot_a.force_debug(True)
+    bot_e.force_debug(True)
+    #bot_a.force_debug(True)
     #click_on_color(bot_a, bot_e, cyan)
-    click_on_color(bot_a, bot_e, purple)
-    click_on_color(bot_a, bot_e, purple)
+
     click_on_color(bot_a, bot_e, purple)
     #click_on_color(bot_a, bot_e, yellow)
 
