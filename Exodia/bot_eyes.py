@@ -56,6 +56,9 @@ class BotEyes():
 
     # Block the inventory in the given image
     def update(self):
+        self.find_center()
+        self.find_inventory()
+        self.grab_inventory()
         # Cover the inventory, only call after init, assume it wont be called prior
         self.check_inventory()
         self.check_client()
@@ -77,9 +80,6 @@ class BotEyes():
 
         # Localized chat position, not global position
         self.chat_rect = [0, self.client_rect[3]-30, 520, 30]
-        self.find_center()
-        self.find_inventory()
-        self.grab_inventory()
         self.update()
             
 
@@ -149,9 +149,9 @@ class BotEyes():
     # Requires BotBrain to assign win_rect in init, otherwise just finds the global center of a rectangle
     def find_center(self):
         #self.client_rect is top-left (x, y) then width and height
-        image_center = [math.floor(self.client_rect[2]/2), math.floor(self.client_rect[3]/2)]
+        image_center = [math.floor(self.client_rect[2]/2)  - 20, math.floor(self.client_rect[3]/2) + 25]
         # Adding 50 so it reflects the character's position rather than the center of the client
-        true_center = [image_center[0] + self.client_rect[0] - 20, image_center[1] + self.client_rect[1] + 25]
+        true_center = [image_center[0] + self.client_rect[0], image_center[1] + self.client_rect[1]]
 
         if self._DEBUG:
             print('IMAGE CENTER ', image_center)
@@ -249,7 +249,7 @@ class BotEyes():
         
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
-    def locate_cluster(self, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=25, draw_contours=True, draw_clusters=True, draw_lines=True):
+    def locate_cluster(self, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=40, draw_contours=True, draw_clusters=True, draw_lines=True):
         # Obtain current information of the client
         self.update()
 
@@ -318,7 +318,7 @@ class BotEyes():
                 # Create a dictionary to map each unique cluster label to a random color
                 integer_to_color = {integer: self.cluster_color(integer) for integer in unique_clusters}
 
-                print(unique_clusters)
+                print(len(unique_clusters), ' clusters found!')
 
                 # Convert each cluster label in the array to its corresponding color
                 colored_array = np.array([integer_to_color[x] for x in clustering.labels_])
@@ -339,30 +339,31 @@ class BotEyes():
                 Env.debug_view(_image2, 'Drawn contours')
             
             # Big number, find the com closest to the center of the screen
-            dist = 999999
+            dist_com = 99999
             if self._DEBUG and draw_lines:
                 com_image = copy.deepcopy(self.curr_client)
             closest_com = []
             for com in com_clusters:
                 if self._DEBUG:
                     cv2.circle(img=com_image, center=com, radius=5, color=(0, 0, 255), thickness=2)
-                    cv2.line(com_image, self.global_center, com, color=(0, 0, 255), thickness=2)
-                _dist = math.dist(self.global_center, com)
-                closest_com = com if _dist < dist else closest_com
-                dist = _dist if _dist < dist else dist
+                    cv2.line(com_image, self.local_center, com, color=(0, 0, 255), thickness=2)
+                _dist = math.dist(self.local_center, com)
+                closest_com = com if _dist < dist_com else closest_com
+                dist_com = _dist if _dist < dist_com else dist_com
+
             if self._DEBUG and draw_lines:
-                cv2.line(com_image, self.global_center, closest_com, color=(0, 255, 0), thickness=2)
+                cv2.line(com_image, self.local_center, closest_com, color=(0, 255, 0), thickness=2)
                 print(closest_com) 
                 Env.debug_view(com_image, 'Cluster cms to center')
 
-            return closest_com
+            return [closest_com[0] + self.client_rect[0], closest_com[1] + self.client_rect[1]]
         else:
             return []
         
 
     # Similar to using 'substring in string', but with images
-    def locate_image(self, img_og, inv=False, filename='', threshold=0.8, name='Screenshot'):
-        img_rgb = copy.deepcopy(img_og)
+    def locate_image(self, inv=False, filename='', threshold=0.8, name='Screenshot'):
+        img_rgb = copy.deepcopy(self.curr_client) if inv == False else copy.deepcopy(self.curr_inventory)
         try:
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
             template = cv2.imread('Exodia/images/' + filename, 0)
@@ -392,6 +393,49 @@ class BotEyes():
         except:
             print('Locate image failed!')
             return []
+        
+
+    # Locate an image within the client scene by attemping to match based on features
+    def find_image_in_scene(self, image_path):
+        self.update()
+        img_rgb = copy.deepcopy(self.curr_client)
+
+        # Read the images
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        scene = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
+
+        if self._DEBUG:
+            Env.debug_view(image)
+            Env.debug_view(scene)
+
+        # Step 1: Detect key points and descriptors
+        orb = cv2.ORB_create()
+        keypoints_image, descriptors_image = orb.detectAndCompute(image, None)
+        keypoints_scene, descriptors_scene = orb.detectAndCompute(scene, None)
+
+        # Step 2: Feature Matching
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        matches = bf.match(descriptors_image, descriptors_scene)
+
+        # Step 3: Apply RANSAC
+        MIN_MATCH_COUNT = 10  # Minimum number of matches required
+        if len(matches) >= MIN_MATCH_COUNT:
+            src_pts = np.float32([keypoints_image[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+            dst_pts = np.float32([keypoints_scene[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+
+            # Find the transformation matrix
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+            matches_mask = mask.ravel().tolist()
+        else:
+            print("Not enough matches are found - %d/%d" % (len(matches), MIN_MATCH_COUNT))
+            return None
+
+        # Step 4: Draw matches
+        draw_params = dict(matchColor=(0, 255, 0), singlePointColor=None, matchesMask=matches_mask, flags=2)
+        result_img = cv2.drawMatches(image, keypoints_image, scene, keypoints_scene, matches, None, **draw_params)
+        
+        if self._DEBUG:
+            Env.debug_view(result_img, 'Detecting image in scene')
         
         
     # Needs to be adjusted to find the action text and read it - not implemented

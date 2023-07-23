@@ -20,12 +20,8 @@ def bot_init(DEBUG=False):
 
 # Update the client and inventory images
 def bot_update(bot_b, bot_e):
-    old_rect = bot_b.win_rect
     bot_b.update()
-    if bot_b.win_rect != old_rect:
-        bot_e.setRect(bot_b.win_rect)
-    else:
-        bot_e.update()
+    bot_e.setRect(bot_b.win_rect)
 
 
 # Look for either an image or a colorband in the playspace
@@ -81,7 +77,8 @@ def use_item_on(b_eyes, b_arms, target_1, target_2):
     b_arms.click_at(target_1[0], rad=11)
 
 
-def click_on_color(bot_arms, bot_eyes, color, shade=20):
+def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20):
+    bot_update(bot_brain, bot_eyes)
     # min 0
     [b, g, r] = color
     color_lower = [max(b-shade, 0), max(g-shade, 0), max(r-shade, 0)]
@@ -111,11 +108,10 @@ if __name__ == "__main__":
     purple = [255, 0, 183]
     yellow = [0, 255, 255]
     cyan = [255, 255, 0]
-    bot_e.force_debug(True)
-    #bot_a.force_debug(True)
+    # bot_a.force_debug(True)
     #click_on_color(bot_a, bot_e, cyan)
 
-    click_on_color(bot_a, bot_e, purple)
+    click_on_color(bot_b, bot_a, bot_e, purple)
     #click_on_color(bot_a, bot_e, yellow)
 
     # time.sleep(5)
