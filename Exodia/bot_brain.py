@@ -49,8 +49,8 @@ class BotBrain():
         try:
             rect = win32gui.GetWindowRect(self.id)
             # [left, top+ 24, right - 40, bottom - 24] -> correct for margins
-            self.win_rect = []
-            self.win_rect = [rect[0], rect[1] + 24, rect[2]-rect[0] - 40, rect[3]-rect[1] - 24]
+            self.win_rect = rect
+            # self.win_rect = [rect[0], rect[1] + 24, rect[2]-rect[0] - 40, rect[3]-rect[1] - 24]
             if(self._DEBUG):
                 print('GET WINDOW RECT: ', self.win_rect)
                 image = Env.screen_image(self.win_rect)

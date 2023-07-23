@@ -4,6 +4,7 @@
 import bot_brain as Brain
 import bot_eyes as Eyes
 import bot_arms as Arms
+import bot_env as Env
 import time
 import random
 
@@ -44,7 +45,7 @@ def scan_for(b_eyes, b_arms, target='', method='image', bounds=[], attempts = 10
 
     # Image was found, Bob's your uncle
     if click_info != []:
-         b_arms.click_here(click_info, center=b_eyes.local_center)
+        b_arms.click_here(click_info, center=b_eyes.local_center)
     else:
         # We did not find the object for one reason or another, try looking around? Give it 10 attemps
         attempt = 0
@@ -80,25 +81,53 @@ def use_item_on(b_eyes, b_arms, target_1, target_2):
     b_arms.click_at(target_1[0], rad=11)
 
 
+def click_on_color(bot_arms, bot_eyes, color, shade=20):
+    # min 0
+    [b, g, r] = color
+    color_lower = [max(b-shade, 0), max(g-shade, 0), max(r-shade, 0)]
+    # max 255
+    color_upper = [min(b+shade, 255), min(g+shade, 255), min(r+shade, 255)]
+
+    print(color_lower)
+    print(color_upper)
+    # purple = [([240, 0, 160], [255, 0, 200])]
+    point = bot_eyes.locate_cluster(bot_eyes.curr_client, boundaries=[(color_lower, color_upper)])
+    # locate cluster will return the point closest to the center of the client
+    bot_arms.click_at(point)
+
 
 #Main
 if __name__ == "__main__":
     # Initialize bot objects
     [bot_b, bot_e, bot_a] = bot_init()
 
+    # Env.debug_view(bot_e.curr_client, "Initial")
+
     # scan_for(bot_e, bot_a, target=r'magic_tree_sample.png')
-    bounds = [([0, 240, 240], [0, 255, 255])] # -> Yellow
-    scan_for(bot_e, bot_a, method='color', bounds=bounds)
+    # bounds = [([0, 240, 240], [0, 255, 255])] # -> Yellow
+    # scan_for(bot_e, bot_a, method='color', bounds=bounds)
+    
+
+    purple = [255, 0, 183]
+    yellow = [0, 255, 255]
+    cyan = [255, 255, 0]
+    # bot_e.force_debug(True)
+    # bot_a.force_debug(True)
+    #click_on_color(bot_a, bot_e, cyan)
+    click_on_color(bot_a, bot_e, purple)
+    click_on_color(bot_a, bot_e, purple)
+    click_on_color(bot_a, bot_e, purple)
+    #click_on_color(bot_a, bot_e, yellow)
 
     # time.sleep(5)
 
     # Check if the top left of the client says "Woodcutting" or whatever
-    action = bot_e.get_action_text()
-    print(action)
-    if action != 0:
-        time.sleep(2)
-        scan_for(bot_e, bot_a, method='color', bounds=bounds)
+    # action = bot_e.get_action_text()
+    # print(action)
+    # if action != 0:
+        # time.sleep(2)
+        # scan_for(bot_e, bot_a, method='color', bounds=bounds)
 
     # Example for 'use_item_on'
-    use_item_on(bot_e, bot_a, r'knife.png', r'magic_logs.png')
+    # use_item_on(bot_e, bot_a, r'knife.png', r'magic_logs.png')
     # use_item_on(bot_e, bot_a, r'magic_logs.png', r'knife.png')

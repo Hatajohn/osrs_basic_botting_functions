@@ -20,7 +20,7 @@ class BotArms():
         # Any duration less than this is rounded to 0.0 to instantly move the mouse.
         pyautogui.MINIMUM_DURATION = 0  # Default: 0.1
         # Minimal number of seconds to sleep between mouse moves.
-        pyautogui.MINIMUM_SLEEP = 0.01  # Default: 0.05
+        pyautogui.MINIMUM_SLEEP = 0  # Default: 0.05
         # The number of seconds to pause after EVERY public function call.
         pyautogui.PAUSE = 0  # Default: 0.1
 
@@ -49,6 +49,9 @@ class BotArms():
 
     # Move and click the mouse at a given position  
     def click_at(self, point, rad=15):
+        if point == []:
+            return
+        
         if self._DEBUG:
             [x, y] = point
             image = Env.screen_image([0, 0, 1920, 1040])
@@ -58,7 +61,7 @@ class BotArms():
 
         self.move_mouse(point)
         b = random.uniform(0.05, 0.09)
-        pyautogui.click(duration=b)
+        pyautogui.click()
         b = random.uniform(0.05, 0.18)
         time.sleep(b)
 
@@ -117,11 +120,11 @@ class BotArms():
         dist = math.dist(position, point)
         rad += int(dist % 5)
         print(rad)
-        point = Env.pick_point_in_circle(point, rad)
+        # point = Env.pick_point_in_circle(point, rad)
 
         # pyautogui.moveTo(point, duration=b)
 
-        cp = random.randint(3, 20)  # Number of control points. Must be at least 2.
+        cp = random.randint(3, 10)  # Number of control points. Must be at least 2.
         x1, y1 = position   # Starting position
         x2, y2 = point      # Ending position
 
@@ -146,12 +149,14 @@ class BotArms():
         points = interpolate.splev(u, tck)
 
         # Move mouse.
-        duration = random.uniform(0.18, 0.96)
+        duration = 0.1
+        timeout = duration / len(points[0])
         point_list=zip(*(i.astype(int) for i in points))
         for point in point_list:
-            pyautogui.moveTo(*point, duration=duration/len(points))
+            #print('Moving to ', *point, ' with duration ', duration)
+            pyautogui.moveTo(*point)
+            time.sleep(timeout)
         
-
 
     # Need to address this -> I personally do not drag from the center of my screen, I just full send
     def control_camera(self, center, drag_to, rad=15):

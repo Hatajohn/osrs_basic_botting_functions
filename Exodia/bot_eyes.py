@@ -351,7 +351,7 @@ class BotEyes():
                 print(closest_com) 
                 Env.debug_view(com_image, 'Cluster cms to center')
 
-            return [closest_com]
+            return closest_com
         else:
             return []
         
