@@ -153,7 +153,7 @@ class BotEyes():
         # Adding 50 so it reflects the character's position rather than the center of the client
         true_center = [image_center[0] + self.client_rect[0], image_center[1] + self.client_rect[1]]
 
-        if self._DEBUG:
+        if self._DEBUG and False:
             print('IMAGE CENTER ', image_center)
             print('TRUE CENTER ', true_center)
             image = Env.screen_image(self.client_rect)
@@ -337,17 +337,29 @@ class BotEyes():
                 _image2 = copy.deepcopy(self.curr_client)
                 cv2.drawContours(_image2, contours, -1, color=(0, 0, 255), thickness=2)
                 Env.debug_view(_image2, 'Drawn contours')
+
+            if self._DEBUG and draw_lines:
+                com_image = copy.deepcopy(self.curr_client)
+            dist_com = 99999
+            closest_c = []
+            # find the closest contour point
+            for c in range(0, len(clusters)):
+                for _c in clusters[c]:
+                    if self._DEBUG:
+                        cv2.circle(img=com_image, center=_c, radius=5, color=(255, 255, 255), thickness=2)
+                        cv2.line(com_image, self.local_center, _c, color=(255, 255, 255), thickness=1)
+                    _dist = math.dist(self.local_center, _c)
+                    closest_c = _c if _dist < dist_com else closest_c
+                    dist_com = _dist if _dist < dist_com else dist_com
             
             # Big number, find the com closest to the center of the screen
             dist_com = 99999
-            if self._DEBUG and draw_lines:
-                com_image = copy.deepcopy(self.curr_client)
             closest_com = []
             for com in com_clusters:
                 if self._DEBUG:
                     cv2.circle(img=com_image, center=com, radius=5, color=(0, 0, 255), thickness=2)
-                    cv2.line(com_image, self.local_center, com, color=(0, 0, 255), thickness=2)
-                _dist = math.dist(self.local_center, com)
+                    cv2.line(com_image, closest_c, com, color=(0, 0, 255), thickness=2)
+                _dist = math.dist(closest_c, com)
                 closest_com = com if _dist < dist_com else closest_com
                 dist_com = _dist if _dist < dist_com else dist_com
 

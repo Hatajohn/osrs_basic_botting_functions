@@ -92,6 +92,10 @@ def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20):
     # locate cluster will return the point closest to the center of the client
     bot_arms.click_at(point)
 
+def mouse_fidgit(bot_brain, bot_arms, bot_eyes):
+    bot_update(bot_brain, bot_eyes)
+    bot_arms.move_mouse(bot_eyes.global_center, rad=200)
+
 
 #Main
 if __name__ == "__main__":
@@ -110,7 +114,7 @@ if __name__ == "__main__":
     cyan = [255, 255, 0]
     # bot_a.force_debug(True)
     #click_on_color(bot_a, bot_e, cyan)
-
+    bot_e.force_debug(True)
     click_on_color(bot_b, bot_a, bot_e, purple)
     #click_on_color(bot_a, bot_e, yellow)
 

@@ -107,7 +107,8 @@ class BotArms():
 
 
     # Move mouse to a point on the screen using Bezier curves
-    def move_mouse(self, point, rad=11):
+    def move_mouse(self, point, rad=9):
+        point = Env.pick_point_in_circle(point, rad)
         b = random.uniform(0.07, 0.284)
         # Move the mouse
         if self._DEBUG:
@@ -121,9 +122,6 @@ class BotArms():
         dist = math.dist(position, point)
         rad += int(dist % 5)
         print(rad)
-        # point = Env.pick_point_in_circle(point, rad)
-
-        # pyautogui.moveTo(point, duration=b)
 
         cp = random.randint(3, 10)  # Number of control points. Must be at least 2.
         x1, y1 = position   # Starting position
