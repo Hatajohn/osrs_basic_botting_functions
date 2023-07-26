@@ -5,6 +5,7 @@ import bot_brain as Brain
 import bot_eyes as Eyes
 import bot_arms as Arms
 import bot_env as Env
+import math
 import time
 import random
 
@@ -69,15 +70,22 @@ def scan_for(b_eyes, b_arms, target='', method='image', bounds=[], attempts = 10
 # This will be useful for when I need to 'use' one item on another in my inv, like for making potions
 # Both target params are singular image files, target_2 can end up being multiple items, but only one will be clicked
 def use_item_on(b_eyes, b_arms, target_1, target_2):
-    target_1 = b_eyes.locate_image(b_eyes.curr_inventory, filename=target_1, inv=True, name=('Scanning for %s'%(target_1)))
-    targets_2 = b_eyes.locate_image(b_eyes.curr_inventory, filename=target_2, inv=True, name=('Scanning for %s'%(target_2)))
-
+    targets_1 = b_eyes.locate_image(filename=target_1, inv=True, name=('Scanning for %s'%(target_1)))
+    targets_2 = b_eyes.locate_image(filename=target_2, inv=True, name=('Scanning for %s'%(target_2)))
     # Assuming the first target_1 is valid
-    b_arms.click_here(targets_2, target_1[0], rad=11)
-    b_arms.click_at(target_1[0], rad=11)
+    b_arms.click_here(targets_2, targets_1[0], rad=11)
+    b_arms.click_at(targets_1[0], rad=11)
 
 
-def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20):
+def click_on_image(bot_brain, bot_arms, bot_eyes, target, refresh=True):
+    if refresh:
+        bot_update(bot_brain, bot_eyes)
+    target = bot_eyes.locate_image(filename=target, inv=False)
+    target = random.choice(target)
+    bot_arms.click_at(target)
+
+
+def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20, range=20):
     bot_update(bot_brain, bot_eyes)
     # min 0
     [b, g, r] = color
@@ -88,13 +96,31 @@ def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20):
     print(color_lower)
     print(color_upper)
     # purple = [([240, 0, 160], [255, 0, 200])]
-    point = bot_eyes.locate_cluster(boundaries=[(color_lower, color_upper)])
+    point = bot_eyes.locate_cluster(boundaries=[(color_lower, color_upper)], cluster_dist=range)
     # locate cluster will return the point closest to the center of the client
     bot_arms.click_at(point)
+    # bot_arms.move_mouse(point)
 
-def mouse_fidgit(bot_brain, bot_arms, bot_eyes):
+
+def color_is_close(bot_brain, bot_eyes, color, shade=10, dist=40, range=300):
     bot_update(bot_brain, bot_eyes)
-    bot_arms.move_mouse(bot_eyes.global_center, rad=200)
+    # min 0
+    [b, g, r] = color
+    color_lower = [max(b-shade, 0), max(g-shade, 0), max(r-shade, 0)]
+    # max 255
+    color_upper = [min(b+shade, 255), min(g+shade, 255), min(r+shade, 255)]
+
+    print(color_lower)
+    print(color_upper)
+    point = bot_eyes.locate_cluster(boundaries=[(color_lower, color_upper)], cluster_dist=range)
+    if math.dist(bot_eyes.global_center, point) < range:
+        return True
+    return False
+
+
+def mouse_fidgit(bot_brain, bot_arms, bot_eyes, rad=300):
+    bot_update(bot_brain, bot_eyes)
+    bot_arms.move_mouse(bot_eyes.global_center, rad=rad)
 
 
 #Main
@@ -114,8 +140,11 @@ if __name__ == "__main__":
     cyan = [255, 255, 0]
     # bot_a.force_debug(True)
     #click_on_color(bot_a, bot_e, cyan)
-    bot_e.force_debug(True)
-    click_on_color(bot_b, bot_a, bot_e, purple)
+    # bot_e.force_debug(True)
+    for i in range(0, 15):
+        click_on_color(bot_b, bot_a, bot_e, purple)
+        mouse_fidgit(bot_b, bot_a, bot_e, rad=500)
+        time.sleep(0.1)
     #click_on_color(bot_a, bot_e, yellow)
 
     # time.sleep(5)

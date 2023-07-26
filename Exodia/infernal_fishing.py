@@ -11,7 +11,7 @@ def keep_fishing(bot_e, bot_a, bot_l, state):
     action = bot_e.get_action_text()
     if action != 0:
         # Figure out why we are not fishing
-        eels_inv = bot_e.locate_image(bot_e.curr_inventory, filename=r'infernal_eel_fish.png', inv=True, name='Checking inventory')
+        eels_inv = bot_e.locate_image(filename=r'infernal_eel_fish.png', inv=True, name='Checking inventory')
         print(len(eels_inv), state)
         if len(eels_inv) == 0:
             state = 'idle'
@@ -35,7 +35,8 @@ def keep_fishing(bot_e, bot_a, bot_l, state):
                 time.sleep(wait)
                 
             print('Looking for eels')
-            Actions.scan_for(bot_e, bot_a, r'infernal_eel_spot.png', method='color', bounds=[([235, 255, 0], [250, 255, 0])])
+            # Actions.scan_for(bot_e, bot_a, r'infernal_eel_spot.png', method='color', bounds=[([235, 255, 0], [250, 255, 0])])
+            Actions.click_on_color(bot_b, bot_a, bot_e, color=(255, 255 ,0), range=20)
             time.sleep(random.randrange(2,5))
         return state
     else:
@@ -47,6 +48,7 @@ def keep_fishing(bot_e, bot_a, bot_l, state):
 if __name__ == "__main__":
     [bot_b, bot_e, bot_a] = Actions.bot_init()
     bot_l = Legs.BotLegs(mods=[bot_b, bot_e])
+    # bot_e.force_debug(True)
 
     #fishing_task = bot_l.add_task(func='keep_fishing', params=[bot_e, bot_a, bot_l, 'idle'])
     #bot_l.bot_loop()
@@ -60,6 +62,7 @@ if __name__ == "__main__":
     delta_time = 0
     state = 'idle'
     interval = 6000
+    cracking = False
     _interval = 6000
     # Something else needs to stop this
     while(end < timer):
@@ -67,9 +70,20 @@ if __name__ == "__main__":
         # If we have passed the time period, we need to update each object legs is watching
         if delta_time > interval:
             cycles += 1
-            bot_b.update()
-            bot_e.update()
-            state = keep_fishing(bot_e, bot_a, bot_l, state)
+            Actions.bot_update(bot_b, bot_e)
+            state = bot_e.get_action_text()
+            eels_inv = bot_e.locate_image(filename=r'infernal_eel_fish.png', inv=True, name='Checking inventory')
+            if len(eels_inv) == 0 and cracking:
+                cracking = False
+            if state != 0 and not cracking and len(eels_inv) < 22:
+                Actions.click_on_image(bot_b, bot_a, bot_e, target=r'infernal_eel_fish.png')
+                time.sleep(3)
+            elif len(eels_inv) == 22 or cracking:
+                print('START CRACKING')
+                cracking = True
+                Actions.use_item_on(bot_e, bot_a, r'imcando_hammer.png', r'infernal_eel_fish.png')
+                eels_inv = bot_e.locate_image(filename=r'infernal_eel_fish.png', inv=True, name='Checking inventory')
+                print(len(eels_inv))
             last_time = time.time()
             print('Cycles: ', cycles)
         end += time.time() - last_time

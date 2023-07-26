@@ -7,14 +7,16 @@ import cv2
 import bot_env as Env
 import copy
 import pytesseract
+import os
 
 
 # This class handles object recognition and the images required for the rest of the bot to function
 class BotEyes():
     def __init__(self, win_rect=[], DEBUG=False):
         # Relative path to the tesseract executable
-        self.tesseract_path = r'..\\..\\..\\Tesseract-OCR\\tesseract.exe'
-
+        self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
+        if not os.path.exists(self.tesseract_path):
+            print('Path of the file is Invalid')
         # Inventory location in a client screenshot -> easier for image recognition and future screenshots
         self.inventory_rect = None
 
@@ -250,9 +252,6 @@ class BotEyes():
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
     def locate_cluster(self, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=40, draw_contours=True, draw_clusters=True, draw_lines=True):
-        # Obtain current information of the client
-        self.update()
-
         _image = copy.deepcopy(self.curr_client)
         # define the list of boundaries
         # loop over the boundaries
@@ -456,7 +455,7 @@ class BotEyes():
         scale = 300
         # I don't identify the locaiton of the fishing/mining/woodcutting text since I havent trained on the osrs font,
         # make sure it's dragged to the top-left area!
-        action = Env.screen_image([self.client_rect[0]+5, self.client_rect[1]+10, 100, 30])
+        action = Env.screen_image([self.client_rect[0]+25, self.client_rect[1]+50, 100, 30])
         img = Env.resize_image(copy.deepcopy(action), scale)
 
         if self._DEBUG:
@@ -522,26 +521,24 @@ class BotEyes():
             x, y, w, h = cv2.boundingRect(cnt)
             # Cropping the text block for giving input to OCR
             cropped = im2[y:y + h, x:x + w]
-            text = pytesseract.image_to_string(cropped)
             working = True
 
             if self._DEBUG:
                 # Drawing a rectangle on copied image
                 rect = cv2.rectangle(im2, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                print('(GREEN) WE ARE: %s'%(text))
+                print('(GREEN) WE ARE WORKING')
                 Env.debug_view(rect)
 
         for cnt in contours_r:
             x, y, w, h = cv2.boundingRect(cnt)
             # Cropping the text block for giving input to OCR
             cropped = im3[y:y + h, x:x + w]
-            text = pytesseract.image_to_string(cropped)
             not_working = True
 
             if self._DEBUG:
                 # Drawing a rectangle on copied image
                 rect = cv2.rectangle(im3, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                print('(RED) WE ARE: %s'%(text))
+                print('(RED) WE ARE NOT WORKING')
                 Env.debug_view(rect)
 
         # 2 means there is no action text, or it failed to find anything, this distinction might not be necessary
@@ -551,3 +548,7 @@ class BotEyes():
         elif not_working:
             result = 1
         return result
+    
+#Main
+if __name__ == "__main__":
+    bot_eyes = BotEyes()
