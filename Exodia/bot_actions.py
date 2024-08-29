@@ -101,6 +101,10 @@ def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20, range=20, use
     bot_arms.click_at(point, 9)
     # bot_arms.move_mouse(point)
 
+# Runs the above function with enabled target params
+def click_color_near_color(bot_brain, bot_arms, bot_eyes, color, target_color, shade=20, range=20):
+    click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20, range=20, use_target=True, c_target=bot_eyes.locate_color(target_color))
+
 # Checks if a color is near a target point
 def color_is_close(bot_brain, bot_eyes, color, shade=10, dist=40, range=300):
     bot_update(bot_brain, bot_eyes)

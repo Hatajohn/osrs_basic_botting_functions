@@ -178,8 +178,8 @@ class BotEyes():
         return [b, g, r]
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
-    def locate_color(self, image, boundaries=[([180, 0, 180], [220, 20, 220])], multi=True, cluster_dist=25):
-        _image = copy.deepcopy(image)
+    def locate_color(self, boundaries=[([180, 0, 180], [220, 20, 220])], multi=True, cluster_dist=25):
+        _image = copy.deepcopy(self.curr_client)
         # define the list of boundaries
         # loop over the boundaries
         for (lower, upper) in boundaries:
