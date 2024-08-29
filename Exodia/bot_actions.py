@@ -76,7 +76,7 @@ def use_item_on(b_eyes, b_arms, target_1, target_2):
     b_arms.click_here(targets_2, targets_1[0], rad=11)
     b_arms.click_at(targets_1[0], rad=11)
 
-
+# Attempts to locate and click on an image within an image
 def click_on_image(bot_brain, bot_arms, bot_eyes, target, refresh=True):
     if refresh:
         bot_update(bot_brain, bot_eyes)
@@ -84,8 +84,8 @@ def click_on_image(bot_brain, bot_arms, bot_eyes, target, refresh=True):
     target = random.choice(target)
     bot_arms.click_at(target)
 
-
-def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20, range=20):
+# Attempts to click on a color on the screen closest to the center of the image, if provided a target will try to click on the color near the target
+def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20, range=20, use_target=False, c_target=(0,0)):
     bot_update(bot_brain, bot_eyes)
     # min 0
     [b, g, r] = color
@@ -93,15 +93,15 @@ def click_on_color(bot_brain, bot_arms, bot_eyes, color, shade=20, range=20):
     # max 255
     color_upper = [min(b+shade, 255), min(g+shade, 255), min(r+shade, 255)]
 
-    print(color_lower)
-    print(color_upper)
+    # print(color_lower)
+    # print(color_upper)
     # purple = [([240, 0, 160], [255, 0, 200])]
-    point = bot_eyes.locate_cluster(boundaries=[(color_lower, color_upper)], cluster_dist=range)
+    point = bot_eyes.locate_cluster(boundaries=[(color_lower, color_upper)], cluster_dist=range, use_target=use_target, c_target=c_target)
     # locate cluster will return the point closest to the center of the client
-    bot_arms.click_at(point)
+    bot_arms.click_at(point, 9)
     # bot_arms.move_mouse(point)
 
-
+# Checks if a color is near a target point
 def color_is_close(bot_brain, bot_eyes, color, shade=10, dist=40, range=300):
     bot_update(bot_brain, bot_eyes)
     # min 0
@@ -113,14 +113,24 @@ def color_is_close(bot_brain, bot_eyes, color, shade=10, dist=40, range=300):
     print(color_lower)
     print(color_upper)
     point = bot_eyes.locate_cluster(boundaries=[(color_lower, color_upper)], cluster_dist=range)
-    if math.dist(bot_eyes.global_center, point) < range:
+    if len(point) == 2 and math.dist(bot_eyes.global_center, point) < range:
         return True
     return False
 
+# Basically the function above
+def check_color(bot_b, bot_e, bot_color):
+    b = color_is_close(bot_b, bot_e, bot_color)
+    if not b:
+        print('UH OH')
+        return False
+    return True
 
-def mouse_fidgit(bot_brain, bot_arms, bot_eyes, rad=300):
+# moves mouse with additional radius
+def mouse_fidgit(bot_brain, bot_arms, bot_eyes, rad=200):
+    #484x338
     bot_update(bot_brain, bot_eyes)
-    bot_arms.move_mouse(bot_eyes.global_center, rad=rad)
+    goto = [bot_eyes.global_center[0] + 484,  bot_eyes.global_center[1] + 338]
+    bot_arms.move_mouse(goto, rad=rad)
 
 
 #Main

@@ -251,7 +251,7 @@ class BotEyes():
         
 
     # Locates and draws contours around colors defined by the boundaries param - only returns one point
-    def locate_cluster(self, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=40, draw_contours=True, draw_clusters=True, draw_lines=True):
+    def locate_cluster(self, boundaries=[([180, 0, 180], [220, 20, 220])], cluster_dist=40, draw_contours=True, draw_clusters=True, draw_lines=True, use_target=False, c_target=(0,0)):
         _image = copy.deepcopy(self.curr_client)
         # define the list of boundaries
         # loop over the boundaries
@@ -347,7 +347,7 @@ class BotEyes():
                     if self._DEBUG:
                         cv2.circle(img=com_image, center=_c, radius=5, color=(255, 255, 255), thickness=2)
                         cv2.line(com_image, self.local_center, _c, color=(255, 255, 255), thickness=1)
-                    _dist = math.dist(self.local_center, _c)
+                    _dist = math.dist(self.local_center, _c) if use_target else math.dist(c_target, _c)
                     closest_c = _c if _dist < dist_com else closest_c
                     dist_com = _dist if _dist < dist_com else dist_com
             
@@ -377,7 +377,7 @@ class BotEyes():
         img_rgb = copy.deepcopy(self.curr_client) if inv == False else copy.deepcopy(self.curr_inventory)
         try:
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
-            template = cv2.imread('Exodia/images/' + filename, 0)
+            template = cv2.imread(os.getcwd() + '/images/' + filename, 0)
             w, h = template.shape[::-1]
             pt = None
             res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)

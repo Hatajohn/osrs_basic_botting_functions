@@ -48,7 +48,7 @@ class BotArms():
 
 
     # Move and click the mouse at a given position  
-    def click_at(self, point, rad=15):
+    def click_at(self, point, rad=15, duration=0.1):
         if point == []:
             return
         
@@ -59,11 +59,11 @@ class BotArms():
             image = cv2.circle(image, (x, y), radius=rad, color=(0, 0, 255), thickness=2)
             Env.debug_view(image, title='Moving the mouse here')
 
-        self.move_mouse(point)
-        b = random.uniform(0.05, 0.09)
+        self.move_mouse(point, duration)
+        b = random.uniform(0.03, 0.05)
         time.sleep(b)
         pyautogui.click()
-        b = random.uniform(0.05, 0.18)
+        b = random.uniform(0.04, 0.06)
         time.sleep(b)
 
 
@@ -107,7 +107,7 @@ class BotArms():
 
 
     # Move mouse to a point on the screen using Bezier curves
-    def move_mouse(self, point, rad=9):
+    def move_mouse(self, point, rad=9, duration=0.1):
         point = Env.pick_point_in_circle(point, rad)
         b = random.uniform(0.07, 0.284)
         # Move the mouse
@@ -121,7 +121,6 @@ class BotArms():
         position = pyautogui.position()
         dist = math.dist(position, point)
         rad += int(dist % 5)
-        print(rad)
 
         cp = random.randint(3, 10)  # Number of control points. Must be at least 2.
         x1, y1 = position   # Starting position
@@ -139,19 +138,28 @@ class BotArms():
         x += xr
         y += yr
 
-        # Approximate using Bezier spline.
-        degree = 3 if cp > 3 else cp - 1  # Degree of b-spline. 3 is recommended.
-                                        # Must be less than number of control points.
-        tck, u = interpolate.splprep([x, y], k=degree)
-        # Move upto a certain number of points
-        u = np.linspace(0, 1, num=2+int(math.dist([x1,y1],[x2,y2])/50.0))
-        points = interpolate.splev(u, tck)
+        list_length = 0
+        try:
+            # Approximate using Bezier spline.
+            degree = 3 if cp > 3 else cp - 1  # Degree of b-spline. 3 is recommended.
+                                            # Must be less than number of control points.
+            tck, u = interpolate.splprep([x, y], k=degree)
+            # Move upto a certain number of points
+            u = np.linspace(0, 1, num=2+int(math.dist([x1,y1],[x2,y2])/50.0))
+            points = interpolate.splev(u, tck)
+            list_length = len(points)
 
-        # Move mouse.
-        duration = 0.1
-        timeout = duration / len(points[0])
-        point_list=zip(*(i.astype(int) for i in points))
-        pick_tween = random.choice([pyautogui.easeInQuad, pyautogui.easeOutQuad, pyautogui.easeOutElastic, pyautogui.easeInBounce, pyautogui.easeInElastic])
+            # Move mouse.
+            point_list=zip(*(i.astype(int) for i in points))
+            pick_tween = random.choice([pyautogui.easeInQuad, pyautogui.easeOutQuad, pyautogui.easeOutElastic, pyautogui.easeInBounce, pyautogui.easeInElastic])
+        except:
+            #Something went wrong, just send it to the destination
+            print('Move_to errored, sending to destination')
+            point_list = [point]
+            list_length = 1
+            pick_tween = None
+
+        timeout = duration / list_length
         for point in point_list:
             #print('Moving to ', *point, ' with duration ', duration)
             pyautogui.moveTo(*point, tween=pick_tween)
