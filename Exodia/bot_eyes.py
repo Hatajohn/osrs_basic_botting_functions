@@ -8,15 +8,33 @@ import bot_env as Env
 import copy
 import pytesseract
 import os
+import shutil
+
+
+def resolve_tesseract_cmd(explicit=None):
+    """Prefer explicit arg, then EXODIA_TESSERACT_CMD, then PATH, then 'tesseract'."""
+    if explicit:
+        return explicit
+    env = os.environ.get("EXODIA_TESSERACT_CMD", "").strip()
+    if env:
+        return env
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    return "tesseract"
 
 
 # This class handles object recognition and the images required for the rest of the bot to function
 class BotEyes():
-    def __init__(self, win_rect=[], DEBUG=False):
-        # Relative path to the tesseract executable
-        self.tesseract_path = r'..\\..\\Tesseract-OCR\\tesseract.exe'
-        if not os.path.exists(self.tesseract_path):
-            print('Path of the file is Invalid')
+    def __init__(self, win_rect=[], DEBUG=False, tesseract_cmd=None):
+        self.tesseract_path = resolve_tesseract_cmd(tesseract_cmd)
+        pytesseract.pytesseract.tesseract_cmd = self.tesseract_path
+        _ok = os.path.isfile(self.tesseract_path) or shutil.which(self.tesseract_path) is not None
+        if not _ok:
+            print(
+                "Warning: Tesseract may be missing (%r). Set EXODIA_TESSERACT_CMD or install tesseract-ocr."
+                % (self.tesseract_path,)
+            )
         # Inventory location in a client screenshot -> easier for image recognition and future screenshots
         self.inventory_rect = None
 

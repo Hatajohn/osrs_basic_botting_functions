@@ -1,7 +1,8 @@
 # Imports
 import time
 
-# Handles the runtime of the bot session
+# Handles the runtime of the bot session.
+# For less rigid timing between cycles, consider bot_env.human_pause() when driving update loops.
 class BotLegs():
     # Constructor
     def __init__(self, mods=[], DEBUG=False):

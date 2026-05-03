@@ -7,6 +7,16 @@ import random
 import numpy as np
 
 
+def human_pause(base_seconds, jitter_ratio=0.35):
+    """Sleep base_seconds +/- random jitter (0 .. jitter_ratio*base). Keeps pacing less uniform."""
+    if base_seconds <= 0:
+        return
+    span = base_seconds * jitter_ratio
+    low = max(0.0, base_seconds - span)
+    high = base_seconds + span
+    time.sleep(random.uniform(low, high))
+
+
 # Expects a tuple[x1,y1,x2,y2], requires a value for cover_name if viewing an image in monitor
 def screen_image(rect=None, name='BotEnv_Screenshot', DEBUG=False):
     if rect == None:
