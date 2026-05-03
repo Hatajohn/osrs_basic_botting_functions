@@ -1,5 +1,11 @@
 # Issues and notes
 
+## Exodia BotLegs / Task
+
+- **`update_all`** and **`Task.run`** use **`except Exception`** and print **`repr(e)`** (no bare `except`).
+- **`bot_loop`**: runs while elapsed wall time **\< `_max`** ms (fixed inverted condition). **`_t`** = minimum **milliseconds** between **`update_all`** ticks; use **`_t = 600`** (~0.6 s) if you want tick-ish cadence, or **`int(Env.PERF_TICK_S * 1000)`**.
+- **`Task.run`** invokes **`getattr(self._object, self._func)`** with **`*_params`** when params is a non-empty list/tuple.
+
 ## Repo-root skill scripts (not ported in bulk)
 
 These files still **`import win32gui`** and duplicate window setup. They will **fail on Linux** until refactored to use **`core.findWindow`** or **Exodia `BotBrain`**:

@@ -1,10 +1,45 @@
-from PIL import ImageGrab
+from __future__ import annotations
+
+import os
 import cv2
 import time
 import math
-import copy
 import random
 import numpy as np
+from typing import Dict, Iterable, Optional, Tuple, Union
+
+from PIL import ImageGrab
+
+# OSRS server/client tick ~0.6s; align sense/act loops when simulating tick fidelity.
+PERF_TICK_S = 0.6
+
+Rect = Union[List[int], Tuple[int, int, int, int]]
+
+
+def _capture_backend() -> str:
+    return (os.environ.get("EXODIA_CAPTURE_BACKEND") or "pil").strip().lower()
+
+
+def _grab_bgr_pil(left: int, top: int, w: int, h: int) -> np.ndarray:
+    bbox = (left, top, left + w, top + h)
+    shot = ImageGrab.grab(bbox=bbox)
+    return cv2.cvtColor(np.asarray(shot), cv2.COLOR_RGB2BGR)
+
+
+def _grab_bgr_mss(left: int, top: int, w: int, h: int) -> np.ndarray:
+    import mss
+
+    with mss.mss() as sct:
+        region = {"left": left, "top": top, "width": w, "height": h}
+        raw = sct.grab(region)
+        frame = np.asarray(raw)  # BGRA
+        return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+
+def _grab_bgr(left: int, top: int, w: int, h: int) -> np.ndarray:
+    if _capture_backend() == "mss":
+        return _grab_bgr_mss(left, top, w, h)
+    return _grab_bgr_pil(left, top, w, h)
 
 
 def human_pause(base_seconds, jitter_ratio=0.35):
@@ -17,64 +52,77 @@ def human_pause(base_seconds, jitter_ratio=0.35):
     time.sleep(random.uniform(low, high))
 
 
-# Expects a tuple[x1,y1,x2,y2], requires a value for cover_name if viewing an image in monitor
-def screen_image(rect=None, name='BotEnv_Screenshot', DEBUG=False):
-    if rect == None:
-        [left, top, right, bottom] = [0, 0, 1920, 1080]
+def screen_image(
+    rect: Optional[Rect] = None, name: str = "BotEnv_Screenshot", DEBUG: bool = False
+):
+    """
+    Capture BGR image. ``rect`` is [left, top, width, height] in screen coordinates.
+    Set ``EXODIA_CAPTURE_BACKEND=mss`` for mss (often faster on Linux); default ``pil``.
+    """
+    if rect is None:
+        left, top, w, h = 0, 0, 1920, 1080
     else:
-        [left, top, right, bottom] = rect
+        left, top, w, h = rect[0], rect[1], rect[2], rect[3]
 
-    #bbox has a different order of dimensions than GetWindowRect, right+left,etc, because right and bottom are w/h, not locations
-    my_screenshot = ImageGrab.grab(bbox=(left, top, right+left, bottom+top))
-
-     # Convert to a format cv2 can use
-    image = cv2.cvtColor(np.asarray(my_screenshot), cv2.COLOR_RGB2BGR)
+    image = _grab_bgr(int(left), int(top), int(w), int(h))
 
     if DEBUG:
         debug_view(image, title=name)
 
-    # return image
-    return image    
+    return image
 
 
-# Resizes a given image by a integer percentage (like 70), helpful for viewing the entirety of a screenshot
+def screen_image_fast(
+    rect: Rect, name: str = "BotEnv_Fast", DEBUG: bool = False
+):
+    """Alias for :func:`screen_image` (same backend switch); use for clarity at call sites."""
+    return screen_image(rect=rect, name=name, DEBUG=DEBUG)
+
+
+def screen_regions(
+    regions: Iterable[Tuple[str, Rect]],
+    debug: bool = False,
+) -> Dict[str, np.ndarray]:
+    """
+    Capture multiple ROIs in one tick without duplicating full-client logic.
+    ``regions`` is (label, [left, top, w, h]) screen-coordinate rectangles.
+    """
+    out: Dict[str, np.ndarray] = {}
+    for label, rect in regions:
+        r = [rect[0], rect[1], rect[2], rect[3]]
+        out[label] = screen_image(rect=r, name=label if debug else "BotEnv_roi", DEBUG=debug)
+    return out
+
+
 def resize_image(image, scale_percent):
     width = int(image.shape[1] * scale_percent / 100)
     height = int(image.shape[0] * scale_percent / 100)
     dim = (width, height)
-    return cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+    return cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
 
 
-# Given the client image, covers the client name -> no longer needed
 def block_name(image, corner=None):
-    if corner != None:
+    if corner is not None:
         return cv2.rectangle(image, [corner[0], corner[1], 500, 20], color=(0, 0, 0), thickness=-1)
     return cv2.rectangle(image, [0, 0, 500, 25], color=(0, 0, 0), thickness=-1)
 
 
-# Opens a scaled-down view of a given image for debugging
 def debug_view(img, title="Debug Screenshot", scale=60):
-    image = copy.deepcopy(img)
+    arr = np.asarray(img, dtype=np.uint8)
+    image = arr.copy()
     image = resize_image(image, scale)
     cv2.imshow(title, np.hstack([image]))
     cv2.waitKey(0)
-    # Wait for the image to close
     time.sleep(0.5)
 
 
-# Divides a circle into tiered areas-> visualize an archery target
-# Most of the points should fall towards the center
 def pick_point_in_circle(point, rad=15):
-    # Pick a point inside the circle defined by the center and the radius
-    # random angle
     alpha = 2 * math.pi * random.random()
 
-    # random radius
     u = random.random()
     v = random.random()
     r = min(rad, abs(rad * (1 - u if u > 0.6 else 1 - v)))
 
-    # calculating coordinates
     x = int(r * math.cos(alpha) + point[0])
     y = int(r * math.sin(alpha) + point[1])
 

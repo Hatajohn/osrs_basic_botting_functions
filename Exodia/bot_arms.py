@@ -9,6 +9,32 @@ import math
 import random
 import sys
 
+# Mild tweens only (no elastic/bounce — they overshoot and risk dense-UI misclicks).
+_TWEENS_TIGHT = (
+    pyautogui.easeInOutQuad,
+    pyautogui.easeInQuad,
+    pyautogui.easeOutQuad,
+)
+_TWEENS_NORMAL = _TWEENS_TIGHT + (pyautogui.easeInCubic, pyautogui.easeOutCubic)
+_SAFE_EXTRA = getattr(pyautogui, "easeInOutCubic", pyautogui.easeInOutQuad)
+_TWEENS_OPEN = _TWEENS_NORMAL + (_SAFE_EXTRA,)
+
+
+def _bezier_rnd_max(rad: int, dist: float, move_profile: str) -> int:
+    if move_profile == "tight":
+        return min(20, max(2, rad // 2))
+    if move_profile == "open":
+        return min(40, max(6, rad + int(dist % 10)))
+    return min(20, max(3, (rad * 2) // 3 + int(dist % 7)))
+
+
+def _tween_pool(move_profile: str):
+    if move_profile == "tight":
+        return _TWEENS_TIGHT
+    if move_profile == "open":
+        return _TWEENS_OPEN
+    return _TWEENS_NORMAL
+
 
 # This file is for the mouse movements and actions required for the bot to interact with the client
 class BotArms():
@@ -30,7 +56,7 @@ class BotArms():
 
     # takes an array of points, a center point used to find the closest distance, 
     # the win_rect, and then moves and clicks the mouse at about the specified point
-    def click_here(self, points, center, rad=15):
+    def click_here(self, points, center, rad=15, move_profile="tight"):
         if points == []:
             return
         _dist = sys.maxsize
@@ -43,12 +69,11 @@ class BotArms():
                 _dist = dist
                 point = p
 
-        # Pick a point and click at
-        self.click_at(point, rad=rad)
+        self.click_at(point, rad=rad, move_profile=move_profile)
 
 
     # Move and click the mouse at a given position  
-    def click_at(self, point, rad=15, duration=0.1):
+    def click_at(self, point, rad=15, duration=0.1, move_profile="tight"):
         if point == []:
             return
         
@@ -59,7 +84,7 @@ class BotArms():
             image = cv2.circle(image, (x, y), radius=rad, color=(0, 0, 255), thickness=2)
             Env.debug_view(image, title='Moving the mouse here')
 
-        self.move_mouse(point, duration)
+        self.move_mouse(point, rad=rad, duration=duration, move_profile=move_profile)
         b = random.uniform(0.03, 0.05)
         time.sleep(b)
         pyautogui.click()
@@ -79,7 +104,7 @@ class BotArms():
             # Adjust for global coordinates
             x = p[0] + rect[0]
             y = p[1] + rect[1]
-            self.move_mouse([x, y], rad)
+            self.move_mouse([x, y], rad=rad, move_profile="tight")
             b = random.uniform(0.05, 0.09)
             pyautogui.click(duration=b)
             b = random.uniform(0.05, 0.09)
@@ -107,31 +132,27 @@ class BotArms():
 
 
     # Move mouse to a point on the screen using Bezier curves
-    def move_mouse(self, point, rad=9, duration=0.1):
+    # move_profile: "tight" (default, dense UI), "normal", "open" (sparse / camera drags)
+    def move_mouse(self, point, rad=9, duration=0.1, move_profile="tight"):
         point = Env.pick_point_in_circle(point, rad)
-        b = random.uniform(0.07, 0.284)
-        # Move the mouse
         if self._DEBUG:
             debug_image = Env.screen_image([0, 0, 1920, 1040])
             debug_image = cv2.circle(debug_image, point, radius=10, color=(0,255,0), thickness=-1)
             print('XY: ', point)
             Env.debug_view(debug_image, "Center vs move point")
         
-        # Get current position in order to determine how much variance to add to the ending position
         position = pyautogui.position()
         dist = math.dist(position, point)
-        rad += int(dist % 5)
+        rad_eff = rad + int(dist % 5)
 
-        cp = random.randint(3, 10)  # Number of control points. Must be at least 2.
-        x1, y1 = position   # Starting position
-        x2, y2 = point      # Ending position
+        cp = random.randint(3, 10)
+        x1, y1 = position
+        x2, y2 = point
 
-        # Distribute control points between start and destination evenly.
         x = np.linspace(x1, x2, num=cp, dtype='int')
         y = np.linspace(y1, y2, num=cp, dtype='int')
 
-        # Randomise inner points a bit (+-RND at most).
-        RND = 20
+        RND = _bezier_rnd_max(rad_eff, dist, move_profile)
         xr = [random.randint(-RND, RND) for k in range(cp)]
         yr = [random.randint(-RND, RND) for k in range(cp)]
         xr[0] = yr[0] = xr[-1] = yr[-1] = 0
@@ -139,30 +160,25 @@ class BotArms():
         y += yr
 
         list_length = 0
+        pick_tween = None
         try:
-            # Approximate using Bezier spline.
-            degree = 3 if cp > 3 else cp - 1  # Degree of b-spline. 3 is recommended.
-                                            # Must be less than number of control points.
+            degree = 3 if cp > 3 else cp - 1
             tck, u = interpolate.splprep([x, y], k=degree)
-            # Move upto a certain number of points
             u = np.linspace(0, 1, num=2+int(math.dist([x1,y1],[x2,y2])/50.0))
             points = interpolate.splev(u, tck)
-            list_length = len(points)
+            list_length = len(points[0])
 
-            # Move mouse.
-            point_list=zip(*(i.astype(int) for i in points))
-            pick_tween = random.choice([pyautogui.easeInQuad, pyautogui.easeOutQuad, pyautogui.easeOutElastic, pyautogui.easeInBounce, pyautogui.easeInElastic])
-        except:
-            #Something went wrong, just send it to the destination
+            point_list = zip(*(i.astype(int) for i in points))
+            pick_tween = random.choice(_tween_pool(move_profile))
+        except Exception:
             print('Move_to errored, sending to destination')
             point_list = [point]
             list_length = 1
             pick_tween = None
 
-        timeout = duration / list_length
-        for point in point_list:
-            #print('Moving to ', *point, ' with duration ', duration)
-            pyautogui.moveTo(*point, tween=pick_tween)
+        timeout = duration / max(list_length, 1)
+        for pt in point_list:
+            pyautogui.moveTo(*pt, tween=pick_tween)
             time.sleep(timeout)
         
 
@@ -173,7 +189,7 @@ class BotArms():
         print('DRAG TO ', drag_to)
         # Move mouse to center of the client screen
         # move_to = pick_point_in_circle(center, rad) -> pass the point
-        self.move_mouse(center)
+        self.move_mouse(center, move_profile="open")
         # Hold middle mouse and drag
         b = random.uniform(0.6, 1.0)
         drag_to = Env.pick_point_in_circle(drag_to, rad=rad)

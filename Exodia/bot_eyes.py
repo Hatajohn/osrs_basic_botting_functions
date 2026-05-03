@@ -24,6 +24,28 @@ def resolve_tesseract_cmd(explicit=None):
     return "tesseract"
 
 
+def run_ocr(
+    roi_bgr,
+    psm=None,
+    whitelist=None,
+    scale=None,
+):
+    """
+    Central OCR hook: optional downscale, PSM, whitelist. Call per ROI to stay tick-budget friendly.
+    ``scale``: if set (e.g. 0.5), resize ROI before OCR for speed.
+    """
+    img = roi_bgr
+    if scale is not None and 0 < scale < 1.0:
+        img = cv2.resize(img, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    parts = []
+    if psm is not None:
+        parts.append("--psm %d" % int(psm))
+    if whitelist:
+        parts.append("-c tessedit_char_whitelist=%s" % whitelist)
+    config = " ".join(parts)
+    return pytesseract.image_to_string(img, config=config).strip()
+
+
 # This class handles object recognition and the images required for the rest of the bot to function
 class BotEyes():
     def __init__(self, win_rect=[], DEBUG=False, tesseract_cmd=None):
@@ -120,23 +142,33 @@ class BotEyes():
 
 
     # Locate the inventory on the client screen and returns the corners
-    def find_inventory(self, threshold=0.7):
+    # search_roi: optional [x, y, w, h] within client image to limit matchTemplate cost
+    def find_inventory(self, threshold=0.7, search_roi=None):
         self.check_client()
         image = copy.deepcopy(self.curr_client)
         image_gray = cv2.cvtColor(copy.deepcopy(image), cv2.COLOR_BGR2GRAY)
+        off_x, off_y = 0, 0
+        if search_roi is not None and len(search_roi) == 4:
+            sx, sy, sw, sh = search_roi
+            sx, sy, sw, sh = int(sx), int(sy), int(sw), int(sh)
+            h0, w0 = image_gray.shape[:2]
+            sx = max(0, min(sx, w0 - 1))
+            sy = max(0, min(sy, h0 - 1))
+            sw = max(1, min(sw, w0 - sx))
+            sh = max(1, min(sh, h0 - sy))
+            image_gray = image_gray[sy : sy + sh, sx : sx + sw]
+            off_x, off_y = sx, sy
         template = cv2.imread('images/ui_icons.png', 0)
         w, h = template.shape[::-1]
         pt = None
         res = cv2.matchTemplate(image_gray, template, cv2.TM_CCOEFF_NORMED)
 
         loc = np.where(res >= threshold)
-        # print('LOC: ', len(loc))
         for pt in zip(*loc[::-1]):
             cv2.rectangle(image_gray, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
-            # cv2.circle(image, pt, radius=10, color=(255,0,0), thickness=2)
         try:
             #182x255
-            self.inventory_rect = [pt[0]+20, pt[1]+35, 182, 255]
+            self.inventory_rect = [pt[0] + off_x + 20, pt[1] + off_y + 35, 182, 255]
             self.inventory_global = [self.inventory_rect[0] + self.client_rect[0], self.inventory_rect[1] + self.client_rect[1], self.inventory_rect[2], self.inventory_rect[3]]
             if self._DEBUG:
                 cv2.rectangle(image, self.inventory_rect, (0, 0, 255), 2)
@@ -391,10 +423,22 @@ class BotEyes():
         
 
     # Similar to using 'substring in string', but with images
-    def locate_image(self, inv=False, filename='', threshold=0.8, name='Screenshot'):
+    # search_roi: optional [x, y, w, h] within img_gray to search (client or inventory space)
+    def locate_image(self, inv=False, filename='', threshold=0.8, name='Screenshot', search_roi=None):
         img_rgb = copy.deepcopy(self.curr_client) if inv == False else copy.deepcopy(self.curr_inventory)
         try:
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
+            off_x, off_y = 0, 0
+            if search_roi is not None and len(search_roi) == 4:
+                sx, sy, sw, sh = (int(search_roi[i]) for i in range(4))
+                h0, w0 = img_gray.shape[:2]
+                sx = max(0, min(sx, w0 - 1))
+                sy = max(0, min(sy, h0 - 1))
+                sw = max(1, min(sw, w0 - sx))
+                sh = max(1, min(sh, h0 - sy))
+                img_gray = img_gray[sy : sy + sh, sx : sx + sw]
+                img_rgb = img_rgb[sy : sy + sh, sx : sx + sw]
+                off_x, off_y = sx, sy
             template = cv2.imread(os.getcwd() + '/images/' + filename, 0)
             w, h = template.shape[::-1]
             pt = None
@@ -409,8 +453,9 @@ class BotEyes():
                     cv2.rectangle(img_rgb, pt, (pt[0] + w, pt[1] + h), (255, 0, 0), thickness=1)
                 if mask[pt[1] + int(round(h/2)), pt[0] + int(round(w/2))] != 255:
                     mask[pt[1]:pt[1]+h, pt[0]:pt[0]+w] = 255
-                    # An array of points
-                    items.append([pt[0] + math.floor(w/2) + (self.inventory_global[0] if inv else self.client_rect[0]), pt[1] + math.floor(h/2) + (self.inventory_global[1] if inv else self.client_rect[1])])
+                    gcx = pt[0] + off_x + math.floor(w/2) + (self.inventory_global[0] if inv else self.client_rect[0])
+                    gcy = pt[1] + off_y + math.floor(h/2) + (self.inventory_global[1] if inv else self.client_rect[1])
+                    items.append([gcx, gcy])
                     if self._DEBUG:
                         cv2.circle(img_rgb, (pt[0]+math.floor(w/2), pt[1]+math.floor(h/2)), radius=min(math.floor(w/3), math.floor(h/3)), color=(0,255,0), thickness=1)
             if self._DEBUG:
@@ -419,7 +464,7 @@ class BotEyes():
                 return items
             print('Locate image could not find the image ', filename)
             return []
-        except:
+        except Exception:
             print('Locate image failed!')
             return []
         

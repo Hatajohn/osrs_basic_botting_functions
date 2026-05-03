@@ -9,7 +9,7 @@ Living notes for the `feature/linux-exodia-wslg` work. Keep in sync with code ch
 | [exodia_linux_eyes_tesseract.md](exodia_linux_eyes_tesseract.md) | `BotEyes` + Tesseract resolution |
 | [exodia_requirements_linux.md](exodia_requirements_linux.md) | `requirements-linux.txt` vs Windows pins |
 | [root_core_linux.md](root_core_linux.md) | Repo-root `core.py` + import path to `Exodia/window_tool` |
-| [automation_quality.md](automation_quality.md) | Human-like pacing helper (`human_pause`) |
+| [input_safety.md](input_safety.md) | Tick pacing, `move_profile` (tight/normal/open), misclick envelope |
 | [git.md](git.md) | Branch name + Step 0 reminders |
 | [issues_and_notes.md](issues_and_notes.md) | Skill scripts still using `win32gui`, WSLg caveats |
 

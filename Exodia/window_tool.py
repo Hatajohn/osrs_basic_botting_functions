@@ -46,6 +46,17 @@ def linux_search_window_id(title_substring: str, only_visible: bool = True) -> O
     return None
 
 
+def linux_window_name(wid: int) -> Optional[str]:
+    """Return window title for ``wid``, or None if invalid / gone."""
+    if not xdotool_available():
+        return None
+    cp = _run(["xdotool", "getwindowname", str(wid)])
+    if cp.returncode != 0:
+        return None
+    name = (cp.stdout or "").strip()
+    return name if name else None
+
+
 def linux_window_geometry(wid: int) -> Optional[Geo]:
     """Screen (X, Y, width, height) from ``xdotool getwindowgeometry --shell``."""
     cp = _run(["xdotool", "getwindowgeometry", "--shell", str(wid)])
