@@ -6,7 +6,8 @@ import time
 import math
 import random
 import numpy as np
-from typing import Dict, Iterable, Optional, Tuple, Union
+import mss
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 from PIL import ImageGrab
 
@@ -17,7 +18,8 @@ Rect = Union[List[int], Tuple[int, int, int, int]]
 
 
 def _capture_backend() -> str:
-    return (os.environ.get("EXODIA_CAPTURE_BACKEND") or "pil").strip().lower()
+    # mss is required (see requirements); set EXODIA_CAPTURE_BACKEND=pil to use PIL only.
+    return (os.environ.get("EXODIA_CAPTURE_BACKEND") or "mss").strip().lower()
 
 
 def _grab_bgr_pil(left: int, top: int, w: int, h: int) -> np.ndarray:
@@ -27,8 +29,6 @@ def _grab_bgr_pil(left: int, top: int, w: int, h: int) -> np.ndarray:
 
 
 def _grab_bgr_mss(left: int, top: int, w: int, h: int) -> np.ndarray:
-    import mss
-
     with mss.mss() as sct:
         region = {"left": left, "top": top, "width": w, "height": h}
         raw = sct.grab(region)
@@ -57,7 +57,7 @@ def screen_image(
 ):
     """
     Capture BGR image. ``rect`` is [left, top, width, height] in screen coordinates.
-    Set ``EXODIA_CAPTURE_BACKEND=mss`` for mss (often faster on Linux); default ``pil``.
+    Default backend is **mss**; set ``EXODIA_CAPTURE_BACKEND=pil`` for PIL/ImageGrab only.
     """
     if rect is None:
         left, top, w, h = 0, 0, 1920, 1080
