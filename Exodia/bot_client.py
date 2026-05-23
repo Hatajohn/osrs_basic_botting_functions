@@ -11,14 +11,14 @@ else:
     win32gui = None  # type: ignore
 
 
-class BotBrain:
+class ClientWindow:
+    """Find and track the RuneLite window; exposes ``win_rect`` for Eyes and capture alignment."""
 
     def __init__(self, DEBUG=False, window_title_substring="RuneLite"):
         self.runelite = window_title_substring
         self.id = None
         self.win_rect = []
         self._DEBUG = DEBUG
-        # Rate-limit geometry queries (xdotool / extra Win32 work) on rapid update() calls
         self._geom_min_interval = float(
             __import__("os").environ.get("EXODIA_GEOM_MIN_INTERVAL", "0.15")
         )
@@ -86,9 +86,15 @@ class BotBrain:
 
         wid = Wt.linux_search_window_id(self.runelite)
         if wid is None:
-            raise RuneLiteNotFoundException(
-                "RuneLite window not found (xdotool search --name %r)." % (self.runelite,)
-            )
+            hint = (
+                "RuneLite window not found (xdotool search --name %r).\n"
+                "  • Is RuneLite open and visible?\n"
+                "  • On WSL: the Linux client must run under WSLg (Windows RuneLite is invisible to xdotool).\n"
+                "  • List windows: python -m SacredEelFishing.sacred_eel_fishing --list-windows\n"
+                "  • Manual rect: python -m SacredEelFishing.sacred_eel_fishing --rect LEFT,TOP,WIDTH,HEIGHT\n"
+                "    (use capture_runelite_once.py --capture-backend wsl_ps to find coords on WSL+Windows)"
+            ) % (self.runelite,)
+            raise RuneLiteNotFoundException(hint)
         self.id = wid
         Wt.linux_activate_move_resize(wid, 0, 0, 865, 830)
         self._last_geom_mono = time.monotonic()
@@ -120,7 +126,7 @@ class BotBrain:
             if self._DEBUG:
                 print("GET WINDOW RECT: ", self.win_rect)
                 image = Env.screen_image(self.win_rect)
-                Env.debug_view(image, title="BotBrain Debug get_window_rect")
+                Env.debug_view(image, title="ClientWindow Debug get_window_rect")
             return True
         except Exception:
             return False
@@ -128,3 +134,19 @@ class BotBrain:
 
 class RuneLiteNotFoundException(Exception):
     pass
+
+
+class FixedClientWindow:
+    """Use a known screen rect when automatic window search fails (``--rect``)."""
+
+    def __init__(self, win_rect: list):
+        self.runelite = "fixed"
+        self.id = "fixed"
+        self.win_rect = [int(v) for v in win_rect]
+        self._DEBUG = False
+
+    def update(self):
+        return True
+
+    def get_window_rect(self):
+        return True

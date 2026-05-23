@@ -6,12 +6,12 @@ import bot_arms as Arms
 import time
 import random
 
-iter = 0.1
+pause_seconds = 0.1
 
 #Main
 if __name__ == "__main__":
     # Initialize bot objects
-    [bot_b, bot_e, bot_a] = Actions.bot_init()
+    [client, bot_e, bot_a] = Actions.bot_init()
 
     total_iter = 0
     duration=0.05

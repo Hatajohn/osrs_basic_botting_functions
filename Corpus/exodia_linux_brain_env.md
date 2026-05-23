@@ -18,7 +18,7 @@
 
 ## bot_env
 
-- **`PERF_TICK_S = 0.6`** — OSRS tick hint for loop authors; align sense/act when you care about tick fidelity.
+- **`PERF_TICK_S`** — aliases **`constants.OSRS_TICK_S`** (~**0.6** s OSRS tick). Scripts may **`import constants`** for tick timing without importing **`bot_env`**.
 - **`EXODIA_CAPTURE_BACKEND`**: **`mss`** (default, listed in requirements) or **`pil`** for PIL/ImageGrab only (same `rect` contract `[left, top, w, h]`).
 - **`screen_image` / `screen_image_fast`**: BGR output; **`screen_regions([("label", rect), ...])`** → `dict` of label → image for multi-ROI single-tick grabs.
 - **`human_pause`**: short variable sleeps (flow-friendly).

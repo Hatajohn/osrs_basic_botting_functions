@@ -1,4 +1,5 @@
-# Importsenv
+# Imports
+import os
 import bot_env as Env
 import numpy as np
 import cv2
@@ -8,6 +9,7 @@ import time
 import math
 import random
 import sys
+from typing import Sequence
 
 # Mild tweens only (no elastic/bounce — they overshoot and risk dense-UI misclicks).
 _TWEENS_TIGHT = (
@@ -74,17 +76,30 @@ class BotArms():
 
     # Move and click the mouse at a given position  
     def click_at(self, point, rad=15, duration=0.1, move_profile="tight"):
-        if point == []:
+        if point is None or point == []:
             return
-        
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            return
+
+        target = Env.pick_point_in_circle([int(point[0]), int(point[1])], rad)
+
         if self._DEBUG:
-            [x, y] = point
+            x, y = target
             image = Env.screen_image([0, 0, 1920, 1040])
             print('Moving mouse to: ', x, y)
             image = cv2.circle(image, (x, y), radius=rad, color=(0, 0, 255), thickness=2)
             Env.debug_view(image, title='Moving the mouse here')
 
-        self.move_mouse(point, rad=rad, duration=duration, move_profile=move_profile)
+        if Env.input_backend_label() == "wsl_ps":
+            self.move_mouse(target, rad=0, duration=max(0.12, duration), move_profile=move_profile)
+            b = random.uniform(0.03, 0.05)
+            time.sleep(b)
+            Env.wsl_windows_click_current()
+            b = random.uniform(0.04, 0.06)
+            time.sleep(b)
+            return
+
+        self.move_mouse(target, rad=0, duration=duration, move_profile=move_profile)
         b = random.uniform(0.03, 0.05)
         time.sleep(b)
         pyautogui.click()
@@ -92,24 +107,80 @@ class BotArms():
         time.sleep(b)
 
 
+    def drag_at(
+        self,
+        start: Sequence[int],
+        end: Sequence[int],
+        *,
+        rad: int = 8,
+        duration: float = 0.35,
+        move_profile: str = "tight",
+    ) -> None:
+        """Left-click drag from ``start`` to ``end`` (Win32 screen coordinates)."""
+        if start is None or end is None:
+            return
+        if len(start) < 2 or len(end) < 2:
+            return
+
+        start_pt = Env.pick_point_in_circle([int(start[0]), int(start[1])], rad)
+        end_pt = Env.pick_point_in_circle([int(end[0]), int(end[1])], rad)
+
+        if self._DEBUG:
+            image = Env.screen_image([0, 0, 1920, 1040])
+            cv2.circle(image, start_pt, rad, (0, 0, 255), 2)
+            cv2.circle(image, end_pt, rad, (0, 255, 0), 2)
+            cv2.arrowedLine(image, start_pt, end_pt, (255, 255, 0), 2)
+            Env.debug_view(image, title="drag_at")
+
+        if Env.input_backend_label() == "wsl_ps":
+            b = random.uniform(0.03, 0.05)
+            time.sleep(b)
+            self.move_mouse(start_pt, rad=0, duration=0.10, move_profile=move_profile)
+            time.sleep(random.uniform(0.03, 0.05))
+            drag_dist = math.dist(start_pt, end_pt)
+            drag_ms = Env.wsl_move_duration_ms(drag_dist, move_profile, duration)
+            drag_ms = max(140, min(280, drag_ms))
+            Env.wsl_windows_left_drag_from_current(
+                end_pt[0],
+                end_pt[1],
+                duration_ms=drag_ms,
+            )
+            time.sleep(random.uniform(0.06, 0.10))
+            return
+
+        self.move_mouse(start_pt, rad=0, duration=0.08, move_profile=move_profile)
+        time.sleep(random.uniform(0.04, 0.07))
+        pyautogui.mouseDown(button="left")
+        time.sleep(random.uniform(0.05, 0.09))
+        pyautogui.dragTo(
+            end_pt[0],
+            end_pt[1],
+            button="left",
+            duration=max(0.15, duration),
+            _pause=False,
+        )
+        pyautogui.mouseUp(button="left")
+        time.sleep(random.uniform(0.06, 0.10))
+
+
     # Go through the inventory and drop all items based on points passed
     def drop_all(self, points, rect, rad=12):
         if points == []:
             return
-        pyautogui.keyDown('shift')
+        pyautogui.keyDown("shift")
+        try:
+            random.shuffle(points)  # -> Need to come up with an algo for click order
 
-        random.shuffle(points) # -> Need to come up with an algo for click order
-        
-        for p in points:
-            # Adjust for global coordinates
-            x = p[0] + rect[0]
-            y = p[1] + rect[1]
-            self.move_mouse([x, y], rad=rad, move_profile="tight")
-            b = random.uniform(0.05, 0.09)
-            pyautogui.click(duration=b)
-            b = random.uniform(0.05, 0.09)
-            time.sleep(b)
-        pyautogui.keyUp('shift')
+            for p in points:
+                x = p[0] + rect[0]
+                y = p[1] + rect[1]
+                self.move_mouse([x, y], rad=rad, move_profile="tight")
+                b = random.uniform(0.05, 0.09)
+                pyautogui.click(duration=b)
+                b = random.uniform(0.05, 0.09)
+                time.sleep(b)
+        finally:
+            pyautogui.keyUp("shift")
 
 
     # Should clamp n between minn and maxn
@@ -140,7 +211,17 @@ class BotArms():
             debug_image = cv2.circle(debug_image, point, radius=10, color=(0,255,0), thickness=-1)
             print('XY: ', point)
             Env.debug_view(debug_image, "Center vs move point")
-        
+
+        if Env.input_backend_label() == "wsl_ps":
+            try:
+                x1, y1 = Env.wsl_windows_cursor_position()
+                dist = math.dist((x1, y1), point)
+            except RuntimeError:
+                dist = 300.0
+            ms = Env.wsl_move_duration_ms(dist, move_profile, duration)
+            Env.wsl_windows_move_to(int(point[0]), int(point[1]), duration_ms=ms)
+            return
+
         position = pyautogui.position()
         dist = math.dist(position, point)
         rad_eff = rad + int(dist % 5)
@@ -187,18 +268,34 @@ class BotArms():
         # Move the mouse somewhere around the center of the client screen
         print('CENTER ', center)
         print('DRAG TO ', drag_to)
-        # Move mouse to center of the client screen
-        # move_to = pick_point_in_circle(center, rad) -> pass the point
-        self.move_mouse(center, move_profile="open")
-        # Hold middle mouse and drag
         b = random.uniform(0.6, 1.0)
-        drag_to = Env.pick_point_in_circle(drag_to, rad=rad)
-        print('DRAGGING TO ', drag_to)
-        pyautogui.dragTo(drag_to, button='middle', duration=b)
+        start = Env.pick_point_in_circle(center, rad)
+        end = Env.pick_point_in_circle(drag_to, rad=rad)
+        print('DRAGGING TO ', end)
 
+        if Env.input_backend_label() == "wsl_ps":
+            Env.wsl_windows_middle_drag(
+                start[0], start[1], end[0], end[1], duration_ms=int(b * 1000)
+            )
+            return
+
+        self.move_mouse(start, move_profile="open")
+        pyautogui.dragTo(end[0], end[1], button='middle', duration=b)
+
+
+    def _camera_key_rotate(self, direction: str, center) -> None:
+        """Rotate camera by holding an arrow key (OSRS default when not using middle-mouse drag)."""
+        focus = Env.pick_point_in_circle(center, rad=12)
+        hold_ms = Env.camera_arrow_hold_ms()
+        print("CAMERA %s (arrow hold %dms)" % (direction.upper(), hold_ms))
+        Env.send_camera_arrow(direction, focus_xy=(focus[0], focus[1]), hold_ms=hold_ms)
+        time.sleep(random.uniform(0.12, 0.22))
 
     # Pan functions take the global client center and the window dimensions of the client
     def pan_right(self, center, win_rect, y_var=0, rand=False):
+        if Env.camera_rotate_mode() == "keys":
+            self._camera_key_rotate("right", center)
+            return
         if rand:
             r = random.uniform(0.15, 0.90)
             point = [center[0] + math.floor(win_rect[2]/2 * r), center[1]]
@@ -209,6 +306,9 @@ class BotArms():
 
 
     def pan_left(self, center, win_rect, y_var=0, rand=False):
+        if Env.camera_rotate_mode() == "keys":
+            self._camera_key_rotate("left", center)
+            return
         if rand:
             r = random.uniform(0.15, 0.90)
             point = [center[0] - math.floor(win_rect[2]/2 * r), center[1]]
@@ -219,13 +319,13 @@ class BotArms():
 
 
     def pan_up(self, center, win_rect):
-        point = [center[0], center[1] - math.floor(win_rect[3]/2 * 0.90), center[1]]
+        point = [center[0], center[1] - math.floor(win_rect[3] / 2 * 0.90)]
         print('PAN UP TO ', point)
         self.control_camera(center, point)
 
 
     def pan_down(self, center, win_rect):
-        point = [center[0], center[1] + math.floor(win_rect[3]/2 * 0.90), center[1]]
+        point = [center[0], center[1] + math.floor(win_rect[3] / 2 * 0.90)]
         print('PAN DOWN TO ', point)
         self.control_camera(center, point)
 
@@ -233,6 +333,30 @@ class BotArms():
     def pan_to(self, point, center):
         print('PAN TO ', point)
         self.control_camera(center, point)
+
+    def walk_direction(
+        self,
+        center,
+        win_rect,
+        direction: str,
+        *,
+        distance_frac: float = 0.32,
+        click_rad: int = 8,
+    ) -> list:
+        """
+        Click the ground to walk the character (minimap/main view click).
+
+        ``center`` / ``win_rect`` match ``pan_left`` / ``pan_right`` (screen center + client size).
+        """
+        from bot_search import ground_click_target
+
+        if center is None or win_rect is None or len(win_rect) < 4:
+            return []
+        client_rect = [int(win_rect[i]) for i in range(4)]
+        target = ground_click_target(client_rect, center, direction, distance_frac=distance_frac)
+        print("WALK %s -> click ground %s" % (direction.upper(), target))
+        self.click_at(target, rad=click_rad, move_profile="open")
+        return target
 
 
     # THIS DOES NOT WORK

@@ -1,3 +1,25 @@
-exodia/*
-Exodia/*
+# Local Python venv (see OSRSBot_venv.bat: python -m venv exodia)
+exodia/
+
+# PNG safety: live captures/overlays can expose username, chat, inventory, etc.
+# Only one reviewed exception is allowed in git (inventory UI chrome — no game state).
 *.png
+!captures/osrs_inventory_base.png
+
+captures/*
+!captures/osrs_inventory_base.png
+
+# Offline test reference captures are live client screenshots — keep local only
+tests/fixtures/**/*.png
+
+# Item icon templates (no account info — safe to commit)
+items/*
+!items/*.png
+
+# Saved manual client window rect (calibrate_client_rect.py)
+client_rect.json
+
+# Agent harness runtime artifacts (keep logs/README.md tracked)
+logs/*
+!logs/README.md
+sessions/

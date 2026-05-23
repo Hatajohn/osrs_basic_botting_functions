@@ -3,8 +3,15 @@ import time
 
 # Handles the runtime of the bot session.
 # ``_t`` is milliseconds between ``update_all`` / ``run_tasks`` cycles (default 6000).
-# For OSRS tick ~0.6s use e.g. ``600`` or import ``Env.PERF_TICK_S`` and set ``_t = int(Env.PERF_TICK_S * 1000)``.
+# For OSRS tick ~0.6s use e.g. ``600`` or ``import constants; _t = int(constants.OSRS_TICK_S * 1000)`` (same value as ``Env.PERF_TICK_S``).
 class BotLegs():
+    """
+    Activity orchestration: each ``bot_loop`` tick calls ``update_all`` then ``run_tasks``.
+
+    ``to_do`` is **not** cleared automatically—every queued ``Task`` runs again on the next cycle until removed.
+    For agent-driven ticks, queue ``bot_harness.HarnessStepper(harness).tick`` (or keep ``client`` / ``eyes`` in ``mods`` for geometry-only updates).
+    """
+
     # Constructor
     def __init__(self, mods=None, DEBUG=False):
         if mods is None:
@@ -37,6 +44,7 @@ class BotLegs():
         self.to_do.append(Task(object, func, params))
 
     def run_tasks(self):
+        """Run each queued ``Task`` in order; queue is **not** cleared (runs again next cycle)."""
         for task in self.to_do:
             task.run()
 

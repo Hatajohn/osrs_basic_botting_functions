@@ -1,0 +1,116 @@
+{
+  "client_rect_win32": [
+    1,
+    -2,
+    1919,
+    1033
+  ],
+  "inventory_rect_client_local": [
+    1605,
+    601,
+    283,
+    382
+  ],
+  "outline_score": 0.9934477210044861,
+  "grid_validation_score": 67.32361256544503,
+  "grid_layout": {
+    "offset": [
+      30,
+      20
+    ],
+    "tile": [
+      50,
+      45
+    ],
+    "gap": [
+      7,
+      4
+    ],
+    "field": [
+      221,
+      339
+    ]
+  },
+  "slot_0_0": [
+    1635,
+    621,
+    50,
+    45
+  ],
+  "empty_prototype_bgr": [
+    41.079744816586924,
+    53.016746411483254,
+    62.04984051036683
+  ],
+  "occupied_count": 6,
+  "occupancy": [
+    [
+      true,
+      false,
+      true,
+      true
+    ],
+    [
+      false,
+      true,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      true,
+      false
+    ],
+    [
+      false,
+      true,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false
+    ],
+    [
+      false,
+      false,
+      false,
+      false
+    ]
+  ],
+  "occupied_slots": [
+    [
+      0,
+      0
+    ],
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      3
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      3,
+      2
+    ],
+    [
+      4,
+      1
+    ]
+  ]
+}

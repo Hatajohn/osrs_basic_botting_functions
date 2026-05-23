@@ -28,9 +28,6 @@ def linux_search_window_id(title_substring: str, only_visible: bool = True) -> O
     """First window ID whose name contains ``title_substring``."""
     if not xdotool_available():
         return None
-    attempt_vis = [["xdotool", "search", "--name", title_substring]]
-    if only_visible:
-        attempt_vis[0] = ["xdotool", "search", "--onlyvisible", "--name", title_substring]
     for cmd in (
         ["xdotool", "search", "--onlyvisible", "--name", title_substring],
         ["xdotool", "search", "--name", title_substring],
@@ -77,6 +74,24 @@ def linux_window_geometry(wid: int) -> Optional[Geo]:
         return x, y, w, h
     except (KeyError, ValueError):
         return None
+
+
+def linux_list_visible_windows() -> List[Tuple[int, str]]:
+    """Return ``(window_id, title)`` for visible X11 windows (xdotool)."""
+    if not xdotool_available():
+        return []
+    cp = _run(["xdotool", "search", "--onlyvisible", ""])
+    if cp.returncode != 0 or not (cp.stdout or "").strip():
+        return []
+    out: List[Tuple[int, str]] = []
+    for line in cp.stdout.strip().splitlines():
+        try:
+            wid = int(line.strip())
+        except ValueError:
+            continue
+        name = linux_window_name(wid) or ""
+        out.append((wid, name))
+    return out
 
 
 def linux_activate_move_resize(wid: int, gx: int, gy: int, gwidth: int, gheight: int) -> None:

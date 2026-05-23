@@ -7,7 +7,7 @@ import time
 import random
 
 
-def keep_fishing(bot_e, bot_a, bot_l, state):
+def keep_fishing(client, bot_e, bot_a, bot_l, state):
     action = bot_e.get_action_text()
     if action != 0:
         # Figure out why we are not fishing
@@ -36,7 +36,7 @@ def keep_fishing(bot_e, bot_a, bot_l, state):
                 
             print('Looking for eels')
             # Actions.scan_for(bot_e, bot_a, r'infernal_eel_spot.png', method='color', bounds=[([235, 255, 0], [250, 255, 0])])
-            Actions.click_on_color(bot_b, bot_a, bot_e, color=(255, 255 ,0), range=20)
+            Actions.click_on_color(client, bot_a, bot_e, color=(255, 255 ,0), range=20)
             time.sleep(random.randrange(2,5))
         return state
     else:
@@ -46,46 +46,47 @@ def keep_fishing(bot_e, bot_a, bot_l, state):
 
 #Main
 if __name__ == "__main__":
-    [bot_b, bot_e, bot_a] = Actions.bot_init()
-    bot_l = Legs.BotLegs(mods=[bot_b, bot_e])
+    [client, bot_e, bot_a] = Actions.bot_init()
+    bot_l = Legs.BotLegs(mods=[client, bot_e])
     # bot_e.force_debug(True)
 
-    #fishing_task = bot_l.add_task(func='keep_fishing', params=[bot_e, bot_a, bot_l, 'idle'])
-    #bot_l.bot_loop()
+    # fishing_task = bot_l.add_task(func='keep_fishing', params=[client, bot_e, bot_a, bot_l, 'idle'])
+    # bot_l.bot_loop()
 
-    # keep_fishing(bot_e, bot_a, bot_l, 'idle')
-    timer = 6000000
+    # keep_fishing(client, bot_e, bot_a, bot_l, 'idle')
+    # Session wall-clock cap (legacy literal treated as milliseconds).
+    timer_session_ms = 6000000
+    deadline = time.monotonic() + timer_session_ms / 1000.0
+    interval_s = 6.0
 
     cycles = 0
-    end = 0
-    last_time = time.time()
-    delta_time = 0
-    state = 'idle'
-    interval = 6000
     cracking = False
-    _interval = 6000
-    # Something else needs to stop this
-    while(end < timer):
-        curr_time = time.time()
-        # If we have passed the time period, we need to update each object legs is watching
-        if delta_time > interval:
-            cycles += 1
-            Actions.bot_update(bot_b, bot_e)
-            state = bot_e.get_action_text()
-            eels_inv = bot_e.locate_image(filename=r'infernal_eel_fish.png', inv=True, name='Checking inventory')
-            if len(eels_inv) == 0 and cracking:
-                cracking = False
-            if state != 0 and not cracking and len(eels_inv) < 22:
-                Actions.click_on_image(bot_b, bot_a, bot_e, target=r'infernal_eel_fish.png')
-                time.sleep(3)
-            elif len(eels_inv) == 22 or cracking:
-                print('START CRACKING')
-                cracking = True
-                Actions.use_item_on(bot_e, bot_a, r'imcando_hammer.png', r'infernal_eel_fish.png')
-                eels_inv = bot_e.locate_image(filename=r'infernal_eel_fish.png', inv=True, name='Checking inventory')
-                print(len(eels_inv))
-            last_time = time.time()
-            print('Cycles: ', cycles)
-        end += time.time() - last_time
-        delta_time += curr_time - last_time
-    
+    next_cycle = time.monotonic()
+
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now < next_cycle:
+            time.sleep(min(0.005, next_cycle - now))
+            continue
+        next_cycle += interval_s
+
+        cycles += 1
+        Actions.bot_update(client, bot_e)
+        action_code = bot_e.get_action_text()
+        eels_inv = bot_e.locate_image(
+            filename=r"infernal_eel_fish.png", inv=True, name="Checking inventory"
+        )
+        if len(eels_inv) == 0 and cracking:
+            cracking = False
+        if action_code != 0 and not cracking and len(eels_inv) < 22:
+            Actions.click_on_image(client, bot_a, bot_e, target=r"infernal_eel_fish.png")
+            time.sleep(3)
+        elif len(eels_inv) == 22 or cracking:
+            print("START CRACKING")
+            cracking = True
+            Actions.use_item_on(bot_e, bot_a, r"imcando_hammer.png", r"infernal_eel_fish.png")
+            eels_inv = bot_e.locate_image(
+                filename=r"infernal_eel_fish.png", inv=True, name="Checking inventory"
+            )
+            print(len(eels_inv))
+        print("Cycles: ", cycles)

@@ -1,0 +1,314 @@
+# Exodia
+
+Python automation harness for **RuneLite** (OSRS): capture the client window, interpret the screen with OpenCV/Tesseract, and drive mouse/keyboard. The layout is intentionally split so you can hang an **agent** (LLM, planner, or scripted policy) off a single decision API.
+
+## Mental model
+
+| Piece | Module | Role |
+|--------|--------|------|
+| **Client** (window anchor) | `bot_client.py` | Find RuneLite, track `win_rect`, refresh geometry (Win32 or Linux `xdotool`). On Linux, snap resize for stable vision. |
+| **Eyes** | `bot_eyes.py` | Screenshots, ROIs, template/color clustering, OCR (`get_action_text`, `locate_*`). |
+| **Arms** | `bot_arms.py` | Mouse/keyboard: smooth moves, clicks, **`drag_at`**, camera pans. On WSL (`wsl_ps`), paths use single-call linear smoothstep moves — not Bezier, not teleport. |
+| **Inventory detect** | `bot_inventory_detect.py` | Outline template match → panel rect; 4×7 grid; slot occupancy (count items, not identity). |
+| **Game state** | `bot_gamestate.py` | `GameState` dataclass + `build_game_state()` from `BotEyes` (OCR, inventory occupancy). |
+| **Frames** | `bot_frames.py` | Per-tick PNG sidecar writer (world, inventory, action/chat strips). |
+| **Stream** | `bot_stream.py` | MJPEG HTTP publisher (`/stream/playspace_blobs`, `/meta`). |
+| **Capture** | `bot_capture.py` | Decoupled `CaptureProducer` + `VisionProcessor` @ ≥2× OSRS tick rate. |
+| **Track** | `bot_track.py` | Playspace blob motion + centroid IDs (v1). |
+| **Action log** | `bot_action_log.py` | Always-on JSONL + plain-text action log per run. |
+| **Verify** | `bot_verify.py` | Post-action diff of `GameState` snapshots. |
+| **Session** | `bot_session.py` | Optional per-tick PNG + JSON replay (`--session`). |
+| **Calibration** | `bot_calibration.py` | Startup health checks (capture, inventory template). |
+| **Wait / poll** | `bot_wait.py` | `poll_until()` — generic timed condition polling (injectable sleep/stop). |
+| **Action strip UI** | `bot_action_ui.py` | Tri-state action line (0/1/2), predicates, `wait_for_action_code()`. |
+| **Playspace search** | `bot_search.py` | `playspace_search_roi()`, `search_with_camera_pan()`, `click_random_hit()`. |
+| **Spot verification** | `bot_spot_verify.py` | Sacred eel spot template + eel icon + cyan RuneLite outline checks. |
+| **Session events** | `bot_session_events.py` | Per-run JSONL at `logs/<script_id>_events.jsonl`; `log_event()`; disable with `EXODIA_EVENTS=0`. |
+| **Perception status** | `bot_perception_status.py` | `perception_status_from_eyes()` — capture mean, inventory calibration, action code for `runtime_status.json`. |
+| **Runtime control** | `bot_runtime.py`, `exodia_ctl.py` | Poll `logs/runtime_control.json`, publish `logs/runtime_status.json` each tick; `python exodia_ctl.py <cmd>`. |
+| **Agent (“brain”) + runtime** | `bot_harness.py` | `BotBrain` → `BrainCommand`s → `ExodiaHarness.step()`. |
+| **Legs** | `bot_legs.py` | Timed loop: `update_all()` on mods, then `run_tasks()`. |
+| **Runner** | `run_agent.py` | Canonical agent entrypoint. |
+
+**Glue:** `bot_actions.py` — `bot_init`, `bot_update`, composites like `scan_for`, `click_on_image`, `use_item_on`.
+
+Low-level capture/helpers live in **`bot_env.py`**. Linux window helpers in **`window_tool.py`**.
+
+### GameState fields
+
+| Field | Meaning |
+|-------|---------|
+| `action_busy` | `True` when action line is green (skill in progress) |
+| `action_line_text` | OCR text from action strip |
+| `dialogue_text` | OCR from chat strip |
+| `inventory_occupied` | 4×7 bool grid (`True` = item present) |
+| `inventory_item_count` | Count of occupied slots |
+| `inventory_calibrated` | Inventory template matched |
+| `capture_backend` | Active capture backend label |
+| `frame_paths` | Optional sidecar PNG paths when `--session` |
+
+## Agent quickstart
+
+```bash
+cd Exodia
+pip install -r requirements.txt   # or requirements-linux.txt on WSL
+
+# Run reference infernal fishing brain (tick-aligned, action log always on)
+python run_agent.py --brain reference_fishing
+
+# With MJPEG stream + optional session sidecars
+python run_agent.py --brain reference_fishing --stream-port 8765 --session
+```
+
+Open `http://127.0.0.1:8765/` for stream index; `http://127.0.0.1:8765/stream/playspace_blobs` for motion overlay; `/meta` for capture/vision seq lag.
+
+Capture runs on a **separate timer** (default 4 FPS, ≥2× the 600 ms OSRS tick). Vision (`bot_track`) runs in `VisionProcessor`; the harness tick only reads the latest buffer + cache.
+
+### CLI flags (`run_agent.py`)
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--brain` | `reference_fishing` | `reference_fishing` or `idle` |
+| `--stream-port` | `8765` (`0`=off) | MJPEG HTTP port |
+| `--log-dir` | `logs` | Action log root |
+| `--tick-ms` | `600` | Loop interval (OSRS tick) |
+| `--session` | off | Write PNG sidecars to `sessions/` |
+| `--max-ms` | `0` | Wall-clock cap (ms) |
+| `--debug` | off | BotEyes debug |
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `EXODIA_LOG_DIR` | Action log root (default `logs/`) |
+| `EXODIA_STREAM_PORT` | MJPEG port (default `8765`, `0`=disabled) |
+| `EXODIA_CAPTURE_STREAM` | `1` / `0` — enable buffer pipeline (auto when `--stream-port` > 0) |
+| `EXODIA_CAPTURE_FPS` | Capture timer rate (default `4`, min ~3.3 = 2× OSRS tick) |
+| `EXODIA_VISION_FPS` | Vision thread cap (`0` = match capture) |
+| `EXODIA_CAPTURE_STALE_MS` | Sync-grab fallback if buffer older than this (default `600`) |
+| `EXODIA_CAPTURE_BACKEND` | `mss`, `pil`, or `wsl_ps` (WSLg black-frame fix) |
+| `EXODIA_INPUT_BACKEND` | `wsl_ps` (Windows mouse via PowerShell) or `pyautogui`. **Use `wsl_ps` when RuneLite runs on Windows from WSL** — set automatically by `tests/bot_inventory_test.py --online`. |
+| `EXODIA_CAMERA_ROTATE` | `keys` (arrow keys, default) or `drag` (middle-mouse pan) |
+| `EXODIA_CAMERA_KEY_HOLD_MIN_MS` / `_MAX_MS` | Random arrow hold per pan (default `300`–`900` ms) |
+| `EXODIA_CAMERA_KEY_HOLD_MS` | Fixed hold ms (overrides random range) |
+| `EXODIA_CAMERA_KEY_TAPS` | Optional multiplier on hold ms (legacy) |
+| `EXODIA_TESSERACT_CMD` | Path to tesseract binary |
+| `EXODIA_SIGNIFICANCE_MAX_SKIPS` | Stall escape for significance gate |
+
+## Action log review
+
+Every `run_agent.py` run writes:
+
+```
+logs/<run_id>/actions.jsonl   # one JSON object per tick
+logs/<run_id>/actions.log     # human-readable tail
+logs/<run_id>/run_meta.json   # run summary on shutdown
+```
+
+Example plain-text line:
+
+```
+tick=42 | CLICK infernal_eel_fish.png | action=Idle | verify=changed
+```
+
+Query JSONL:
+
+```bash
+jq -r '.commands[].type' logs/*/actions.jsonl | sort | uniq -c
+jq 'select(.verify.changed==true)' logs/*/actions.jsonl
+```
+
+## BrainCommand types
+
+| Command | Effect |
+|---------|--------|
+| `CmdClickImage(template)` | Template match + click in playspace |
+| `CmdClickColor(bgr, range=20)` | Color cluster click |
+| `CmdUseItemOn(a, b)` | Inventory use-item-on |
+| `CmdWaitTicks(n)` | Sleep `n * OSRS_TICK_S` seconds |
+| `CmdWait(seconds)` | Sleep fixed seconds |
+| `CmdLog(message)` | Print + capture in action log |
+
+## How data flows
+
+### Agent path (recommended)
+
+```mermaid
+sequenceDiagram
+    participant Run as run_agent.py
+    participant H as ExodiaHarness
+    participant GS as GameState
+    participant B as BotBrain
+    participant Log as ActionLogger
+
+    Run->>H: create_harness(brain, logger, stream)
+    loop every tick_ms
+        H->>GS: build_game_state
+        H->>B: decide(observation)
+        B-->>H: BrainCommand[]
+        H->>H: apply_commands + verify
+        H->>Log: actions.jsonl
+    end
+```
+
+Queue harness ticks via `BotLegs`:
+
+```python
+from bot_harness import create_harness, HarnessStepper
+import bot_legs as Legs
+
+h = create_harness(brain=...)
+stepper = HarnessStepper(h)
+legs = Legs.BotLegs(mods=[h.client, h.eyes])
+legs._t = 600
+legs.add_task(stepper, "tick", [])
+legs.bot_loop()
+```
+
+### Legacy skill scripts
+
+Scripts call `bot_actions.bot_init()` → `[client, eyes, arms]`, then loop with direct `eyes` / `arms` calls. **No `BotBrain`** unless you use a harness.
+
+## Reference agents
+
+| Module | Description |
+|--------|-------------|
+| `agents/reference_fishing_brain.py` | Infernal eel fishing + Imcando hammer cracking |
+
+Required PNG templates (place in repo root or `images/`):
+
+- `infernal_eel_fish.png` — fishing spot / inventory eel icon
+- `imcando_hammer.png` — hammer for cracking
+- `images/ui_icons.png` — inventory panel calibration (recommended)
+
+## Tests
+
+All automated tests live under **`tests/`**. Offline unit tests need no game client:
+
+```bash
+python tests/run_tests.py
+# or:
+python -m unittest discover -s tests -p '*_test.py' -v
+```
+
+### Inventory integration (`tests/bot_inventory_test.py`)
+
+Single file for locate → count → drag. Does **not** identify items — only panel geometry and how many slots are occupied.
+
+| Mode | Command |
+|------|---------|
+| Offline | `python tests/bot_inventory_test.py` — needs local `tests/fixtures/inventory/reference.{png,json}` (generate once with `--online --refresh-fixture`; **not committed** — live screenshots) |
+| Online | `python tests/bot_inventory_test.py --online` — requires RuneLite visible, `client_rect.json`, `EXODIA_CAPTURE_BACKEND=wsl_ps`, `EXODIA_INPUT_BACKEND=wsl_ps` |
+
+Online run executes three tests in order:
+
+1. **find inventory** — outline template match (`captures/osrs_inventory_base.png`) + grid validation  
+2. **count items** — 4×7 occupancy grid (0–28 occupied slots)  
+3. **drag item** — random occupied slot → random empty slot via `BotArms.drag_at`; mouse returns to **screen center** before pre/post captures so item hover text does not skew vision  
+
+Output: **`captures/inventory_test_overlay.png`** — grid tint, drag arrow (red source → green dest), green PASS/FAIL lines (top-left).
+
+Useful env overrides:
+
+| Variable | Purpose |
+|----------|---------|
+| `EXODIA_INV_DRAG_FROM` / `EXODIA_INV_DRAG_TO` | Force slot `row,col` instead of random pick |
+| `EXODIA_INV_DRAG_SETTLE_S` | Wait after drag before re-capture (default `1.0`) |
+| `EXODIA_INV_HOVER_CLEAR_S` | Wait after moving mouse to center (default `0.35`) |
+| `EXODIA_WSL_MOVE_MS_MIN` / `_MAX` | WSL move duration bounds (default `110`–`260` ms) |
+
+Other live scripts:
+
+```bash
+python tests/test_stream_live.py --seconds 30
+```
+
+Manual smoke scripts (game required, not unittest): **`tests/manual/`**.
+
+## PNG / screenshot safety
+
+Live captures can show **username, chat, friends, inventory contents**, etc. **Do not commit client screenshots.**
+
+| Policy | Detail |
+|--------|--------|
+| `.gitignore` | All `*.png` ignored except **`captures/osrs_inventory_base.png`** (static inventory frame template) |
+| `captures/` | Overlays, test output, calibrations — local only |
+| `tests/fixtures/**/*.png` | Offline reference captures — local only |
+| Pre-commit hook | From repo root (`Botting/`): `git config core.hooksPath githooks` — blocks **new** PNG paths except the allowlisted template |
+
+Legacy template PNGs under `images/` remain tracked from before this policy; do not add new unreviewed PNGs.
+
+## Setup
+
+From the `Exodia` directory:
+
+```bash
+pip install -r requirements.txt
+```
+
+**Windows:** uses **pywin32** for window targeting (see `bot_client.py`).
+
+**Linux / WSLg:** use `requirements-minimal.txt` (Python 3.12+) and install **tesseract-ocr**, **xdotool**, **python3-tk**. Set `EXODIA_TESSERACT_CMD` if needed. Use **`EXODIA_CAPTURE_BACKEND=wsl_ps`** when `mss` returns black frames.
+
+### WSL + Windows RuneLite (recommended if RuneLite runs on Windows)
+
+WSL cannot see Windows windows via `xdotool`. Calibrate once so the bot knows where RuneLite is on your Windows desktop:
+
+```bash
+cd Exodia && source exodia/bin/activate
+python calibrate_client_rect.py    # tkinter ROI picker (not OpenCV — headless build)
+python -m SacredEelFishing.sacred_eel_fishing       # loads Exodia/client_rect.json automatically
+
+Session output is tee'd to **`Exodia/logs/sacred_eel_latest.log`** (truncated each run). Tail while running:
+
+```bash
+tail -f Exodia/logs/sacred_eel_latest.log
+```
+
+Override with `--log-file PATH` or `EXODIA_SACRED_EEL_LOG`.
+```
+
+If the GUI cannot open (no WSLg display), open `captures/calibrate_primary.png` on Windows and run:
+
+```bash
+python calibrate_client_rect.py --rect LEFT,TOP,WIDTH,HEIGHT
+```
+
+Or pass coords without saving:
+
+```bash
+python -m SacredEelFishing.sacred_eel_fishing --rect LEFT,TOP,WIDTH,HEIGHT
+```
+
+When a manual rect is used, capture and mouse input default to **`wsl_ps`** (Windows screen + clicks via PowerShell) if `/mnt/c/Windows/.../powershell.exe` exists. Override with `EXODIA_CAPTURE_BACKEND` / `EXODIA_INPUT_BACKEND`.
+
+Environment alternatives:
+
+| Variable | Purpose |
+|----------|---------|
+| `EXODIA_CLIENT_RECT` | `LEFT,TOP,WIDTH,HEIGHT` without a JSON file |
+| `EXODIA_CLIENT_RECT_FILE` | Path to saved rect JSON (default: `Exodia/client_rect.json`) |
+| `EXODIA_SPOT_PAN_ATTEMPTS` | Camera pans while seeking a spot (default `8`) |
+| `EXODIA_SPOT_WALK_ATTEMPTS` | Ground clicks to walk after pans fail (default `4`, N/E/S/W) |
+| `EXODIA_WALK_WAIT_S` | Seconds to wait after each walk click (default `3`) |
+| `EXODIA_SPOT_THRESHOLD` | Sacred spot template threshold (default `0.45`) |
+| `EXODIA_SPOT_TRUST_TEMPLATE` | Use strong template match when eel/cyan fail (`0` = off; default ~`0.48`) |
+| `EXODIA_SPOT_EEL_THRESHOLD` / `EXODIA_SPOT_CYAN_MIN_RATIO` | Spot verify gates (defaults `0.38` / `0.012`) |
+| `EXODIA_MAX_CYCLES` | FSM steps before stop (`30` default; `0` = unlimited) |
+| `EXODIA_ACTION_STRIP_RECT` | Manual action-line ROI `LEFT,TOP,WIDTH,HEIGHT` (client-local) |
+| `EXODIA_ACTION_STRIP_LEFT_OF_INV` | Place action ROI left of inventory (`1` default) |
+| `EXODIA_ACTION_STRIP_WIDTH` / `_HEIGHT` / `_GAP` / `_Y_FRAC` | Tune left-of-inv crop (defaults `140`×`42`, gap `6`, y `0.10`) |
+
+**UI regions (`bot_eyes` / `bot_inventory_detect`):** inventory panel via **`captures/osrs_inventory_base.png`** outline match (or `EXODIA_INV_OUTLINE_TEMPLATE`). Grid layout env: **`EXODIA_INV_GRID_OFFSET`**, **`EXODIA_INV_TILE`**, **`EXODIA_INV_TILE_GAP`**. Occupancy tuning: **`EXODIA_INV_CELL_STD_THRESHOLD`**, **`EXODIA_INV_EMPTY_BGR_MAX_DELTA`**, **`EXODIA_INV_CELL_INSET`**. Legacy **`images/ui_icons.png`** path still exists on `BotEyes.find_inventory()`. **`perception_envelope`** carries **`inventory_slot_occupancy`** (4×7 booleans). Set **`EXODIA_MASK_PANELS=0`** to skip UI blackout on `curr_client`.
+
+## Skill / example scripts (legacy)
+
+| Script | Notes |
+|--------|--------|
+| `infernal_fishing.py` | Direct-action fishing loop (superseded by `run_agent.py --brain reference_fishing`) |
+| `agility.py` | Color-based course sequence |
+| `WhyFletch.py` | Fixed-coordinate clicks |
+
+## Related notes elsewhere in the repo
+
+Older docs under `../Corpus/` may mention `bot_brain` for the old window finder — that code is **`ClientWindow`** (`bot_client.py`). **`BotBrain`** here means *the agent / policy*.

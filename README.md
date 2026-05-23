@@ -1,5 +1,7 @@
 # Old School Botting Functions
 
+**Exodia:** This repo also contains [Exodia/](Exodia/) — a RuneLite-oriented module set (client window, vision, input, agent-style `BotBrain` + harness). See [Exodia/README.md](Exodia/README.md) for the current architecture and file map.
+
 Full tutorial on creating Functions for automation using Python for osrs botting. 
 The example used will be woodcutting, where the script will use colour detection using opencv and use pyautogui to move the mouse, click and use the keyboard to drop items using an image recognition module that will detect the wood icons in the inventory.
 

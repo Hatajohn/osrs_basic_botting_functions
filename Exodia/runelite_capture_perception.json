@@ -1,0 +1,57 @@
+{
+  "perception_envelope": {
+    "client_rect": [
+      0,
+      0,
+      1920,
+      1080
+    ],
+    "inventory_rect_client_local": null,
+    "inventory_global": null,
+    "local_center": [
+      940,
+      565
+    ],
+    "global_center": [
+      940,
+      565
+    ],
+    "mask_regions_applied_to_curr_client": [
+      {
+        "name": "chat_strip",
+        "rect_client_local": [
+          0,
+          1050,
+          520,
+          30
+        ]
+      }
+    ],
+    "curr_client_shape_hw": [
+      1080,
+      1920
+    ],
+    "curr_client_unmasked_shape_hw": [
+      1080,
+      1920
+    ],
+    "curr_inventory_shape_hw": null,
+    "capture_backend": "wsl_ps",
+    "action_strip_roi_client_local": [
+      25,
+      50,
+      100,
+      30
+    ]
+  },
+  "inventory_template_match": false,
+  "files_note": "Inventory uses template images/ui_icons.png; omit or fail leaves inventory_* absent.",
+  "ocr": null,
+  "sidecars": {
+    "client_masked": "/home/hata/Botting/Exodia/runelite_capture_masked.png",
+    "ui_rois_overlay": "/home/hata/Botting/Exodia/runelite_capture_ui_rois_overlay.png",
+    "chat_strip": "/home/hata/Botting/Exodia/runelite_capture_chat_strip.png",
+    "action_strip": "/home/hata/Botting/Exodia/runelite_capture_action_strip.png",
+    "perception_json": "/home/hata/Botting/Exodia/runelite_capture_perception.json"
+  }
+}

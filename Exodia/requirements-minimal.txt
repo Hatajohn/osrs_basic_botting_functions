@@ -1,0 +1,15 @@
+# Minimal deps for Exodia skill scripts on Linux/WSLg (Python 3.12+).
+# System packages (install once with apt):
+#   sudo apt-get install -y python3-tk python3-dev tesseract-ocr xdotool
+#
+# Full stack: requirements-linux.txt (older pins; may fail on 3.12 without extra tooling).
+
+numpy
+opencv-python-headless
+mss
+Pillow
+pytesseract
+scipy
+scikit-learn
+PyAutoGUI
+keyboard

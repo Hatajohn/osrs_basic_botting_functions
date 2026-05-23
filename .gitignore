@@ -1,12 +1,22 @@
 *.png
 *.pyc
-*.png
-*.png
-*.png
-*.png
+__pycache__/
+*.py[cod]
+
 .vscode/launch.json
-Exodia/Lib/*
+
 Exodia/images/*
 images/*
+
+# Virtual environments — never commit
+.venv/
+venv/
+ENV/
+env/
+.exodia/
+Exodia/exodia/
+
+# Windows-style venv beside sources under Exodia/ (Lib/Scripts layout)
 Exodia/pyvenv.cfg
+Exodia/Lib/*
 Exodia/Scripts/*

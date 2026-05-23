@@ -1,4 +1,4 @@
-# Exodia stack on Linux/WSLg — no pywin32. Install system: tesseract-ocr, xdotool (optional but needed for BotBrain window targeting).
+# Exodia stack on Linux/WSLg — no pywin32. Install system: tesseract-ocr, xdotool (optional but needed for ClientWindow targeting).
 certifi==2023.5.7
 charset-normalizer==3.2.0
 EasyProcess==1.1

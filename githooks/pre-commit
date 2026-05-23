@@ -1,0 +1,44 @@
+#!/bin/sh
+# Block committing NEW PNG files unless explicitly allowlisted (account-info risk).
+# Enable: from repo root, run: git config core.hooksPath githooks
+#
+# Already-tracked PNGs under images/ etc. may still be committed when modified;
+# they were added before this policy. Do not add new screenshots or overlays.
+
+set -e
+
+ALLOW='Exodia/captures/osrs_inventory_base.png'
+
+blocked=0
+while IFS= read -r f; do
+	[ -n "$f" ] || continue
+	case "$f" in
+	*.png|*.PNG) ;;
+	*) continue ;;
+	esac
+
+	if [ "$f" = "$ALLOW" ]; then
+		continue
+	fi
+
+	case "$f" in
+	Exodia/items/*.png) continue ;;
+	esac
+
+	if git cat-file -e "HEAD:$f" 2>/dev/null; then
+		continue
+	fi
+
+	echo "pre-commit: blocked new PNG (may contain account/game info): $f" >&2
+	echo "pre-commit: allowed new PNG path: $ALLOW" >&2
+	echo "pre-commit: use JPG locally or keep captures out of git" >&2
+	blocked=1
+done <<EOF
+$(git diff --cached --name-only --diff-filter=ACM)
+EOF
+
+if [ "$blocked" -ne 0 ]; then
+	exit 1
+fi
+
+exit 0

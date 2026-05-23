@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+_root = Path(__file__).resolve().parents[2]
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 DEBUG = True
     bot = BotEyes(DEBUG)
     print('We are doing an action: ', get_action_text(bot, DEBUG) is 0)
