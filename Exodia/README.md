@@ -10,6 +10,7 @@ Python automation harness for **RuneLite** (OSRS): capture the client window, in
 | **Eyes** | `bot_eyes.py` | Screenshots, ROIs, template/color clustering, OCR (`get_action_text`, `locate_*`). |
 | **Arms** | `bot_arms.py` | Mouse/keyboard: smooth moves, clicks, **`drag_at`**, camera pans. On WSL (`wsl_ps`), paths use single-call linear smoothstep moves — not Bezier, not teleport. |
 | **Inventory detect** | `bot_inventory_detect.py` | Outline template match → panel rect; 4×7 grid; slot occupancy (count items, not identity). |
+| **Inventory items** | `bot_inventory_items.py` | Per-slot template match against `items/*.png`; known name or `?` if no match. |
 | **Game state** | `bot_gamestate.py` | `GameState` dataclass + `build_game_state()` from `BotEyes` (OCR, inventory occupancy). |
 | **Frames** | `bot_frames.py` | Per-tick PNG sidecar writer (world, inventory, action/chat strips). |
 | **Stream** | `bot_stream.py` | MJPEG HTTP publisher (`/stream/playspace_blobs`, `/meta`). |
@@ -191,28 +192,50 @@ python tests/run_tests.py
 python -m unittest discover -s tests -p '*_test.py' -v
 ```
 
-### Inventory integration (`tests/bot_inventory_test.py`)
+### Inventory integration tests
 
-Single file for locate → count → drag. Does **not** identify items — only panel geometry and how many slots are occupied.
+Two suites — **eyes** (vision) and **arms** (mouse input), run separately.
 
-| Mode | Command |
-|------|---------|
-| Offline | `python tests/bot_inventory_test.py` — needs local `tests/fixtures/inventory/reference.{png,json}` (generate once with `--online --refresh-fixture`; **not committed** — live screenshots) |
-| Online | `python tests/bot_inventory_test.py --online` — requires RuneLite visible, `client_rect.json`, `EXODIA_CAPTURE_BACKEND=wsl_ps`, `EXODIA_INPUT_BACKEND=wsl_ps` |
+| Suite | Command | What it tests |
+|-------|---------|---------------|
+| Eyes | `python tests/bot_inventory_test.py` | Outline match, occupancy grid, template identify |
+| Eyes (live) | `python tests/bot_inventory_test.py --online` | Same, on a live capture — **no mouse input** |
+| Arms | `python tests/bot_inventory_arms_test.py --online` | Drag occupied → empty slot; verify occupancy moved |
 
-Online run executes three tests in order:
+`tests/run_tests.py` runs eyes (offline) only; arms are skipped unless you invoke the arms script.
 
-1. **find inventory** — outline template match (`captures/osrs_inventory_base.png`) + grid validation  
+**Eyes** (`tests/bot_inventory_test.py`):
+
+1. **find inventory** — outline template match + grid validation  
 2. **count items** — 4×7 occupancy grid (0–28 occupied slots)  
-3. **drag item** — random occupied slot → random empty slot via `BotArms.drag_at`; mouse returns to **screen center** before pre/post captures so item hover text does not skew vision  
+3. **identify items** — template match each occupied slot against `items/*.png`; label `?` when unknown  
 
-Output: **`captures/inventory_test_overlay.png`** — grid tint, drag arrow (red source → green dest), green PASS/FAIL lines (top-left).
+**Arms** (`tests/bot_inventory_arms_test.py`, online only):
+
+1. **drag item** — random occupied → random empty via `BotArms.drag_at`; mouse returns to **screen center** before captures  
+2. **drag rounds** — optional extra drags when `EXODIA_INV_DRAG_ROUNDS` > 1  
+
+Outputs (local, gitignored except committed templates):
+
+| File | When |
+|------|------|
+| `captures/inventory_test_overlay.png` | Eyes suite |
+| `captures/offline_inventory_detect.png` | Eyes offline only |
+| `captures/inventory_arms_overlay.png` | Arms suite |
+
+Item templates: add cropped slot PNGs to **`items/`** (filename stem = item name, e.g. `flax.png` → `"flax"`). Matching uses the **full slot tile** (50×45) so `matchTemplate` can align icons that sit slightly off-center; occupancy still uses the inset crop.
 
 Useful env overrides:
 
 | Variable | Purpose |
 |----------|---------|
-| `EXODIA_INV_DRAG_FROM` / `EXODIA_INV_DRAG_TO` | Force slot `row,col` instead of random pick |
+| `EXODIA_ITEMS_DIR` | Item template directory (default `items/`) |
+| `EXODIA_INV_ITEM_MATCH_THRESHOLD` | Min normalized score to accept a template (default `0.40`) |
+| `EXODIA_INV_ITEM_MATCH_INSET` | Slot crop inset for item match (default `0` = full tile) |
+| `EXODIA_SEEN_ITEMS` | Register/match temp `unknown:<8-hex>` ids (default `0`; set `1` for manual runs) |
+| `EXODIA_MATCH_DEBUG` | Slot crop dumps + rejection lines in inventory test overlay |
+| `EXODIA_INV_DRAG_FROM` / `EXODIA_INV_DRAG_TO` | Force slot `row,col` instead of random pick (arms suite) |
+| `EXODIA_INV_DRAG_ROUNDS` | Arms: consecutive drags (default `1`; round 2+ in `test_drag_multiple_rounds`) |
 | `EXODIA_INV_DRAG_SETTLE_S` | Wait after drag before re-capture (default `1.0`) |
 | `EXODIA_INV_HOVER_CLEAR_S` | Wait after moving mouse to center (default `0.35`) |
 | `EXODIA_WSL_MOVE_MS_MIN` / `_MAX` | WSL move duration bounds (default `110`–`260` ms) |
@@ -231,10 +254,10 @@ Live captures can show **username, chat, friends, inventory contents**, etc. **D
 
 | Policy | Detail |
 |--------|--------|
-| `.gitignore` | All `*.png` ignored except **`captures/osrs_inventory_base.png`** (static inventory frame template) |
+| `.gitignore` | All `*.png` ignored except **`captures/osrs_inventory_base.png`** (static inventory frame template) and **`items/*.png`** (item icon templates — no account info) |
 | `captures/` | Overlays, test output, calibrations — local only |
 | `tests/fixtures/**/*.png` | Offline reference captures — local only |
-| Pre-commit hook | From repo root (`Botting/`): `git config core.hooksPath githooks` — blocks **new** PNG paths except the allowlisted template |
+| Pre-commit hook | From repo root (`Botting/`): `git config core.hooksPath githooks` — blocks **new** PNG paths except allowlisted template + `items/*.png` |
 
 Legacy template PNGs under `images/` remain tracked from before this policy; do not add new unreviewed PNGs.
 
@@ -258,6 +281,7 @@ WSL cannot see Windows windows via `xdotool`. Calibrate once so the bot knows wh
 cd Exodia && source exodia/bin/activate
 python calibrate_client_rect.py    # tkinter ROI picker (not OpenCV — headless build)
 python -m SacredEelFishing.sacred_eel_fishing       # loads Exodia/client_rect.json automatically
+```
 
 Session output is tee'd to **`Exodia/logs/sacred_eel_latest.log`** (truncated each run). Tail while running:
 
@@ -266,7 +290,6 @@ tail -f Exodia/logs/sacred_eel_latest.log
 ```
 
 Override with `--log-file PATH` or `EXODIA_SACRED_EEL_LOG`.
-```
 
 If the GUI cannot open (no WSLg display), open `captures/calibrate_primary.png` on Windows and run:
 
@@ -299,7 +322,7 @@ Environment alternatives:
 | `EXODIA_ACTION_STRIP_LEFT_OF_INV` | Place action ROI left of inventory (`1` default) |
 | `EXODIA_ACTION_STRIP_WIDTH` / `_HEIGHT` / `_GAP` / `_Y_FRAC` | Tune left-of-inv crop (defaults `140`×`42`, gap `6`, y `0.10`) |
 
-**UI regions (`bot_eyes` / `bot_inventory_detect`):** inventory panel via **`captures/osrs_inventory_base.png`** outline match (or `EXODIA_INV_OUTLINE_TEMPLATE`). Grid layout env: **`EXODIA_INV_GRID_OFFSET`**, **`EXODIA_INV_TILE`**, **`EXODIA_INV_TILE_GAP`**. Occupancy tuning: **`EXODIA_INV_CELL_STD_THRESHOLD`**, **`EXODIA_INV_EMPTY_BGR_MAX_DELTA`**, **`EXODIA_INV_CELL_INSET`**. Legacy **`images/ui_icons.png`** path still exists on `BotEyes.find_inventory()`. **`perception_envelope`** carries **`inventory_slot_occupancy`** (4×7 booleans). Set **`EXODIA_MASK_PANELS=0`** to skip UI blackout on `curr_client`.
+**UI regions (`bot_eyes` / `bot_inventory_detect` / `bot_inventory_items` / `bot_match_index`):** inventory panel via **`captures/osrs_inventory_base.png`** outline match (or `EXODIA_INV_OUTLINE_TEMPLATE`). Grid layout env: **`EXODIA_INV_GRID_OFFSET`**, **`EXODIA_INV_TILE`**, **`EXODIA_INV_TILE_GAP`**. Occupancy tuning: **`EXODIA_INV_CELL_STD_THRESHOLD`**, **`EXODIA_INV_EMPTY_BGR_MAX_DELTA`**, **`EXODIA_INV_CELL_INSET`**. Item identity: templates in **`items/`** (named + optional 8-char temp ids), gated match via **`bot_match_index`**, **`EXODIA_INV_ITEM_MATCH_THRESHOLD`**, **`EXODIA_SEEN_ITEMS`**, **`EXODIA_MATCH_STACK_MASK`**. Run **`python tests/bot_inventory_test.py`** for **`captures/inventory_test_overlay.png`**; with **`EXODIA_SEEN_ITEMS=1`**, unknown slots become **`unknown:<8-hex>`** and persist under **`items/`**. Cleanup: **`python -m bot_match_index cleanup --dry-run`**. Legacy **`images/ui_icons.png`** path still exists on `BotEyes.find_inventory()`. **`perception_envelope`** carries **`inventory_slot_occupancy`** (4×7 booleans). Set **`EXODIA_MASK_PANELS=0`** to skip UI blackout on `curr_client`.
 
 ## Skill / example scripts (legacy)
 

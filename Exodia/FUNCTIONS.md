@@ -11,7 +11,7 @@ Living reference for how automation is layered in this repo. Update this file wh
 
 **Not in scope here:** `BrainCommand` types, harness `step()`, runtime/CLI, tests, and private `_`-prefixed helpers unless they are the main public API.
 
-**Future compound work:** inventory drag-to-slot (now covered by `tests/bot_inventory_test.py`); shift+click drop (modifier + inventory locate + click).
+**Future compound work:** shift+click drop (modifier + inventory locate + click); wire `identify_inventory_slot_items` into harness `GameState`.
 
 ---
 
@@ -55,6 +55,40 @@ Living reference for how automation is layered in this repo. Update this file wh
 | `auto_detect_inventory_rect()` | Search + refine (fallback when outline disabled) |
 | `draw_inventory_outline_overlay()` / `draw_inventory_occupancy_overlay()` | Debug overlays (grid tint, occupied vs empty) |
 | `inventory_outline_template_path()` | Default `captures/osrs_inventory_base.png` |
+
+Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0`) so icons can slide within the cell; occupancy uses the tighter inset crop separately. Gated matching and seen-item fingerprints live in `bot_match_index.py` (see below).
+
+### Match index (`bot_match_index.py`)
+
+| Function / type | Role |
+|-----------------|------|
+| `extract_signals()` | Hue/edge/dHash/aspect + stack-text aux from slot BGR |
+| `gate_signals()` | Cheap reject with `RejectionReason` (`color`, `edge`, `size`, `dhash`) |
+| `TemplateCatalog` / `load_named_catalog()` | Named `items/*.png` only (not 8-char temp ids) |
+| `TemplateCatalog.match_query()` | Gated match → `MatchVerdict` with per-candidate diagnostics |
+| `SeenItemRegistry` / `load_seen_registry()` | Temp-id PNGs in `items/seen/`, JSON in `items/fingerprints/` |
+| `SeenItemRegistry.resolve()` | Match seen → `unknown:<id>` or register new 8-char id |
+| `is_temp_item_id()` / `allocate_temp_id()` | Temp stem rules and collision-safe allocation |
+| `audit_seen_duplicates()` | Pairwise duplicate audit across temp + named templates |
+| `merge_duplicate_clusters()` | Apply cleanup merge (use with `python -m bot_match_index cleanup --merge`) |
+
+**Match / seen env:** `EXODIA_MATCH_COLOR_MAX_L1`, `EXODIA_MATCH_EDGE_MAX_DIFF`, `EXODIA_MATCH_SIZE_MAX_RATIO`, `EXODIA_MATCH_DHASH_MAX_BITS`, `EXODIA_MATCH_STACK_MASK`, `EXODIA_STACK_WHITE_TEXT`, `EXODIA_SEEN_ITEMS` (default `0` — set `1` for temp ids), `EXODIA_SEEN_MATCH_THRESHOLD`, `EXODIA_SEEN_DHASH_MAX_BITS`, `EXODIA_SEEN_COLOR_MAX_L1`, `EXODIA_SEEN_FRAME_DEDUPE`, `EXODIA_SEEN_MERGE_ON_LOAD`, `EXODIA_MATCH_DEBUG`, `EXODIA_CLEANUP_*`.
+
+### Inventory items (`bot_inventory_items.py`)
+
+| Function | Role |
+|----------|------|
+| `items_directory()` | Named template root (default `items/`, override `EXODIA_ITEMS_DIR`) |
+| `seen_images_directory()` | Temp-id PNG crops (default `items/seen/`, `EXODIA_SEEN_ITEMS_DIR`) |
+| `seen_fingerprints_directory()` | Temp-id JSON sidecars (default `items/fingerprints/`, `EXODIA_SEEN_FINGERPRINTS_DIR`) |
+| `load_item_catalog()` | Named templates → `TemplateCatalog` |
+| `load_item_templates()` | Named `items/*.png` → `{name: gray}` (skips temp ids) |
+| `resolve_cell_item()` | Named catalog → seen registry → label + `MatchVerdict` |
+| `match_cell_to_item()` | Best gated match for one slot crop |
+| `identify_inventory_slot_items()` | Occupied slots → name, `unknown:<id>`, `"?"`, or `None` + scores + optional diagnostics |
+| `draw_inventory_item_identify_overlay()` | Occupancy tint + item labels on occupied slots |
+
+Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0`) so icons can slide within the cell; occupancy uses the tighter inset crop separately.
 
 ### Arms — input (`bot_arms.py`)
 
@@ -143,19 +177,31 @@ Living reference for how automation is layered in this repo. Update this file wh
 | `click_on_color()` | Refresh → cluster → `click_at` | `infernal_fishing.py`, `agility.py`, harness `CmdClickColor` |
 | `click_color_near_color()` | Anchor color → `click_on_color` near it | — (available) |
 | `use_item_on()` | Two inv templates → use-on click sequence | `infernal_fishing.py`, harness, reference brain |
-
-### Inventory integration test — `tests/bot_inventory_test.py`
-
-| Step | Layers | Summary |
-|------|--------|---------|
-| find inventory | eyes + `bot_inventory_detect` | Outline match + grid validation |
-| count items | detect occupancy | 4×7 bool grid, slot count only |
-| drag item (online) | detect + arms | Random occupied → random empty; center mouse before captures; verify move |
-
-Output overlay: `captures/inventory_test_overlay.png` (local, gitignored).
 | `color_is_close()` | Refresh → cluster → distance check | `agility.py` (via `check_color`) |
 | `check_color()` | `color_is_close` + log | `agility.py` |
 | `mouse_fidgit()` | Refresh → move mouse offset from center | `agility.py`, `bot_actions` `__main__` |
+
+### Inventory integration tests
+
+| Suite | File | Layers |
+|-------|------|--------|
+| **Eyes** | `tests/bot_inventory_test.py` | find inventory, count, identify — capture/vision only |
+| **Arms** | `tests/bot_inventory_arms_test.py --online` | drag item(s); verify move via occupancy (uses eyes for read-back only) |
+
+Shared helpers: `tests/inventory_test_common.py`.
+
+| Step (eyes) | Summary |
+|-------------|---------|
+| find inventory | Outline match + grid validation |
+| count items | 4×7 bool grid |
+| identify items | Template match vs `items/`; `?` if unknown |
+
+| Step (arms) | Summary |
+|-------------|---------|
+| drag item | Random occupied → empty; center mouse before captures; verify occupancy |
+| drag rounds | Extra drags when `EXODIA_INV_DRAG_ROUNDS` > 1 |
+
+Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `captures/offline_inventory_detect.png` (eyes offline); `captures/inventory_arms_overlay.png` (arms).
 
 ### Search loop — `bot_search.py`
 
@@ -237,13 +283,15 @@ Output overlay: `captures/inventory_test_overlay.png` (local, gitignored).
 | `infernal_fishing.py` | `get_action_text`, `locate_image` | `bot_init`, `bot_update`, `click_on_image`, `use_item_on`, `click_on_color` |
 | `SacredEelFishing/sacred_eel_fishing.py` | `get_action_text`, `locate_image` (knife) | `bot_init`, FSM, `locate_sacred_eel_spots`, `search_with_camera_pan`, `wait_for_action_code` |
 | `agility.py` | — | `click_on_color`, `mouse_fidgit`, `color_is_close` |
-| `tests/bot_inventory_test.py --online` | `match_inventory_by_outline`, occupancy | `BotArms.drag_at`, center-mouse capture discipline |
+| `tests/bot_inventory_test.py` (offline) | `match_inventory_by_outline`, occupancy, `identify_inventory_slot_items` | — |
+| `tests/bot_inventory_test.py --online` | same (live capture) | — |
+| `tests/bot_inventory_arms_test.py --online` | occupancy read-back | `BotArms.drag_at`, center-mouse capture discipline |
 
 ---
 
 ## Repository safety (PNG)
 
-Live client PNGs may contain account-identifying UI. **Only `captures/osrs_inventory_base.png` is allowlisted in git.** Pre-commit hook at repo root: `githooks/pre-commit` (enable with `git config core.hooksPath githooks` from `Botting/`).
+Live client PNGs may contain account-identifying UI. **Allowlisted in git:** `captures/osrs_inventory_base.png`, `items/*.png` (item icon templates). Pre-commit hook at repo root: `githooks/pre-commit` (enable with `git config core.hooksPath githooks` from `Botting/`).
 
 ---
 
@@ -252,7 +300,7 @@ Live client PNGs may contain account-identifying UI. **Only `captures/osrs_inven
 - [ ] **Compound modifier actions** — shift+click drop, key chords.
 - [ ] **`scan_for`** — implemented but unused; deprecate in favor of `search_with_camera_pan`.
 - [ ] **`drop_all`** — simple arms API exists; no script-level compound wrapper yet.
-- [ ] **Item identity in inventory** — occupancy/count only in integration test; `bot_inventory_count.py` not wired into harness.
+- [ ] **Item identity in harness** — `bot_inventory_items` + offline test; not yet on `GameState` / `BotEyes.resolve_inventory_slot_items`.
 - [ ] **`bot_track` blobs** — motion blob pipeline (`bot_track.py` + `VisionProcessor`).
 - [ ] **Sacred eel → `BotLegs`** — FSM as legs task; retire bespoke main `while` loop.
 
@@ -260,8 +308,8 @@ Live client PNGs may contain account-identifying UI. **Only `captures/osrs_inven
 
 **Product decisions:** Canonical work in Exodia harness/FSM only; legacy root scripts not first-class; blob tracking v1; chat kept as separate crop; scheduler owned by `bot_legs` via **`SacredEelStepper`** (not harness brain).
 
-**Recent:** `wsl_ps` smooth linear move + drag-from-current; outline inventory detect; `tests/bot_inventory_test.py` (find / count / drag).
+**Recent:** `bot_inventory_items` template match (`items/flax.png`); full-tile match inset; offline identify test + `offline_inventory_detect.png`; `wsl_ps` smooth drag; outline inventory detect.
 
 ---
 
-*Last reviewed: inventory detect + drag test + WSL smooth mouse paths.*
+*Last reviewed: inventory item identification + offline detect overlay.*

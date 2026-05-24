@@ -118,6 +118,46 @@ def _load_inventory_outline_assets() -> Optional[Tuple[np.ndarray, np.ndarray, n
     return _outline_cache
 
 
+def _supplement_outline_peaks(
+    peaks: Sequence[Tuple[int, int, float]],
+    res: np.ndarray,
+    *,
+    template_w: int,
+    template_h: int,
+    threshold: float,
+) -> List[Tuple[int, int, float]]:
+    """
+    Re-add strong matches NMS may have removed.
+
+    World textures often match one panel-width left of the real inventory; suppression
+    around that false peak hides the true panel at ``x + template_w`` (± a few px).
+    """
+    if not peaks:
+        return []
+    h_r, w_r = res.shape[:2]
+    merged: List[Tuple[int, int, float]] = list(peaks)
+    seen = {(int(p[0]), int(p[1])) for p in peaks}
+    best_score = max(p[2] for p in peaks)
+    margin = _env_float("EXODIA_INV_OUTLINE_SCORE_MARGIN", 0.04)
+    min_shift_score = max(threshold, best_score - margin)
+    x_shifts = range(template_w - 16, template_w + 12, 4)
+    y_shifts = range(-8, 9, 4)
+    for px, py, _sc in list(peaks)[:3]:
+        for dx in x_shifts:
+            for dy in y_shifts:
+                nx, ny = int(px + dx), int(py + dy)
+                if nx < 0 or ny < 0 or nx >= w_r or ny >= h_r:
+                    continue
+                if (nx, ny) in seen:
+                    continue
+                nsc = float(res[ny, nx])
+                if nsc < min_shift_score:
+                    continue
+                merged.append((nx, ny, nsc))
+                seen.add((nx, ny))
+    return merged
+
+
 def _pick_outline_peak(
     peaks: Sequence[Tuple[int, int, float]],
     *,
@@ -135,6 +175,19 @@ def _pick_outline_peak(
     cands = [p for p in peaks if p[2] >= best_score - margin]
     if not cands:
         cands = list(peaks)
+
+    frame_w = client_bgr.shape[1] if client_bgr is not None else 0
+    br_only = os.environ.get("EXODIA_INV_SEARCH_FULL", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    )
+    if br_only and frame_w > 0:
+        min_x_frac = _env_float("EXODIA_INV_BR_MIN_X_FRAC", 0.78)
+        min_x = int(frame_w * min_x_frac)
+        br_cands = [p for p in cands if roi_x + p[0] >= min_x]
+        if br_cands:
+            cands = br_cands
 
     def _rank(p: Tuple[int, int, float]) -> Tuple[float, float]:
         rect = [roi_x + p[0], roi_y + p[1], template_w, template_h]
@@ -173,7 +226,8 @@ def match_inventory_by_outline(
 
     thr = threshold if threshold is not None else _env_float("EXODIA_INV_OUTLINE_THR", 0.55)
     res = cv2.matchTemplate(gray, gray_tpl, cv2.TM_CCORR_NORMED, mask=mask)
-    peaks = _match_template_peaks(res, tw, th, thr, max_peaks=8)
+    peaks = _match_template_peaks(res, tw, th, thr, max_peaks=16)
+    peaks = _supplement_outline_peaks(peaks, res, template_w=tw, template_h=th, threshold=thr)
     peak = _pick_outline_peak(
         peaks,
         client_bgr=client_bgr,
@@ -609,7 +663,9 @@ def auto_detect_inventory_rect(
             min_score = _env_float("EXODIA_INV_OUTLINE_MIN_SCORE", 0.55)
             min_grid = _env_float("EXODIA_INV_MIN_GRID_SCORE", 12.0)
             if score >= min_score and validate_inventory_rect(client_bgr, rect) >= min_grid:
-                rect = refine_inventory_rect(client_bgr, rect)
+                skip_refine = _env_float("EXODIA_INV_SKIP_REFINE_SCORE", 0.96)
+                if score < skip_refine:
+                    rect = refine_inventory_rect(client_bgr, rect)
                 return rect
 
     center = None

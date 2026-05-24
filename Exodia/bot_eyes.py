@@ -97,8 +97,10 @@ def _inventory_search_roi(frame_w: int, frame_h: int) -> List[int]:
     raw = _parse_rect_env("EXODIA_INV_SEARCH_ROI")
     if raw:
         return raw
-    # Inventory can be repositioned anywhere in the client — search the full frame by default.
-    return [0, 0, int(frame_w), int(frame_h)]
+    # Default OSRS layout: inventory anchored bottom-right. Set EXODIA_INV_SEARCH_FULL=1 to search everywhere.
+    if os.environ.get("EXODIA_INV_SEARCH_FULL", "").strip().lower() in ("1", "true", "yes"):
+        return [0, 0, int(frame_w), int(frame_h)]
+    return _bottom_right_ui_search_roi(frame_w, frame_h)
 
 
 def _mask_ui_panels_after_update() -> bool:
@@ -243,7 +245,7 @@ def inventory_grid_layout(
     Grid geometry inside panel ``[ix, iy, iw, ih]``.
 
     Returns ``(dx, dy, tile_w, tile_h, gap_x, gap_y, field_w, field_h)``.
-    Defaults (reference panel 283×382): offset 30×20, tile 50×45, gaps 7×4.
+    Defaults (reference panel 283×382): offset 30×20, tile 50×45, gaps 7×5.
     """
     if len(inventory_xywh) != 4:
         return 0, 0, 0, 0, 0, 0, 0, 0
@@ -261,7 +263,7 @@ def inventory_grid_layout(
     else:
         dx, dy = _parse_pair_env("EXODIA_INV_GRID_OFFSET", (30, 20))
         tile_w, tile_h = _parse_pair_env("EXODIA_INV_TILE", (50, 45))
-        gap_x, gap_y = _parse_pair_env("EXODIA_INV_TILE_GAP", (7, 4))
+        gap_x, gap_y = _parse_pair_env("EXODIA_INV_TILE_GAP", (7, 5))
         gw = INV_COLS * tile_w + (INV_COLS - 1) * gap_x
         gh = INV_ROWS * tile_h + (INV_ROWS - 1) * gap_y
 
@@ -353,6 +355,14 @@ def inventory_cell_inset_px(inventory_xywh: Sequence[int]) -> int:
     return max(3, min(tile_w, tile_h) // 7)
 
 
+def _cell_laplacian_variance(cell_bgr: np.ndarray) -> float:
+    """Variance of Laplacian — high when slot has icon edges despite brown-plate color match."""
+    if cell_bgr is None or cell_bgr.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2GRAY)
+    return float(np.var(cv2.Laplacian(gray, cv2.CV_64F)))
+
+
 def analyze_inventory_panel_occupancy(
     inventory_panel_bgr: np.ndarray,
 ) -> Tuple[
@@ -360,6 +370,10 @@ def analyze_inventory_panel_occupancy(
 ]:
     """
     Classify 28 slots: **True** = occupied, **False** = empty (uniform brown plate).
+
+    Slots that pass the std/color empty test but exceed
+    ``EXODIA_INV_LAPLACE_MIN_VAR`` edge variance are treated as occupied
+    (catches low-contrast icons that blend with the slot background).
 
     Returns ``(occupancy_7x4, grayscale_std_7x4_or_None, prototype_bgr_or_None)``.
     """
@@ -375,9 +389,11 @@ def analyze_inventory_panel_occupancy(
     color_delta_cap = _env_positive_float("EXODIA_INV_EMPTY_BGR_MAX_DELTA", 12.0)
     cal_k = max(4, min(INV_SLOTS, _env_positive_int("EXODIA_INV_EMPTY_CALIBRATION_K", 10)))
 
+    lap_min = _env_positive_float("EXODIA_INV_LAPLACE_MIN_VAR", 300.0)
     rects: List[Optional[Tuple[int, int, int, int]]] = []
     grays_stds: List[float] = []
     mean_bgrs: List[np.ndarray] = []
+    cell_crops: List[Optional[np.ndarray]] = []
 
     for row in range(INV_ROWS):
         for col in range(INV_COLS):
@@ -386,9 +402,11 @@ def analyze_inventory_panel_occupancy(
             if r is None:
                 grays_stds.append(1e9)
                 mean_bgrs.append(np.zeros(3))
+                cell_crops.append(None)
                 continue
             sx, sy, sw, sh = r
             cell = inventory_panel_bgr[sy : sy + sh, sx : sx + sw]
+            cell_crops.append(cell)
             gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
             gray = cv2.blur(gray, (3, 3))
             grays_stds.append(float(np.std(gray)))
@@ -425,7 +443,13 @@ def analyze_inventory_panel_occupancy(
                 band = np.all((mu >= np.asarray(lb)) & (mu <= np.asarray(ub)))
                 empty = empty and band
 
-            row_occ.append(not empty)
+            occupied = not empty
+            if not occupied and lap_min > 0:
+                cell = cell_crops[idx]
+                if cell is not None and _cell_laplacian_variance(cell) >= lap_min:
+                    occupied = True
+
+            row_occ.append(occupied)
         occ.append(row_occ)
         std_grid.append(row_std)
 

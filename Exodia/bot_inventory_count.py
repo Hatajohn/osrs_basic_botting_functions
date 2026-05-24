@@ -50,9 +50,28 @@ def _panel_gray_for_match(panel_bgr: np.ndarray) -> np.ndarray:
     return gray
 
 
+def _stack_band_rect(h: int, w: int) -> Tuple[int, int]:
+    y1 = max(8, int(h * float(os.environ.get("EXODIA_INV_STACK_Y_FRAC", "0.42"))))
+    x1 = max(8, int(w * float(os.environ.get("EXODIA_INV_STACK_X_FRAC", "0.50"))))
+    return y1, x1
+
+
+def _fill_stack_band_in_gray(gray: np.ndarray, y1: int, x1: int) -> np.ndarray:
+    if y1 <= 0 and x1 <= 0:
+        return gray
+    out = gray.copy()
+    band = out[0:y1, 0:x1]
+    if band.size == 0:
+        return out
+    fill = int(np.median(out[y1:, x1:])) if out[y1:, x1:].size else int(np.median(out))
+    out[0:y1, 0:x1] = fill
+    return out
+
+
 def _slot_gray_for_match(cell_bgr: np.ndarray) -> np.ndarray:
     """
     Grayscale for matching — masks RuneLite item-tag green so the base icon matches.
+    Optionally median-fills the stack-quantity band (``EXODIA_MATCH_STACK_MASK``).
     """
     gray = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2HSV)
@@ -62,6 +81,15 @@ def _slot_gray_for_match(cell_bgr: np.ndarray) -> np.ndarray:
         fill = int(np.median(gray[tag_mask == 0])) if np.any(tag_mask == 0) else 90
         gray = gray.copy()
         gray[tag_mask > 0] = fill
+    if os.environ.get("EXODIA_MATCH_STACK_MASK", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        h, w = gray.shape[:2]
+        y1, x1 = _stack_band_rect(h, w)
+        gray = _fill_stack_band_in_gray(gray, y1, x1)
     return gray
 
 

@@ -87,14 +87,24 @@ def scan_for(b_eyes, b_arms, target="", method="image", bounds=None, attempts=10
             b_arms.click_here(click_info, center=b_eyes.local_center)
 
 
-# This will be useful for when I need to 'use' one item on another in my inv, like for making potions
-# Both target params are singular image files, target_2 can end up being multiple items, but only one will be clicked
+# OSRS use-on: click source item, then destination item (both inventory templates).
 def use_item_on(b_eyes, b_arms, target_1, target_2):
-    targets_1 = b_eyes.locate_image(filename=target_1, inv=True, name=('Scanning for %s'%(target_1)))
-    targets_2 = b_eyes.locate_image(filename=target_2, inv=True, name=('Scanning for %s'%(target_2)))
-    # Assuming the first target_1 is valid
-    b_arms.click_here(targets_2, targets_1[0], rad=11)
+    from bot_inventory_actions import UseItemOnResult
+
+    targets_1 = b_eyes.locate_image(
+        filename=target_1, inv=True, name=("Scanning for %s" % target_1)
+    )
+    targets_2 = b_eyes.locate_image(
+        filename=target_2, inv=True, name=("Scanning for %s" % target_2)
+    )
+    if not targets_1:
+        return UseItemOnResult.fail("source_not_found", missing_item=target_1)
+    if not targets_2:
+        return UseItemOnResult.fail("dest_not_found", missing_item=target_2)
     b_arms.click_at(targets_1[0], rad=11)
+    time.sleep(random.uniform(0.12, 0.22))
+    b_arms.click_at(random.choice(targets_2), rad=11)
+    return UseItemOnResult(True)
 
 # Attempts to locate and click on an image within an image
 def click_on_image(client, bot_arms, bot_eyes, target, refresh=True):
