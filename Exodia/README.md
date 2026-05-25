@@ -201,6 +201,7 @@ Two suites — **eyes** (vision) and **arms** (mouse input), run separately.
 | Eyes | `python tests/bot_inventory_test.py` | Outline match, occupancy grid, template identify |
 | Eyes (live) | `python tests/bot_inventory_test.py --online` | Same, on a live capture — **no mouse input** |
 | Arms | `python tests/bot_inventory_arms_test.py --online` | Drag occupied → empty slot; verify occupancy moved |
+| Use-on | `python tests/bot_inventory_use_on_test.py --online` | Hammer → closest infernal eel (`items/hammer`, `items/infernal_eel`) |
 
 `tests/run_tests.py` runs eyes (offline) only; arms are skipped unless you invoke the arms script.
 
@@ -215,6 +216,11 @@ Two suites — **eyes** (vision) and **arms** (mouse input), run separately.
 1. **drag item** — random occupied → random empty via `BotArms.drag_at`; mouse returns to **screen center** before captures  
 2. **drag rounds** — optional extra drags when `EXODIA_INV_DRAG_ROUNDS` > 1  
 
+**Use-on** (`tests/bot_inventory_use_on_test.py`, online only):
+
+1. **hammer → eel** — identify slots via `items/*.png`; click source then **closest** matching eel slot  
+2. Skips when hammer or eel not visible; env: `EXODIA_USE_ON_SOURCE`, `EXODIA_USE_ON_DEST`, `EXODIA_USE_ON_SETTLE_S`  
+
 Outputs (local, gitignored except committed templates):
 
 | File | When |
@@ -222,6 +228,7 @@ Outputs (local, gitignored except committed templates):
 | `captures/inventory_test_overlay.png` | Eyes suite |
 | `captures/offline_inventory_detect.png` | Eyes offline only |
 | `captures/inventory_arms_overlay.png` | Arms suite |
+| `captures/inventory_use_on_overlay.png` | Use-on suite |
 
 Item templates: add cropped slot PNGs to **`items/`** (filename stem = item name, e.g. `flax.png` → `"flax"`). Matching uses the **full slot tile** (50×45) so `matchTemplate` can align icons that sit slightly off-center; occupancy still uses the inset crop.
 
@@ -314,6 +321,20 @@ Or pass coords without saving:
 python -m SacredEelFishing.sacred_eel_fishing --rect LEFT,TOP,WIDTH,HEIGHT
 ```
 
+### Infernal eel fishing
+
+Fish infernal eels at spot templates; crack with Imcando hammer when inventory is **28/28** full. Eel and hammer must be labeled in `items/` (defaults: `infernal_eel`, `hammer` — use `label_inventory_item.py`).
+
+```bash
+cd Exodia && source exodia/bin/activate
+python calibrate_client_rect.py    # once, if using Windows RuneLite from WSL
+python -m InfernalEelFishing.infernal_eel_fishing
+# or: ./InfernalEelFishing/run_infernal_eel.sh
+# diagnose (no clicks): ./InfernalEelFishing/run_infernal_eel.sh diagnose
+```
+
+Session log: **`Exodia/logs/infernal_eel_latest.log`**. Item labels: `EXODIA_INFERNAL_EEL_ITEM`, `EXODIA_INFERNAL_HAMMER_ITEM`. Spot templates: `EXODIA_INFERNAL_SPOT_TEMPLATES` (default `infernal_eel_spot.png` under `images/`).
+
 When a manual rect is used, capture and mouse input default to **`wsl_ps`** (Windows screen + clicks via PowerShell) if `/mnt/c/Windows/.../powershell.exe` exists. Override with `EXODIA_CAPTURE_BACKEND` / `EXODIA_INPUT_BACKEND`.
 
 Environment alternatives:
@@ -339,7 +360,7 @@ Environment alternatives:
 
 | Script | Notes |
 |--------|--------|
-| `infernal_fishing.py` | Direct-action fishing loop (superseded by `run_agent.py --brain reference_fishing`) |
+| `infernal_fishing.py` | **Deprecated** — redirects to `InfernalEelFishing.infernal_eel_fishing` |
 | `agility.py` | Color-based course sequence |
 | `WhyFletch.py` | Fixed-coordinate clicks |
 

@@ -91,6 +91,8 @@ Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0
 | `slots_match_for_bucket()` | Tolerant same-item gate for bucketing (signals → template cross-score → seen-loose) |
 | `normalize_item_template_name()` / `save_named_item_template()` | Write ``items/<name>.png`` from a slot crop |
 | `bucket_slots_for_label()` / `slot_at_client_point()` | Sidebar bucket data + canvas click hit-test |
+| `count_labeled_item_slots()` | Occupied slots matching a named item stem (case-insensitive) |
+| `read_inventory_labels()` | `identify_inventory_slot_items(..., frame_buckets=True)` after occupancy read |
 | `label_inventory_item.py` | Interactive tkinter labeler (canvas + bucket sidebar) |
 | `crop_inventory_slot_bgr()` / `inventory_slot_cell_looks_occupied()` | Slot crop + empty heuristic |
 | `match_cell_to_item()` | Best gated match for one slot crop |
@@ -99,6 +101,21 @@ Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0
 | `draw_inventory_bucket_counts_above()` / `slot_label_bucket_counts()` | Bucket amount lines above inventory rect |
 
 Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0`) so icons can slide within the cell; occupancy uses the tighter inset crop separately.
+
+### Inventory actions (`bot_inventory_actions.py`)
+
+| Function / type | Role |
+|-----------------|------|
+| `UseItemOnResult` | Outcome of use-on (`ok`, `reason`, `missing_item`, source/dest slots) |
+| `clear_inventory_hover()` | Move cursor to client center; clears item tooltip before clicks |
+| `click_inventory_slot()` | Move + click one grid slot (screen coords) |
+| `use_inventory_slot_on_slot()` | OSRS use-on: source slot → dest slot (hover clear, focus, gap env) |
+| `slots_matching_item()` | All `(row, col)` with a given named label |
+| `closest_slot()` | Nearest candidate slot to a reference (Manhattan grid distance) |
+| `use_named_item_on_named_item()` | Label-based use-on; **closest** dest to source when slots omitted |
+| `pick_distinct_screen_points()` | Template use-on: source point + **closest** distinct dest (screen px) |
+
+Use-on env: `EXODIA_INV_USE_ON_GAP_S`, `EXODIA_INV_CLICK_RAD`, `EXODIA_INV_USE_ON_MIN_SEP_PX`, `EXODIA_INV_HOVER_CLEAR_S`.
 
 ### Arms — input (`bot_arms.py`)
 
@@ -164,6 +181,7 @@ Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0
 |--------|----------|------|
 | `bot_actions.py` | `bgr_bounds_from_color()` | BGR lower/upper for color ops |
 | `bot_gamestate.py` | `occupied_cell_count()` | Count `True` cells in grid |
+| `bot_gamestate.py` | `inventory_is_full()` | True when occupied cells ≥ 28 |
 | `bot_inventory_count.py` | `count_inventory_*()` | Stack / object / quantity counts |
 | `bot_action_ui.py` | `is_action_*()`, `action_code_label()` | Predicates on action code |
 | `bot_search.py` | `playspace_search_roi()`, `ground_click_target()`, `walk_direction_for_attempt()` | ROI / walk target math (no I/O loop) |
@@ -186,8 +204,8 @@ Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0
 | `click_on_image()` | Optional refresh → `locate_image` → `click_at` | Harness, `infernal_fishing.py`, reference brain (via harness) |
 | `click_on_color()` | Refresh → cluster → `click_at` | `infernal_fishing.py`, `agility.py`, harness `CmdClickColor` |
 | `click_color_near_color()` | Anchor color → `click_on_color` near it | — (available) |
-| `use_x_on_y()` | Two inv templates → use-on click sequence (source then dest) | Harness `CmdUseItemOn`, sacred eel SCALING, infernal CRACKING (planned) |
-| `use_item_on()` | Deprecated alias → `use_x_on_y()` | `infernal_fishing.py`, legacy callers |
+| `use_x_on_y()` | Inv templates → hover clear → click source → **closest** dest; returns `UseItemOnResult` | Harness `CmdUseItemOn`, sacred eel SCALING, infernal CRACKING (template fallback) |
+| `use_item_on()` | Deprecated alias → `use_x_on_y()` | Legacy callers |
 | `color_is_close()` | Refresh → cluster → distance check | `agility.py` (via `check_color`) |
 | `check_color()` | `color_is_close` + log | `agility.py` |
 | `mouse_fidgit()` | Refresh → move mouse offset from center | `agility.py`, `bot_actions` `__main__` |
@@ -198,6 +216,7 @@ Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0
 |-------|------|--------|
 | **Eyes** | `tests/bot_inventory_test.py` | find inventory, count, identify — capture/vision only |
 | **Arms** | `tests/bot_inventory_arms_test.py --online` | drag item(s); verify move via occupancy (uses eyes for read-back only) |
+| **Use-on** | `tests/bot_inventory_use_on_test.py --online` | hammer → infernal eel (named labels); closest eel to hammer |
 
 Shared helpers: `tests/inventory_test_common.py`.
 
@@ -212,7 +231,11 @@ Shared helpers: `tests/inventory_test_common.py`.
 | drag item | Random occupied → empty; center mouse before captures; verify occupancy |
 | drag rounds | Extra drags when `EXODIA_INV_DRAG_ROUNDS` > 1 |
 
-Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `captures/offline_inventory_detect.png` (eyes offline); `captures/inventory_arms_overlay.png` (arms).
+| Step (use-on) | Summary |
+|---------------|---------|
+| use hammer on eel | Identify `items/` labels; `use_named_item_on_named_item`; skip if either missing |
+
+Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `captures/offline_inventory_detect.png` (eyes offline); `captures/inventory_arms_overlay.png` (arms); `captures/inventory_use_on_overlay.png` (use-on).
 
 ### Search loop — `bot_search.py`
 
@@ -233,6 +256,7 @@ Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `capt
 |----------|-----------------|---------|
 | `build_game_state()` | Eyes: action text, inventory grid, capture meta → `GameState` | `bot_harness.py`, perception status |
 | `game_state_to_dict()` | Serialize for observation / logs | Harness |
+| `inventory_is_full()` | `occupied_cell_count` ≥ slot count (default 28) | Infernal eel FSM, diagnose |
 
 ### Spot pipeline — `bot_spot_verify.py`
 
@@ -260,12 +284,19 @@ Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `capt
 | `_locate_sacred_eels()` | `locate_sacred_eel_spots` + reject hook | Main loop, FSM |
 | `SacredEelFSM` states / `_seek_spot_click()` | Action waits + `search_with_camera_pan` + click | `sacred_eel_fishing.py` |
 
+### Infernal eel — `InfernalEelFishing/`
+
+| Function | Steps (summary) | Used by |
+|----------|-----------------|---------|
+| `InfernalEelMachine` FSM | FISHING / SEEK_SPOT / CRACKING; bucket eel count; crack at 28/28 | `infernal_eel_fishing.py` |
+| `_locate_spots()` | Template match spot PNGs in playspace | FSM seek, diagnose |
+| CRACKING sub-loop | `use_named_item_on_named_item` (closest eel to hammer) → tick wait → re-count | FSM (template `use_x_on_y` fallback) |
+
 ### Legacy script composites
 
 | Location | Function | Notes |
 |----------|----------|-------|
-| `infernal_fishing.py` | `keep_fishing()` | Action code + inv count → `use_item_on` / `click_on_color` / waits |
-| `infernal_fishing.py` | `__main__` loop | Inline version of fishing + cracking (no `BotLegs`) |
+| `infernal_fishing.py` | `__main__` | **Deprecated** — redirects to `InfernalEelFishing` |
 | `agility.py` | `__main__` loop | `click_on_color` + `mouse_fidgit` per course segment |
 
 ---
@@ -291,12 +322,13 @@ Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `capt
 | Entrypoint | Simple (typical) | Compound (typical) |
 |------------|------------------|---------------------|
 | `run_agent.py` | via harness eyes/arms | `step()`, `click_on_image`, `use_item_on` |
-| `infernal_fishing.py` | `get_action_text`, `locate_image` | `bot_init`, `bot_update`, `click_on_image`, `use_item_on`, `click_on_color` |
+| `InfernalEelFishing/infernal_eel_fishing.py` | `read_inventory_labels`, `count_labeled_item_slots` | `bot_init`, FSM, `search_with_camera_pan`, `use_named_item_on_named_item` |
 | `SacredEelFishing/sacred_eel_fishing.py` | `get_action_text`, `locate_image` (knife) | `bot_init`, FSM, `locate_sacred_eel_spots`, `search_with_camera_pan`, `wait_for_action_code` |
 | `agility.py` | — | `click_on_color`, `mouse_fidgit`, `color_is_close` |
 | `tests/bot_inventory_test.py` (offline) | `match_inventory_by_outline`, occupancy, `identify_inventory_slot_items` | — |
 | `tests/bot_inventory_test.py --online` | same (live capture) | — |
 | `tests/bot_inventory_arms_test.py --online` | occupancy read-back | `BotArms.drag_at`, center-mouse capture discipline |
+| `tests/bot_inventory_use_on_test.py --online` | `identify_inventory_slot_items`, `closest_slot` | `use_named_item_on_named_item` |
 
 ---
 
@@ -319,8 +351,8 @@ Live client PNGs may contain account-identifying UI. **Allowlisted in git:** `ca
 
 **Product decisions:** Canonical work in Exodia harness/FSM only; legacy root scripts not first-class; blob tracking v1; chat kept as separate crop; scheduler owned by `bot_legs` via **`SacredEelStepper`** (not harness brain).
 
-**Recent:** `bot_inventory_items` template match (`items/flax.png`); full-tile match inset; offline identify test + `offline_inventory_detect.png`; `wsl_ps` smooth drag; outline inventory detect.
+**Recent:** infernal eel FSM (`InfernalEelFishing/`); inventory use-on (`use_x_on_y`, `use_named_item_on_named_item`, closest-dest selection); `tests/bot_inventory_use_on_test.py`.
 
 ---
 
-*Last reviewed: inventory item identification + offline detect overlay.*
+*Last reviewed: infernal eel FSM package + inventory bucket helpers.*

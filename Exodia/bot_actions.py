@@ -6,6 +6,7 @@ import bot_eyes as Eyes
 import bot_arms as Arms
 import bot_env as Env
 import math
+import os
 import time
 import random
 
@@ -93,18 +94,34 @@ def use_x_on_y(
     source: str,
     dest: str,
     *,
+    client=None,
     inv: bool = True,
     threshold: float | None = None,
-    click_rad: int = 11,
+    click_rad: int | None = None,
+    refresh: bool = False,
+    center_first: bool = True,
+    focus: bool = True,
 ):
     """
     OSRS inventory use-on: click source (X), then destination (Y).
 
+    Locates both templates in the inventory crop, clears hover text when
+    ``center_first`` is true, then clicks source → closest destination.
+
     Examples:
-      use_x_on_y(eyes, arms, "osrs_imcandoHammer.png", "osrs_infernalEel.png")
+      use_x_on_y(eyes, arms, "imcando_hammer.png", "infernal_eel_fish.png")
       use_x_on_y(eyes, arms, "osrs_knife.png", "osrs_sacredEel.png")
     """
-    from bot_inventory_actions import UseItemOnResult
+    from bot_inventory_actions import (
+        UseItemOnResult,
+        _env_float,
+        clear_inventory_hover,
+        focus_runelite,
+        pick_distinct_screen_points,
+    )
+
+    if refresh and client is not None:
+        bot_update(client, eyes)
 
     locate_kw: dict = {"inv": inv}
     if threshold is not None:
@@ -120,9 +137,25 @@ def use_x_on_y(
         return UseItemOnResult.fail("source_not_found", missing_item=source)
     if not dests:
         return UseItemOnResult.fail("dest_not_found", missing_item=dest)
-    arms.click_at(sources[0], rad=click_rad)
-    time.sleep(random.uniform(0.12, 0.22))
-    arms.click_at(random.choice(dests), rad=click_rad)
+
+    src_pt, dst_pt = pick_distinct_screen_points(sources, dests)
+    if src_pt is None or dst_pt is None:
+        return UseItemOnResult.fail("dest_not_found", missing_item=dest)
+
+    if focus:
+        focus_runelite()
+        time.sleep(0.2)
+    if center_first and eyes.client_rect is not None:
+        clear_inventory_hover(eyes.client_rect)
+
+    rad = click_rad
+    if rad is None:
+        rad = int(os.environ.get("EXODIA_INV_CLICK_RAD", "6"))
+
+    arms.click_at(list(src_pt), rad=rad)
+    gap = _env_float("EXODIA_INV_USE_ON_GAP_S", 0.18)
+    time.sleep(max(0.05, gap))
+    arms.click_at(list(dst_pt), rad=rad)
     return UseItemOnResult(True)
 
 

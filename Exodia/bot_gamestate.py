@@ -9,13 +9,20 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from bot_action_ui import ACTION_FISHING
+from bot_eyes import INV_SLOTS
 
 if TYPE_CHECKING:
     import bot_eyes as Eyes
 
 Rect = List[int]
 
-__all__ = ["GameState", "build_game_state", "game_state_to_dict", "occupied_cell_count"]
+__all__ = [
+    "GameState",
+    "build_game_state",
+    "game_state_to_dict",
+    "inventory_is_full",
+    "occupied_cell_count",
+]
 
 
 @dataclass
@@ -42,6 +49,14 @@ def occupied_cell_count(grid: Optional[List[List[bool]]]) -> Optional[int]:
     if grid is None:
         return None
     return sum(1 for row in grid for cell in row if cell)
+
+
+def inventory_is_full(eyes: "Eyes.BotEyes", *, slot_count: int = INV_SLOTS) -> bool:
+    """True when occupied inventory cells reach ``slot_count`` (default 28)."""
+    pe = eyes.perception_envelope or {}
+    occ = pe.get("inventory_slot_occupancy")
+    n = occupied_cell_count(occ)
+    return n is not None and n >= slot_count
 
 
 def build_game_state(

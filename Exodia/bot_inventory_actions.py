@@ -5,8 +5,8 @@ Coordinates are Win32 screen space from ``inventory_slot_screen_xy`` + ``client_
 """
 from __future__ import annotations
 
+import math
 import os
-import random
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
@@ -61,6 +61,73 @@ def _env_float(key: str, default: float) -> float:
         return float(raw)
     except ValueError:
         return default
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def slot_manhattan(a: Tuple[int, int], b: Tuple[int, int]) -> int:
+    """Grid steps between two inventory slots ``(row, col)``."""
+    return abs(int(a[0]) - int(b[0])) + abs(int(a[1]) - int(b[1]))
+
+
+def closest_slot(
+    reference: Tuple[int, int],
+    candidates: Sequence[Tuple[int, int]],
+) -> Optional[Tuple[int, int]]:
+    """Candidate slot nearest ``reference`` (Manhattan); ties → top-left."""
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda c: (slot_manhattan(reference, c), int(c[0]), int(c[1])),
+    )
+
+
+def pick_distinct_screen_points(
+    sources: Sequence[Sequence[int]],
+    dests: Sequence[Sequence[int]],
+    *,
+    min_sep_px: Optional[int] = None,
+) -> Tuple[Optional[Tuple[int, int]], Optional[Tuple[int, int]]]:
+    """
+    Choose source and destination screen points for use-on.
+
+    Picks the destination **closest** to the source (screen distance). Returns
+    ``(None, None)`` when every destination lies on the source point.
+    """
+    sep = min_sep_px
+    if sep is None:
+        sep = _env_int("EXODIA_INV_USE_ON_MIN_SEP_PX", 8)
+    src_pts = sorted(
+        {(int(p[0]), int(p[1])) for p in sources},
+        key=lambda p: (p[0], p[1]),
+    )
+    dst_pts = [(int(p[0]), int(p[1])) for p in dests]
+    for src in src_pts:
+        pool = [
+            dst
+            for dst in dst_pts
+            if math.hypot(dst[0] - src[0], dst[1] - src[1]) >= sep
+        ]
+        if pool:
+            dst = min(
+                pool,
+                key=lambda d: (
+                    math.hypot(d[0] - src[0], d[1] - src[1]),
+                    d[0],
+                    d[1],
+                ),
+            )
+            return src, dst
+    return None, None
 
 
 def client_screen_center(client_rect: Sequence[int]) -> Tuple[int, int]:
@@ -262,11 +329,11 @@ def use_named_item_on_named_item(
     center_first: bool = True,
 ) -> UseItemOnResult:
     """
-    Use one named inventory item on another (e.g. flax on flax).
+    Use one named inventory item on another (e.g. hammer on infernal eel).
 
-    Picks random matching slots when ``source_slot`` / ``dest_slot`` are omitted.
-    Source and destination must be **different** slots. If only one matching
-    destination location exists and it equals the source, returns ``dest_not_found``.
+    When ``source_slot`` / ``dest_slot`` are omitted, picks a stable source slot
+    and the **closest** matching destination slot (Manhattan grid distance).
+    Source and destination must be **different** slots.
     """
     src_candidates = slots_matching_item(slot_items, source_item)
     dst_candidates = slots_matching_item(slot_items, dest_item)
@@ -282,7 +349,7 @@ def use_named_item_on_named_item(
     elif not src_candidates:
         return UseItemOnResult.fail("source_not_found", missing_item=source_item)
     else:
-        src = random.choice(src_candidates)
+        src = sorted(src_candidates, key=lambda s: (s[0], s[1]))[0]
 
     if dest_slot is not None:
         if dest_slot not in dst_candidates:
@@ -308,7 +375,13 @@ def use_named_item_on_named_item(
                 missing_item=dest_item,
                 source_slot=src,
             )
-        dst = random.choice(dst_pool)
+        dst = closest_slot(src, dst_pool)
+        if dst is None:
+            return UseItemOnResult.fail(
+                "dest_not_found",
+                missing_item=dest_item,
+                source_slot=src,
+            )
 
     result = use_inventory_slot_on_slot(
         inventory_rect,

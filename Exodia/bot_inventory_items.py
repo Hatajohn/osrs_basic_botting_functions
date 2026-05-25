@@ -961,3 +961,42 @@ def slot_at_client_point(
             if x <= client_x < x + w and y <= client_y < y + h:
                 return row, col
     return None
+
+
+def count_labeled_item_slots(
+    slot_items: Sequence[Sequence[Optional[str]]],
+    occupancy: Sequence[Sequence[bool]],
+    item_name: str,
+) -> int:
+    """Occupied slots whose identify label matches ``item_name`` (case-insensitive)."""
+    needle = item_name.strip().lower()
+    if not needle:
+        return 0
+    n = 0
+    for row in range(INV_ROWS):
+        for col in range(INV_COLS):
+            if row >= len(occupancy) or col >= len(occupancy[row]) or not occupancy[row][col]:
+                continue
+            if row >= len(slot_items) or col >= len(slot_items[row]):
+                continue
+            label = slot_items[row][col]
+            if label and label.strip().lower() == needle:
+                n += 1
+    return n
+
+
+def read_inventory_labels(eyes) -> Tuple[
+    Sequence[Sequence[Optional[str]]], Sequence[Sequence[bool]]
+]:
+    """Identify occupied inventory slots (``frame_buckets=True``) after ``bot_update``."""
+    pe = eyes.perception_envelope or {}
+    occ = pe.get("inventory_slot_occupancy")
+    if occ is None:
+        occ = eyes.compute_inventory_slot_occupancy()
+    grid, _, _ = identify_inventory_slot_items(
+        eyes.curr_client,
+        eyes.inventory_rect,
+        occ,
+        frame_buckets=True,
+    )
+    return grid, occ
