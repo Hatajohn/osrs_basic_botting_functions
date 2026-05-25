@@ -459,10 +459,30 @@ def analyze_inventory_panel_occupancy(
 
 def _load_template_gray(path):
     """Load a single-channel template or return ``None`` if missing or empty."""
-    t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-    if t is None or t.size == 0:
-        return None
-    return t
+    gray, _mask = _load_template_gray_and_mask(path)
+    return gray
+
+
+def _load_template_gray_and_mask(path):
+    """
+    Load grayscale template and optional ``matchTemplate`` mask.
+
+    Uses PNG alpha when present; otherwise no mask (legacy grayscale load).
+    """
+    raw = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    if raw is None or raw.size == 0:
+        return None, None
+    if raw.ndim == 2:
+        return raw, None
+    if raw.shape[2] == 4:
+        gray = cv2.cvtColor(raw, cv2.COLOR_BGRA2GRAY)
+        alpha = raw[:, :, 3]
+        mask = np.where(alpha > 0, 255, 0).astype(np.uint8)
+        if int(cv2.countNonZero(mask)) < 16:
+            return gray, None
+        return gray, mask
+    gray = cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
+    return gray, None
 
 
 def _mask_and_contours_bgr(image_bgr, boundaries):
@@ -1132,6 +1152,8 @@ class BotEyes():
         name: str = "Screenshot",
         search_roi: Optional[List[int]] = None,
         max_peaks: int = 32,
+        template_path: Optional[str] = None,
+        frame_bgr: Optional[np.ndarray] = None,
     ) -> LocateImageResult:
         """
         Template match via ``TM_CCOEFF_NORMED`` with peak NMS. Returns structured result including scores.
@@ -1145,10 +1167,16 @@ class BotEyes():
                 return LocateImageResult(filename, False, "no_inventory_crop", [])
             img_rgb = copy.deepcopy(self.curr_inventory)
         else:
-            img_rgb = copy.deepcopy(self.curr_client)
+            if frame_bgr is not None and getattr(frame_bgr, "size", 0) > 0:
+                img_rgb = copy.deepcopy(frame_bgr)
+            else:
+                img_rgb = copy.deepcopy(self.curr_client)
+        result_name = filename or (
+            os.path.basename(template_path) if template_path else ""
+        )
         try:
             if img_rgb is None or img_rgb.size == 0:
-                return LocateImageResult(filename, False, "empty_image", [])
+                return LocateImageResult(result_name, False, "empty_image", [])
             img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
             off_x, off_y = 0, 0
             if search_roi is not None and len(search_roi) == 4:
@@ -1157,20 +1185,23 @@ class BotEyes():
                 img_gray = img_gray[sy : sy + sh, sx : sx + sw]
                 img_rgb = img_rgb[sy : sy + sh, sx : sx + sw]
                 off_x, off_y = sx, sy
-            template_path = os.path.join(os.getcwd(), "images", filename)
-            template = _load_template_gray(template_path)
+            tpl_path = template_path or os.path.join(os.getcwd(), "images", filename)
+            template, tpl_mask = _load_template_gray_and_mask(tpl_path)
             if template is None:
                 if self._DEBUG:
-                    print("locate_image: missing template images/", filename, sep="")
-                return LocateImageResult(filename, False, "missing_template", [])
+                    print("locate_image: missing template", tpl_path, sep="")
+                return LocateImageResult(result_name, False, "missing_template", [])
             tw, th = template.shape[::-1]
-            res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
+            if tpl_mask is not None:
+                res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED, mask=tpl_mask)
+            else:
+                res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
             peaks = _match_template_peaks(res, tw, th, threshold, max_peaks=max_peaks)
             if not peaks:
                 if self._DEBUG:
                     Env.debug_view(img_rgb, "View image")
                     print("Locate image could not find the image ", filename)
-                return LocateImageResult(filename, False, None, [])
+                return LocateImageResult(result_name, False, None, [])
             ox = self.inventory_global[0] if inv else self.client_rect[0]
             oy = self.inventory_global[1] if inv else self.client_rect[1]
             matches: List[TemplateMatch] = []
@@ -1194,10 +1225,10 @@ class BotEyes():
                     )
             if self._DEBUG:
                 Env.debug_view(img_rgb, "View image")
-            return LocateImageResult(filename, True, None, matches)
+            return LocateImageResult(result_name, True, None, matches)
         except Exception as exc:
-            print("Locate image failed! %s (inv=%s file=%s)" % (exc, inv, filename))
-            return LocateImageResult(filename, False, "exception", [])
+            print("Locate image failed! %s (inv=%s file=%s)" % (exc, inv, result_name))
+            return LocateImageResult(result_name, False, "exception", [])
 
     # search_roi: optional [x, y, w, h] within client or inventory image to limit matchTemplate cost
     def locate_image(self, inv=False, filename="", threshold=0.8, name="Screenshot", search_roi=None):

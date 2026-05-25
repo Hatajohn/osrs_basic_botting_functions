@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 Point = List[int]
 
 __all__ = [
+    "CyanMarkerRegion",
     "SacredEelSpotCandidate",
     "SpotVerifyConfig",
     "cyan_marker_ratio",
@@ -35,6 +36,7 @@ __all__ = [
     "dedupe_spot_candidates",
     "eel_icon_score_at",
     "filter_sacred_eel_spots",
+    "locate_cyan_marker_regions",
     "locate_sacred_eel_spots",
     "spot_template_trust_threshold",
     "template_trust_fallback",
@@ -198,6 +200,209 @@ def cyan_marker_ratio(
     cx = int(m["m10"] / m["m00"])
     cy = int(m["m01"] / m["m00"])
     return ratio, [cx, cy]
+
+
+@dataclass(frozen=True)
+class CyanMarkerRegion:
+    """One RuneLite-style cyan tile marker in client-local coordinates."""
+
+    client_rect: List[int]
+    client_center: List[int]
+    area: int
+
+
+def locate_cyan_marker_regions(
+    client_bgr: np.ndarray,
+    search_roi: Optional[Sequence[int]] = None,
+    *,
+    hsv_lower: Optional[Tuple[int, int, int]] = None,
+    hsv_upper: Optional[Tuple[int, int, int]] = None,
+    min_area: Optional[int] = None,
+    max_area: Optional[int] = None,
+    max_side: Optional[int] = None,
+    min_side: Optional[int] = None,
+    border_margin: Optional[int] = None,
+) -> List[CyanMarkerRegion]:
+    """
+    Find compact cyan blobs (object-marker tiles) inside ``search_roi``.
+
+    Uses connected components on an HSV cyan mask — intended for RuneLite ground
+    highlights, not full-frame template peaks.
+
+    Adjacent tile outlines often merge into one wide/tall component. Oversized blobs
+    (width, height, or ROI fraction over limits) are split into ~``EXODIA_WORLD_CYAN_TILE_W``
+    columns with tight mask bounds so clustered fishing spots stay separate.
+    """
+    if client_bgr is None or client_bgr.size == 0:
+        return []
+
+    cfg = default_spot_verify_config()
+    lo = hsv_lower if hsv_lower is not None else cfg.cyan_hsv_lower
+    hi = hsv_upper if hsv_upper is not None else cfg.cyan_hsv_upper
+    min_area = int(min_area if min_area is not None else os.environ.get("EXODIA_WORLD_CYAN_MIN_AREA", "40"))
+    max_area = int(max_area if max_area is not None else os.environ.get("EXODIA_WORLD_CYAN_MAX_AREA", "2000"))
+    max_side = int(max_side if max_side is not None else os.environ.get("EXODIA_WORLD_CYAN_MAX_SIDE", "90"))
+    min_side = int(min_side if min_side is not None else os.environ.get("EXODIA_WORLD_CYAN_MIN_SIDE", "12"))
+    border_margin = int(
+        border_margin if border_margin is not None else os.environ.get("EXODIA_WORLD_CYAN_BORDER_MARGIN", "3")
+    )
+    tile_w = int(os.environ.get("EXODIA_WORLD_CYAN_TILE_W", "56"))
+    split_min_w = int(os.environ.get("EXODIA_WORLD_CYAN_SPLIT_MIN_W", "72"))
+    roi_frac = float(os.environ.get("EXODIA_WORLD_CYAN_MAX_ROI_FRAC", "0.12"))
+
+    h0, w0 = client_bgr.shape[:2]
+    if search_roi is not None and len(search_roi) == 4:
+        sx, sy, sw, sh = _clamp_roi(w0, h0, search_roi)
+    else:
+        sx, sy, sw, sh = 0, 0, w0, h0
+
+    patch = client_bgr[sy : sy + sh, sx : sx + sw]
+    if patch.size == 0:
+        return []
+
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array(lo, dtype=np.uint8), np.array(hi, dtype=np.uint8))
+    if border_margin > 0 and sw > border_margin * 2 and sh > border_margin * 2:
+        m = border_margin
+        mask[:m, :] = 0
+        mask[-m:, :] = 0
+        mask[:, :m] = 0
+        mask[:, -m:] = 0
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    def _accepts(w: int, h: int, area: int) -> bool:
+        if area < min_area or area > max_area:
+            return False
+        if w > max_side or h > max_side or w < min_side or h < min_side:
+            return False
+        aspect = w / float(max(h, 1))
+        if aspect < 0.35 or aspect > 2.8:
+            return False
+        return True
+
+    def _append_rect(regions: List[CyanMarkerRegion], rx: int, ry: int, rw: int, rh: int, area: int) -> None:
+        if not _accepts(rw, rh, area):
+            return
+        regions.append(
+            CyanMarkerRegion(
+                client_rect=[rx, ry, rw, rh],
+                client_center=[rx + rw // 2, ry + rh // 2],
+                area=area,
+            )
+        )
+
+    def _append_from_mask_slice(
+        regions: List[CyanMarkerRegion],
+        slice_mask: np.ndarray,
+        ox: int,
+        oy: int,
+    ) -> None:
+        if slice_mask.size == 0 or not np.any(slice_mask):
+            return
+        rows = np.any(slice_mask, axis=1)
+        cols = np.any(slice_mask, axis=0)
+        y0 = int(np.argmax(rows))
+        y1 = int(len(rows) - np.argmax(rows[::-1]))
+        x0 = int(np.argmax(cols))
+        x1 = int(len(cols) - np.argmax(cols[::-1]))
+        rw, rh = x1 - x0, y1 - y0
+        if rw < min_side or rh < min_side:
+            return
+        patch = slice_mask[y0:y1, x0:x1]
+        chunk_area = int(cv2.countNonZero(patch))
+        if chunk_area < min_area:
+            return
+        _append_rect(regions, sx + ox + x0, sy + oy + y0, rw, rh, chunk_area)
+
+    def _vertical_bands(sub: np.ndarray) -> List[Tuple[int, int]]:
+        row = np.any(sub, axis=1)
+        if not row.any():
+            return []
+        y0i = int(np.argmax(row))
+        y1i = int(len(row) - np.argmax(row[::-1]))
+        inner = row[y0i:y1i]
+        rh = len(inner)
+        if rh <= max_side:
+            return [(0, sub.shape[0])]
+        lo = int(rh * 0.35)
+        hi = int(rh * 0.85)
+        if hi <= lo + 5:
+            return [(0, sub.shape[0])]
+        valley_rel = lo + int(np.argmin(inner[lo:hi]))
+        if inner[valley_rel] > max(4, int(inner.max() * 0.12)):
+            return [(0, sub.shape[0])]
+        split_at = y0i + valley_rel
+        return [(0, split_at + 1), (split_at, sub.shape[0])]
+
+    def _split_band_horizontal(
+        regions: List[CyanMarkerRegion],
+        band: np.ndarray,
+        base_x: int,
+        base_y: int,
+    ) -> None:
+        bh, bw = band.shape[:2]
+        if bw < split_min_w and bw <= max_side and bh <= max_side:
+            _append_from_mask_slice(regions, band, base_x, base_y)
+            return
+        n = max(2, int(round(bw / float(max(tile_w, 24)))))
+        chunk_w = max(min_side, bw // n)
+        for i in range(n):
+            cx_off = i * chunk_w
+            cw = bw - cx_off if i == n - 1 else chunk_w
+            if cw < min_side:
+                continue
+            col_slice = band[:, cx_off : cx_off + cw]
+            _append_from_mask_slice(regions, col_slice, base_x + cx_off, base_y)
+
+    def _split_merged_blob(
+        regions: List[CyanMarkerRegion],
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        area: int,
+    ) -> None:
+        sub = mask[y : y + h, x : x + w]
+        if sub.size == 0:
+            return
+        for b0, b1 in _vertical_bands(sub):
+            band = sub[b0:b1, :]
+            if band.size == 0 or not np.any(band):
+                continue
+            _split_band_horizontal(regions, band, sx + x, sy + y + b0)
+
+    def _blob_needs_split(w: int, h: int, area: int) -> bool:
+        if area < min_area * 2:
+            return False
+        roi_w_limit = int(sw * roi_frac)
+        roi_h_limit = int(sh * roi_frac)
+        return (
+            w >= split_min_w
+            or w > max_side
+            or h > max_side
+            or w > roi_w_limit
+            or h > roi_h_limit
+        )
+
+    _num, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask)
+    regions: List[CyanMarkerRegion] = []
+    for i in range(1, int(stats.shape[0])):
+        x, y, w, h, area = (int(stats[i, j]) for j in range(5))
+        if area < min_area:
+            continue
+        if area > max_area:
+            continue
+        if _blob_needs_split(w, h, area):
+            _split_merged_blob(regions, x, y, w, h, area)
+            continue
+        if w > int(sw * roi_frac) or h > int(sh * roi_frac):
+            continue
+        _append_rect(regions, sx + x, sy + y, w, h, area)
+
+    regions.sort(key=lambda r: (-r.area, r.client_center[1], r.client_center[0]))
+    return regions
 
 
 def eel_icon_score_at(

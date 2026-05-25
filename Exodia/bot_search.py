@@ -31,16 +31,29 @@ def playspace_search_roi(
     *,
     right_margin: int = 240,
     bottom_margin: int = 180,
+    inventory_rect: Optional[Sequence[int]] = None,
+    chat_rect: Optional[Sequence[int]] = None,
 ) -> Optional[List[int]]:
     """
     Client-local ROI excluding inventory (right) and chat/footer (bottom).
+
+    When ``inventory_rect`` / ``chat_rect`` are known, tighten the ROI to the
+    playspace left of the inventory panel and above the chat strip.
 
     Returns ``[x, y, w, h]`` or ``None`` if the frame is too small.
     """
     w0, h0 = int(frame_width), int(frame_height)
     if w0 < 100 or h0 < 100:
         return None
-    return [0, 0, max(100, w0 - right_margin), max(100, h0 - bottom_margin)]
+    w = max(100, w0 - right_margin)
+    h = max(100, h0 - bottom_margin)
+    if inventory_rect is not None and len(inventory_rect) == 4:
+        w = min(w, max(100, int(inventory_rect[0])))
+    if chat_rect is not None and len(chat_rect) == 4:
+        h = min(h, max(100, int(chat_rect[1])))
+    if w < 100 or h < 100:
+        return None
+    return [0, 0, w, h]
 
 
 def walk_direction_for_attempt(attempt_index: int) -> str:

@@ -33,7 +33,7 @@ Living reference for how automation is layered in this repo. Update this file wh
 | `BotEyes.capture_frame()` | Buffer copy or sync grab + ROIs / masks |
 | `BotEyes.update()` | Alias for `capture_frame()` |
 | `BotEyes.locate_image()` | Template match → screen points |
-| `BotEyes.locate_image_detailed()` | Match + scores/metadata for agents |
+| `BotEyes.locate_image_detailed()` | Match + scores/metadata; optional `template_path`, `frame_bgr` for playspace/off-path templates |
 | `BotEyes.locate_color()` | Color mask → points (optional DBSCAN) |
 | `BotEyes.locate_cluster()` | Clustered color → single best point |
 | `BotEyes.get_action_text()` | Action-strip tri-state code `0/1/2` |
@@ -57,6 +57,23 @@ Living reference for how automation is layered in this repo. Update this file wh
 | `inventory_outline_template_path()` | Default `captures/osrs_inventory_base.png` |
 
 Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0`) so icons can slide within the cell; occupancy uses the tighter inset crop separately. Named template match uses **bidirectional** `matchTemplate` (cross-score) and does not require fingerprint gates to pass. Seen-item fingerprints live in `bot_match_index.py` (see below).
+
+### World objects (`bot_world_objects.py`)
+
+| Function | Role |
+|----------|------|
+| `captures_dir()` / `capture_template_path()` | Resolve `captures/<name>.png` (override root via `EXODIA_CAPTURES_DIR`) |
+| `world_template_names()` | Parse `EXODIA_WORLD_TEMPLATES` (default `osrs_infernalEel`) |
+| `world_match_threshold()` | Default `0.65` via `EXODIA_WORLD_THRESHOLD` (separate from spot seek) |
+| `filter_matches_outside_rect()` | Drop template peaks whose center falls inside inventory panel |
+| `locate_cyan_marker_regions()` | HSV cyan mask → connected components; wide merged blobs split into tile-sized segments |
+| `locate_world_objects()` | Cyan markers → icon match above each (player true tile rejected); optional playspace fallback |
+| `locate_world_objects_from_eyes()` | Same via `BotEyes` + `_client_bgr_for_spot_ops` |
+| `draw_world_detect_overlay()` | Cyan search ROI, inventory outline, hit boxes/labels |
+
+Reuses `bot_eyes.locate_image_detailed(..., template_path=, frame_bgr=)`, `bot_search.playspace_search_roi(..., inventory_rect=, chat_rect=)`, and `bot_spot_verify.dedupe_spot_candidates` (adapter). No eel/cyan verify — template match only. Infernal FSM spot seek is unchanged; wire-in is follow-up.
+
+**World detect env:** `EXODIA_WORLD_TEMPLATES`, `EXODIA_WORLD_TEST_LIVE`, `EXODIA_WORLD_OFFLINE_IMAGE`, `EXODIA_WORLD_MIN_HITS`, `EXODIA_WORLD_THRESHOLD`, `EXODIA_WORLD_CYAN_FIRST`, `EXODIA_WORLD_CYAN_FALLBACK`, `EXODIA_WORLD_ICON_PAD_X`, `EXODIA_WORLD_ICON_PAD_ABOVE`, `EXODIA_WORLD_ICON_PAD_BELOW`, `EXODIA_WORLD_CYAN_MIN_AREA`, `EXODIA_WORLD_CYAN_MAX_AREA`, `EXODIA_WORLD_CYAN_MAX_SIDE`, `EXODIA_WORLD_CYAN_MIN_SIDE`, `EXODIA_WORLD_CYAN_SPLIT_MIN_W`, `EXODIA_WORLD_CYAN_TILE_W`, `EXODIA_WORLD_CYAN_MAX_ROI_FRAC`, `EXODIA_CAPTURES_DIR`, `EXODIA_SPOT_DEDUPE_RADIUS`.
 
 ### Match index (`bot_match_index.py`)
 
@@ -184,7 +201,8 @@ Use-on env: `EXODIA_INV_USE_ON_GAP_S`, `EXODIA_INV_CLICK_RAD`, `EXODIA_INV_USE_O
 | `bot_gamestate.py` | `inventory_is_full()` | True when occupied cells ≥ 28 |
 | `bot_inventory_count.py` | `count_inventory_*()` | Stack / object / quantity counts |
 | `bot_action_ui.py` | `is_action_*()`, `action_code_label()` | Predicates on action code |
-| `bot_search.py` | `playspace_search_roi()`, `ground_click_target()`, `walk_direction_for_attempt()` | ROI / walk target math (no I/O loop) |
+| `bot_search.py` | `playspace_search_roi()` (optional `inventory_rect` / `chat_rect` clip), `ground_click_target()`, `walk_direction_for_attempt()` | ROI / walk target math (no I/O loop) |
+| `bot_world_objects.py` | `capture_template_path()`, `filter_matches_outside_rect()`, `draw_world_detect_overlay()` | Captures-dir templates + overlay helpers |
 | `bot_spot_verify.py` | `cyan_marker_ratio()`, `eel_icon_score_at()`, `verify_spot_at_client_xy()` | Single-spot checks |
 | `BasicUtils.py` | `wait_ticks()` | Sleep `n` OSRS ticks + jitter |
 | `bot_wait.py` | `poll_until()` | Generic timed condition poll |
@@ -217,6 +235,8 @@ Use-on env: `EXODIA_INV_USE_ON_GAP_S`, `EXODIA_INV_CLICK_RAD`, `EXODIA_INV_USE_O
 | **Eyes** | `tests/bot_inventory_test.py` | find inventory, count, identify — capture/vision only |
 | **Arms** | `tests/bot_inventory_arms_test.py --online` | drag item(s); verify move via occupancy (uses eyes for read-back only) |
 | **Use-on** | `tests/bot_inventory_use_on_test.py --online` | hammer → infernal eel (named labels); closest eel to hammer |
+| **World eyes** | `tests/bot_world_detect_test.py` | Playspace template match — capture/vision only (offline structural) |
+| **World eyes (live)** | `tests/bot_world_detect_test.py --live` | Live capture; overlay at `captures/world_detect_overlay.png` |
 
 Shared helpers: `tests/inventory_test_common.py`.
 
@@ -235,7 +255,12 @@ Shared helpers: `tests/inventory_test_common.py`.
 |---------------|---------|
 | use hammer on eel | Identify `items/` labels; `use_named_item_on_named_item`; skip if either missing |
 
-Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `captures/offline_inventory_detect.png` (eyes offline); `captures/inventory_arms_overlay.png` (arms); `captures/inventory_use_on_overlay.png` (use-on).
+Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `captures/offline_inventory_detect.png` (eyes offline); `captures/inventory_arms_overlay.png` (arms); `captures/inventory_use_on_overlay.png` (use-on); `captures/world_detect_overlay.png` (world eyes).
+
+| Step (world eyes) | Summary |
+|-------------------|---------|
+| locate world objects | `playspace_search_roi` → match `captures/*.png` → filter inventory → dedupe |
+| overlay | Cyan ROI, green inventory outline, hit markers + status lines |
 
 ### Search loop — `bot_search.py`
 
@@ -265,6 +290,15 @@ Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `capt
 | `locate_sacred_eel_spots()` | Template peaks → filter/verify → candidates | Sacred eel fishing, diagnose |
 | `filter_sacred_eel_spots()` | Trust + cyan + eel icon gates | Inside locate pipeline |
 | `sacred_eel_spot_click_points()` | Candidates → click points | Sacred eel fishing |
+
+### World object pipeline — `bot_world_objects.py`
+
+| Function | Steps (summary) | Used by |
+|----------|-----------------|---------|
+| `locate_world_objects()` | Cyan tile markers → template in icon window above each → dedupe | `tests/bot_world_detect_test.py` |
+| `locate_world_objects_from_eyes()` | `_client_bgr_for_spot_ops` + eyes rects → `locate_world_objects` | Live world detect test |
+
+Not wired into infernal FSM yet — visual verification via `captures/world_detect_overlay.png` only.
 
 ### Harness — `bot_harness.py`
 
@@ -329,6 +363,8 @@ Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `capt
 | `tests/bot_inventory_test.py --online` | same (live capture) | — |
 | `tests/bot_inventory_arms_test.py --online` | occupancy read-back | `BotArms.drag_at`, center-mouse capture discipline |
 | `tests/bot_inventory_use_on_test.py --online` | `identify_inventory_slot_items`, `closest_slot` | `use_named_item_on_named_item` |
+| `tests/bot_world_detect_test.py` (offline) | `locate_world_objects`, `draw_world_detect_overlay` | — |
+| `tests/bot_world_detect_test.py --live` | `locate_world_objects_from_eyes`, live capture | `bot_init`, `bot_update` |
 
 ---
 
@@ -351,8 +387,8 @@ Live client PNGs may contain account-identifying UI. **Allowlisted in git:** `ca
 
 **Product decisions:** Canonical work in Exodia harness/FSM only; legacy root scripts not first-class; blob tracking v1; chat kept as separate crop; scheduler owned by `bot_legs` via **`SacredEelStepper`** (not harness brain).
 
-**Recent:** infernal eel FSM (`InfernalEelFishing/`); inventory use-on (`use_x_on_y`, `use_named_item_on_named_item`, closest-dest selection); `tests/bot_inventory_use_on_test.py`.
+**Recent:** world object detection (`bot_world_objects.py`, `tests/bot_world_detect_test.py --live`); infernal eel FSM (`InfernalEelFishing/`); inventory use-on (`use_x_on_y`, `use_named_item_on_named_item`, closest-dest selection); `tests/bot_inventory_use_on_test.py`.
 
 ---
 
-*Last reviewed: infernal eel FSM package + inventory bucket helpers.*
+*Last reviewed: world object playspace detection + infernal eel FSM package.*

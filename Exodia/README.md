@@ -23,6 +23,7 @@ Python automation harness for **RuneLite** (OSRS): capture the client window, in
 | **Wait / poll** | `bot_wait.py` | `poll_until()` — generic timed condition polling (injectable sleep/stop). |
 | **Action strip UI** | `bot_action_ui.py` | Tri-state action line (0/1/2), predicates, `wait_for_action_code()`. |
 | **Playspace search** | `bot_search.py` | `playspace_search_roi()`, `search_with_camera_pan()`, `click_random_hit()`. |
+| **World objects** | `bot_world_objects.py` | Playspace template match outside inventory (infernal eel spot icon); ROI + filter + dedupe glue. |
 | **Spot verification** | `bot_spot_verify.py` | Sacred eel spot template + eel icon + cyan RuneLite outline checks. |
 | **Session events** | `bot_session_events.py` | Per-run JSONL at `logs/<script_id>_events.jsonl`; `log_event()`; disable with `EXODIA_EVENTS=0`. |
 | **Perception status** | `bot_perception_status.py` | `perception_status_from_eyes()` — capture mean, inventory calibration, action code for `runtime_status.json`. |
@@ -229,6 +230,37 @@ Outputs (local, gitignored except committed templates):
 | `captures/offline_inventory_detect.png` | Eyes offline only |
 | `captures/inventory_arms_overlay.png` | Arms suite |
 | `captures/inventory_use_on_overlay.png` | Use-on suite |
+| `captures/world_detect_overlay.png` | World object eyes suite |
+
+### World object integration tests
+
+Eyes-only suite for **playspace** template match (not inventory). Default template: **`captures/osrs_infernalEel.png`**.
+
+| Suite | Command | What it tests |
+|-------|---------|---------------|
+| Eyes (offline) | `python tests/bot_world_detect_test.py` | ROI, match pipeline, overlay — structural (0 hits OK on inventory fixture) |
+| Eyes (live) | `python tests/bot_world_detect_test.py --live` | Same on live RuneLite capture; expects ≥1 hit by default |
+
+Override offline frame: `EXODIA_WORLD_OFFLINE_IMAGE=captures/live_probe_now.png python tests/bot_world_detect_test.py`
+
+Useful env overrides:
+
+| Variable | Purpose |
+|----------|---------|
+| `EXODIA_WORLD_TEMPLATES` | Comma-separated capture stems (default `osrs_infernalEel`) |
+| `EXODIA_WORLD_TEST_LIVE` | `1` when using `--live` (set by script) |
+| `EXODIA_WORLD_OFFLINE_IMAGE` | Offline PNG path (default: inventory reference fixture) |
+| `EXODIA_WORLD_MIN_HITS` | Live run: min hits required (default `1`; set `0` for structural-only live) |
+| `EXODIA_WORLD_THRESHOLD` | World icon match threshold inside cyan window (default `0.65`) |
+| `EXODIA_WORLD_CYAN_FIRST` | Find cyan tile markers first, then match icon above (default on) |
+| `EXODIA_WORLD_CYAN_FALLBACK` | Full playspace template scan when cyan path finds nothing (default off) |
+| `EXODIA_WORLD_ICON_PAD_X` / `_PAD_ABOVE` / `_PAD_BELOW` | Icon search padding around cyan tile box (default `30` / `70` / `30`) |
+| `EXODIA_WORLD_CYAN_MIN_AREA` / `_MAX_AREA` / `_MAX_SIDE` / `_MIN_SIDE` | Cyan blob size filters (default min side `12`) |
+| `EXODIA_WORLD_CYAN_SPLIT_MIN_W` / `_TILE_W` | Split merged wide blobs into tile-sized segments (default `72` / `56`) |
+| `EXODIA_WORLD_CYAN_MAX_ROI_FRAC` | Reject blobs spanning more than this fraction of search ROI (default `0.12`) |
+| `EXODIA_WORLD_SCORE_MARGIN` | Legacy full-scan weak-peak drop (only when cyan fallback runs) |
+| `EXODIA_CAPTURES_DIR` | Template + overlay directory (default `captures/`) |
+| `EXODIA_SPOT_DEDUPE_RADIUS` | Dedupe radius px (default `28`) |
 
 Item templates: add cropped slot PNGs to **`items/`** (filename stem = item name, e.g. `flax.png` → `"flax"`). Matching uses the **full slot tile** (50×45) so `matchTemplate` can align icons that sit slightly off-center; occupancy still uses the inset crop.
 
@@ -273,7 +305,7 @@ Live captures can show **username, chat, friends, inventory contents**, etc. **D
 | Policy | Detail |
 |--------|--------|
 | `.gitignore` | All `*.png` ignored except **`captures/osrs_inventory_base.png`** (static inventory frame template) and **`items/*.png`** (item icon templates — no account info) |
-| `captures/` | Overlays, test output, calibrations — local only |
+| `captures/` | Overlays, test output, calibrations, world templates (e.g. **`osrs_infernalEel.png`**) — local only |
 | `tests/fixtures/**/*.png` | Offline reference captures — local only |
 | Pre-commit hook | From repo root (`Botting/`): `git config core.hooksPath githooks` — blocks **new** PNG paths except allowlisted template + `items/*.png` |
 
@@ -334,6 +366,8 @@ python -m InfernalEelFishing.infernal_eel_fishing
 ```
 
 Session log: **`Exodia/logs/infernal_eel_latest.log`**. Item labels: `EXODIA_INFERNAL_EEL_ITEM`, `EXODIA_INFERNAL_HAMMER_ITEM`. Spot templates: `EXODIA_INFERNAL_SPOT_TEMPLATES` (default `infernal_eel_spot.png` under `images/`).
+
+**World spot icon (playspace detect test):** template **`captures/osrs_infernalEel.png`**; run `python tests/bot_world_detect_test.py --live` and inspect **`captures/world_detect_overlay.png`**. Tune **`EXODIA_WORLD_THRESHOLD`** (default `0.65`) if hits are missed or lava sparks false-positive.
 
 When a manual rect is used, capture and mouse input default to **`wsl_ps`** (Windows screen + clicks via PowerShell) if `/mnt/c/Windows/.../powershell.exe` exists. Override with `EXODIA_CAPTURE_BACKEND` / `EXODIA_INPUT_BACKEND`.
 
