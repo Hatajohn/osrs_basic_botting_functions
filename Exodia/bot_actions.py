@@ -87,24 +87,48 @@ def scan_for(b_eyes, b_arms, target="", method="image", bounds=None, attempts=10
             b_arms.click_here(click_info, center=b_eyes.local_center)
 
 
-# OSRS use-on: click source item, then destination item (both inventory templates).
-def use_item_on(b_eyes, b_arms, target_1, target_2):
+def use_x_on_y(
+    eyes,
+    arms,
+    source: str,
+    dest: str,
+    *,
+    inv: bool = True,
+    threshold: float | None = None,
+    click_rad: int = 11,
+):
+    """
+    OSRS inventory use-on: click source (X), then destination (Y).
+
+    Examples:
+      use_x_on_y(eyes, arms, "osrs_imcandoHammer.png", "osrs_infernalEel.png")
+      use_x_on_y(eyes, arms, "osrs_knife.png", "osrs_sacredEel.png")
+    """
     from bot_inventory_actions import UseItemOnResult
 
-    targets_1 = b_eyes.locate_image(
-        filename=target_1, inv=True, name=("Scanning for %s" % target_1)
+    locate_kw: dict = {"inv": inv}
+    if threshold is not None:
+        locate_kw["threshold"] = threshold
+
+    sources = eyes.locate_image(
+        filename=source, name=("Scanning for %s" % source), **locate_kw
     )
-    targets_2 = b_eyes.locate_image(
-        filename=target_2, inv=True, name=("Scanning for %s" % target_2)
+    dests = eyes.locate_image(
+        filename=dest, name=("Scanning for %s" % dest), **locate_kw
     )
-    if not targets_1:
-        return UseItemOnResult.fail("source_not_found", missing_item=target_1)
-    if not targets_2:
-        return UseItemOnResult.fail("dest_not_found", missing_item=target_2)
-    b_arms.click_at(targets_1[0], rad=11)
+    if not sources:
+        return UseItemOnResult.fail("source_not_found", missing_item=source)
+    if not dests:
+        return UseItemOnResult.fail("dest_not_found", missing_item=dest)
+    arms.click_at(sources[0], rad=click_rad)
     time.sleep(random.uniform(0.12, 0.22))
-    b_arms.click_at(random.choice(targets_2), rad=11)
+    arms.click_at(random.choice(dests), rad=click_rad)
     return UseItemOnResult(True)
+
+
+def use_item_on(b_eyes, b_arms, target_1, target_2):
+    """Deprecated alias for :func:`use_x_on_y`."""
+    return use_x_on_y(b_eyes, b_arms, target_1, target_2)
 
 # Attempts to locate and click on an image within an image
 def click_on_image(client, bot_arms, bot_eyes, target, refresh=True):

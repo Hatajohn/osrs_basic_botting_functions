@@ -56,23 +56,24 @@ Living reference for how automation is layered in this repo. Update this file wh
 | `draw_inventory_outline_overlay()` / `draw_inventory_occupancy_overlay()` | Debug overlays (grid tint, occupied vs empty) |
 | `inventory_outline_template_path()` | Default `captures/osrs_inventory_base.png` |
 
-Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0`) so icons can slide within the cell; occupancy uses the tighter inset crop separately. Gated matching and seen-item fingerprints live in `bot_match_index.py` (see below).
+Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0`) so icons can slide within the cell; occupancy uses the tighter inset crop separately. Named template match uses **bidirectional** `matchTemplate` (cross-score) and does not require fingerprint gates to pass. Seen-item fingerprints live in `bot_match_index.py` (see below).
 
 ### Match index (`bot_match_index.py`)
 
 | Function / type | Role |
 |-----------------|------|
 | `extract_signals()` | Hue/edge/dHash/aspect + stack-text aux from slot BGR |
+| `signals_same_item()` | Symmetric pairwise slot fingerprint compare (same gates as matching) |
 | `gate_signals()` | Cheap reject with `RejectionReason` (`color`, `edge`, `size`, `dhash`) |
 | `TemplateCatalog` / `load_named_catalog()` | Named `items/*.png` only (not 8-char temp ids) |
-| `TemplateCatalog.match_query()` | Gated match → `MatchVerdict` with per-candidate diagnostics |
+| `TemplateCatalog.match_query()` | Cross-template match → `MatchVerdict` (bidirectional `matchTemplate`; named items accept on score even when fingerprint gates fail) |
 | `SeenItemRegistry` / `load_seen_registry()` | Temp-id PNGs in `items/seen/`, JSON in `items/fingerprints/` |
 | `SeenItemRegistry.resolve()` | Match seen → `unknown:<id>` or register new 8-char id |
 | `is_temp_item_id()` / `allocate_temp_id()` | Temp stem rules and collision-safe allocation |
 | `audit_seen_duplicates()` | Pairwise duplicate audit across temp + named templates |
 | `merge_duplicate_clusters()` | Apply cleanup merge (use with `python -m bot_match_index cleanup --merge`) |
 
-**Match / seen env:** `EXODIA_MATCH_COLOR_MAX_L1`, `EXODIA_MATCH_EDGE_MAX_DIFF`, `EXODIA_MATCH_SIZE_MAX_RATIO`, `EXODIA_MATCH_DHASH_MAX_BITS`, `EXODIA_MATCH_STACK_MASK`, `EXODIA_STACK_WHITE_TEXT`, `EXODIA_SEEN_ITEMS` (default `0` — set `1` for temp ids), `EXODIA_SEEN_MATCH_THRESHOLD`, `EXODIA_SEEN_DHASH_MAX_BITS`, `EXODIA_SEEN_COLOR_MAX_L1`, `EXODIA_SEEN_FRAME_DEDUPE`, `EXODIA_SEEN_MERGE_ON_LOAD`, `EXODIA_MATCH_DEBUG`, `EXODIA_CLEANUP_*`.
+**Match / seen env:** `EXODIA_MATCH_COLOR_MAX_L1`, `EXODIA_MATCH_EDGE_MAX_DIFF`, `EXODIA_MATCH_SIZE_MAX_RATIO`, `EXODIA_MATCH_DHASH_MAX_BITS`, `EXODIA_MATCH_STACK_MASK`, `EXODIA_STACK_WHITE_TEXT`, `EXODIA_SEEN_ITEMS` (default `0` — set `1` for temp ids), `EXODIA_SEEN_MATCH_THRESHOLD`, `EXODIA_SEEN_DHASH_MAX_BITS`, `EXODIA_SEEN_COLOR_MAX_L1`, `EXODIA_SEEN_FRAME_DEDUPE`, `EXODIA_SEEN_MERGE_ON_LOAD`, `EXODIA_MATCH_DEBUG`, `EXODIA_CLEANUP_*`. Pairwise slot compare: `EXODIA_SLOT_SAME_*` (default dHash **18** bits; falls back to match thresholds for color/edge/size). Frame bucketing: `EXODIA_INV_FRAME_BUCKETS`, `EXODIA_BUCKET_TEMPLATE_MIN`, `EXODIA_BUCKET_USE_SEEN_LOOSE`.
 
 ### Inventory items (`bot_inventory_items.py`)
 
@@ -84,9 +85,18 @@ Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0
 | `load_item_catalog()` | Named templates → `TemplateCatalog` |
 | `load_item_templates()` | Named `items/*.png` → `{name: gray}` (skips temp ids) |
 | `resolve_cell_item()` | Named catalog → seen registry → label + `MatchVerdict` |
+| `inventory_slot_crops_same_item()` | Two slot BGR crops → `SlotSameItemVerdict` (identity optional) |
+| `inventory_slots_same_item()` | Grid coords + client frame → same verdict |
+| `apply_frame_fingerprint_buckets()` / `summarize_frame_fingerprint_buckets()` | Ephemeral ``tmp:<8-hex>`` groups for ``?`` slots (``EXODIA_INV_FRAME_BUCKETS``) |
+| `slots_match_for_bucket()` | Tolerant same-item gate for bucketing (signals → template cross-score → seen-loose) |
+| `normalize_item_template_name()` / `save_named_item_template()` | Write ``items/<name>.png`` from a slot crop |
+| `bucket_slots_for_label()` / `slot_at_client_point()` | Sidebar bucket data + canvas click hit-test |
+| `label_inventory_item.py` | Interactive tkinter labeler (canvas + bucket sidebar) |
+| `crop_inventory_slot_bgr()` / `inventory_slot_cell_looks_occupied()` | Slot crop + empty heuristic |
 | `match_cell_to_item()` | Best gated match for one slot crop |
 | `identify_inventory_slot_items()` | Occupied slots → name, `unknown:<id>`, `"?"`, or `None` + scores + optional diagnostics |
-| `draw_inventory_item_identify_overlay()` | Occupancy tint + item labels on occupied slots |
+| `draw_inventory_item_identify_overlay()` | Occupancy tint + item labels + bucket ``x<count>`` summary above panel |
+| `draw_inventory_bucket_counts_above()` / `slot_label_bucket_counts()` | Bucket amount lines above inventory rect |
 
 Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0`) so icons can slide within the cell; occupancy uses the tighter inset crop separately.
 
@@ -176,7 +186,8 @@ Matching crops the **full slot tile** (`EXODIA_INV_ITEM_MATCH_INSET`, default `0
 | `click_on_image()` | Optional refresh → `locate_image` → `click_at` | Harness, `infernal_fishing.py`, reference brain (via harness) |
 | `click_on_color()` | Refresh → cluster → `click_at` | `infernal_fishing.py`, `agility.py`, harness `CmdClickColor` |
 | `click_color_near_color()` | Anchor color → `click_on_color` near it | — (available) |
-| `use_item_on()` | Two inv templates → use-on click sequence | `infernal_fishing.py`, harness, reference brain |
+| `use_x_on_y()` | Two inv templates → use-on click sequence (source then dest) | Harness `CmdUseItemOn`, sacred eel SCALING, infernal CRACKING (planned) |
+| `use_item_on()` | Deprecated alias → `use_x_on_y()` | `infernal_fishing.py`, legacy callers |
 | `color_is_close()` | Refresh → cluster → distance check | `agility.py` (via `check_color`) |
 | `check_color()` | `color_is_close` + log | `agility.py` |
 | `mouse_fidgit()` | Refresh → move mouse offset from center | `agility.py`, `bot_actions` `__main__` |
@@ -245,7 +256,7 @@ Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `capt
 
 | Function | Steps (summary) | Used by |
 |----------|-----------------|---------|
-| `use_knife_on_eel()` | Locate knife + eels → two `click_at` | FSM (`configure_fsm`) |
+| `use_knife_on_eel()` | *(removed)* — use `bot_actions.use_x_on_y()` | Sacred eel FSM SCALING |
 | `_locate_sacred_eels()` | `locate_sacred_eel_spots` + reject hook | Main loop, FSM |
 | `SacredEelFSM` states / `_seek_spot_click()` | Action waits + `search_with_camera_pan` + click | `sacred_eel_fishing.py` |
 
@@ -267,7 +278,7 @@ Outputs (local, gitignored): `captures/inventory_test_overlay.png` (eyes); `capt
 |---------|-----------------|
 | `CmdClickImage` | `Actions.click_on_image()` |
 | `CmdClickColor` | `Actions.click_on_color()` |
-| `CmdUseItemOn` | `Actions.use_item_on()` |
+| `CmdUseItemOn` | `Actions.use_x_on_y()` |
 | `CmdWait` / `CmdWaitTicks` | `time.sleep` (+ `constants.OSRS_TICK_S`) |
 | `CmdLog` | Print only |
 

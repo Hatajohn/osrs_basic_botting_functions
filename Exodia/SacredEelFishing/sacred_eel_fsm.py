@@ -89,7 +89,7 @@ _count_eels: Callable = lambda _e: 0
 _inv_slots: Callable = lambda _e: None
 _inv_full: Callable = lambda _e: False
 _locate_spots: Callable = lambda _e: []
-_use_knife_on_eel: Callable = lambda _e, _a: False
+INV_TEMPLATE_THRESHOLD = float(os.environ.get("EXODIA_INV_TEMPLATE_THRESHOLD", "0.35"))
 
 
 class SacredEelState(Enum):
@@ -556,8 +556,18 @@ class SacredEelMachine:
             scale_actions=ctx.scale_actions,
         )
         _set_last_action("scaling knife→eel")
-        if not _use_knife_on_eel(ctx.bot_e, ctx.bot_a):
-            print("Scaling failed — knife or eel not found in inventory")
+        result = Actions.use_x_on_y(
+            ctx.bot_e,
+            ctx.bot_a,
+            KNIFE_INV,
+            EEL_INV,
+            threshold=INV_TEMPLATE_THRESHOLD,
+        )
+        if not result.ok:
+            print(
+                "Scaling failed — %s (%s)"
+                % (result.reason, result.missing_item or "unknown")
+            )
             _after_scaling_done(ctx)
             return
 
@@ -595,7 +605,6 @@ def configure_fsm(
     inv_slots: Callable,
     inv_full: Callable,
     locate_spots: Callable,
-    use_knife_on_eel: Callable,
     spot_templates: list,
     full_eel_count: int,
     inv_slot_count: int,
@@ -610,7 +619,7 @@ def configure_fsm(
 ) -> None:
     """Wire module-level hooks from ``sacred_eel_fishing`` (called once at startup)."""
     global _sleep, _stop_check, _count_eels, _inv_slots, _inv_full
-    global _locate_spots, _use_knife_on_eel, SPOT_TEMPLATES
+    global _locate_spots, SPOT_TEMPLATES
     global FULL_EEL_COUNT, INV_SLOT_COUNT, MAX_SPOT_PAN_ATTEMPTS, MAX_SPOT_WALK_ATTEMPTS
     global SCALE_TICK_DELAY_S, MAX_SCALE_ACTIONS
     global POST_CLICK_FISH_WAIT_S, POST_CLICK_FISH_POLL_S
@@ -622,7 +631,6 @@ def configure_fsm(
     _inv_slots = inv_slots
     _inv_full = inv_full
     _locate_spots = locate_spots
-    _use_knife_on_eel = use_knife_on_eel
     SPOT_TEMPLATES = spot_templates
     FULL_EEL_COUNT = full_eel_count
     INV_SLOT_COUNT = inv_slot_count

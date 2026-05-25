@@ -21,10 +21,13 @@ import numpy as np
 
 from bot_inventory_count import (
     _read_stack_quantity,
+    _normalized_icon_match_score,
     _slot_gray_for_match,
+    _slot_gray_slide_score,
     _slot_template_score,
     _stack_band_rect,
     _stack_digit_roi,
+    _strip_runelite_tags_bgr,
 )
 
 _EXODIA_DIR = Path(__file__).resolve().parent
@@ -53,6 +56,7 @@ __all__ = [
     "seen_id_from_label",
     "is_unknown_label",
     "extract_signals",
+    "signals_same_item",
     "items_directory",
     "seen_images_directory",
     "seen_fingerprints_directory",
@@ -381,17 +385,81 @@ def _edge_diff(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.mean(np.abs(a - b)))
 
 
+def _match_signal_thresholds() -> Tuple[float, float, float, int]:
+    color_thr = _env_float("EXODIA_MATCH_COLOR_MAX_L1", 0.45)
+    edge_thr = _env_float("EXODIA_MATCH_EDGE_MAX_DIFF", 0.35)
+    size_thr = _env_float("EXODIA_MATCH_SIZE_MAX_RATIO", 0.35)
+    dhash_thr = _env_int("EXODIA_MATCH_DHASH_MAX_BITS", 12)
+    return color_thr, edge_thr, size_thr, dhash_thr
+
+
+def _slot_same_signal_thresholds() -> Tuple[float, float, float, int]:
+    """Hue / edge / aspect / dHash limits for pairwise slot comparison."""
+    color_thr = _env_float(
+        "EXODIA_SLOT_SAME_COLOR_MAX_L1",
+        _env_float("EXODIA_MATCH_COLOR_MAX_L1", 0.45),
+    )
+    edge_thr = _env_float(
+        "EXODIA_SLOT_SAME_EDGE_MAX_DIFF",
+        _env_float("EXODIA_MATCH_EDGE_MAX_DIFF", 0.35),
+    )
+    size_thr = _env_float(
+        "EXODIA_SLOT_SAME_SIZE_MAX_RATIO",
+        _env_float("EXODIA_MATCH_SIZE_MAX_RATIO", 0.35),
+    )
+    raw_dhash = os.environ.get("EXODIA_SLOT_SAME_DHASH_MAX_BITS", "").strip()
+    if raw_dhash:
+        dhash_thr = _env_int("EXODIA_SLOT_SAME_DHASH_MAX_BITS", 18)
+    else:
+        # Icons slide within the tile; pairwise compare is looser than template gates.
+        dhash_thr = 18
+    return color_thr, edge_thr, size_thr, dhash_thr
+
+
+def _signal_pair_distances(sig_a: MatchSignals, sig_b: MatchSignals) -> Dict[str, float]:
+    aspect_delta = abs(sig_a.aspect - sig_b.aspect) / max(sig_a.aspect, sig_b.aspect, 1e-6)
+    return {
+        "color": _hist_l1(sig_a.hue_hist, sig_b.hue_hist),
+        "edge": _edge_diff(sig_a.edge_vec, sig_b.edge_vec),
+        "dhash": float(_hamming(sig_a.dhash, sig_b.dhash)),
+        "size": aspect_delta,
+    }
+
+
+def signals_same_item(
+    sig_a: MatchSignals,
+    sig_b: MatchSignals,
+) -> Tuple[bool, Dict[str, float], Dict[str, float]]:
+    """
+    Whether two slot fingerprints look like the same item icon.
+
+    Uses the same hue / edge / aspect / dHash gates as ``gate_signals``, but
+    compares symmetrically (stack quantity may differ).
+    """
+    color_thr, edge_thr, size_thr, dhash_thr = _slot_same_signal_thresholds()
+    distances = _signal_pair_distances(sig_a, sig_b)
+    scores = {
+        "color": max(0.0, 1.0 - distances["color"] / max(color_thr, 1e-6)),
+        "edge": max(0.0, 1.0 - distances["edge"] / max(edge_thr, 1e-6)),
+        "dhash": max(0.0, 1.0 - distances["dhash"] / max(float(dhash_thr), 1.0)),
+        "size": max(0.0, 1.0 - distances["size"] / max(size_thr, 1e-6)),
+    }
+    same = (
+        distances["color"] <= color_thr
+        and distances["edge"] <= edge_thr
+        and distances["size"] <= size_thr
+        and distances["dhash"] <= float(dhash_thr)
+    )
+    return same, distances, scores
+
+
 def gate_signals(
     entry_sig: MatchSignals,
     query_sig: MatchSignals,
     *,
     entry_aspect: float = 1.0,
 ) -> Tuple[Tuple[RejectionReason, ...], Dict[str, float]]:
-    color_thr = _env_float("EXODIA_MATCH_COLOR_MAX_L1", 0.45)
-    edge_thr = _env_float("EXODIA_MATCH_EDGE_MAX_DIFF", 0.35)
-    size_thr = _env_float("EXODIA_MATCH_SIZE_MAX_RATIO", 0.35)
-    dhash_thr = _env_int("EXODIA_MATCH_DHASH_MAX_BITS", 12)
-
+    color_thr, edge_thr, size_thr, dhash_thr = _match_signal_thresholds()
     color_dist = _hist_l1(entry_sig.hue_hist, query_sig.hue_hist)
     edge_dist = _edge_diff(entry_sig.edge_vec, query_sig.edge_vec)
     dhash_dist = float(_hamming(entry_sig.dhash, query_sig.dhash))
@@ -422,6 +490,27 @@ class TemplateEntry:
     template_bgr: Optional[np.ndarray]
     signals: MatchSignals
     aspect: float
+
+
+def _cross_template_score(
+    query_bgr: np.ndarray,
+    template_gray: np.ndarray,
+    template_bgr: Optional[np.ndarray] = None,
+) -> float:
+    """
+    Bidirectional slot template score — tolerates icon slide within the tile.
+
+    Uses the better of sliding full-tile match and icon-centered compare.
+    """
+    slide_fwd = _slot_gray_slide_score(query_bgr, template_gray)
+    if template_bgr is None or template_bgr.size == 0:
+        return slide_fwd
+    slide_rev = _slot_gray_slide_score(
+        template_bgr, _slot_gray_for_match(query_bgr)
+    )
+    slide = min(slide_fwd, slide_rev)
+    norm = _normalized_icon_match_score(query_bgr, template_bgr)
+    return max(slide, norm)
 
 
 class TemplateCatalog:
@@ -470,51 +559,44 @@ class TemplateCatalog:
         skipped = 0
         best_name: Optional[str] = None
         best_score = 0.0
+        best_gate_passed = False
 
         for entry in self.iter_candidates(sig_q, priority_names):
-            rejections, sig_scores = gate_signals(entry.signals, sig_q, entry_aspect=entry.aspect)
-            if rejections:
+            rejections, sig_scores = gate_signals(
+                entry.signals, sig_q, entry_aspect=entry.aspect
+            )
+            gate_passed = not rejections
+            if not gate_passed:
                 skipped += 1
-                candidates.append(
-                    CandidateResult(
-                        name=entry.name,
-                        gate_passed=False,
-                        rejections=rejections,
-                        signal_scores=sig_scores,
-                    )
-                )
-                continue
-            score = _slot_template_score(query_bgr, entry.template_gray)
+            score = _cross_template_score(
+                query_bgr, entry.template_gray, entry.template_bgr
+            )
             candidates.append(
                 CandidateResult(
                     name=entry.name,
-                    gate_passed=True,
+                    gate_passed=gate_passed,
+                    rejections=rejections,
                     signal_scores=sig_scores,
                     template_score=score,
                 )
             )
-            if score > best_score:
+            if score > best_score or (
+                score == best_score and gate_passed and not best_gate_passed
+            ):
                 best_score = score
                 best_name = entry.name
+                best_gate_passed = gate_passed
 
-        if not strict_gates and best_score <= 0.0 and candidates:
-            for entry in self.iter_candidates(sig_q, priority_names):
-                score = _slot_template_score(query_bgr, entry.template_gray)
-                for i, cand in enumerate(candidates):
-                    if cand.name == entry.name:
-                        candidates[i] = CandidateResult(
-                            name=entry.name,
-                            gate_passed=score > 0.0,
-                            rejections=cand.rejections,
-                            signal_scores=cand.signal_scores,
-                            template_score=score,
-                        )
-                        break
-                if score > best_score:
-                    best_score = score
-                    best_name = entry.name
+        if strict_gates:
+            accepted = (
+                best_name is not None
+                and best_score >= thr
+                and best_gate_passed
+            )
+        else:
+            # Named templates: strong cross-template score wins even when fingerprints differ.
+            accepted = best_name is not None and best_score >= thr
 
-        accepted = best_name is not None and best_score >= thr
         return MatchVerdict(
             accepted=accepted,
             best_name=best_name if accepted else best_name,
@@ -692,7 +774,9 @@ class SeenItemRegistry:
             rejections, _sig_scores = gate_signals(
                 entry.signals, sig_q, entry_aspect=entry.aspect
             )
-            score = _slot_template_score(query_bgr, entry.template_gray)
+            score = _cross_template_score(
+                query_bgr, entry.template_gray, entry.template_bgr
+            )
             if not rejections and score >= thr:
                 return MatchVerdict(
                     accepted=True,
@@ -887,7 +971,8 @@ def _load_png_entry(path: Path) -> Optional[Tuple[str, np.ndarray, np.ndarray, M
     stem = path.stem.lower()
     signal_bgr = bgr if is_temp_item_id(stem) else _embed_icon_in_slot_canvas(bgr)
     sig = extract_signals(signal_bgr)
-    gray = _slot_gray_for_match(bgr)
+    clean_bgr = _strip_runelite_tags_bgr(bgr)
+    gray = _slot_gray_for_match(clean_bgr)
     return stem, bgr, gray, sig
 
 

@@ -272,7 +272,7 @@ class ExodiaHarness:
                     color=cmd.color, range=cmd.range, refresh=cmd.refresh,
                 )
             elif isinstance(cmd, CmdUseItemOn):
-                Actions.use_item_on(self.eyes, self.arms, cmd.target_1, cmd.target_2)
+                Actions.use_x_on_y(self.eyes, self.arms, cmd.target_1, cmd.target_2)
         return log_messages
 
     def step(self, refresh: bool = True, force_agent: bool = False) -> StepResult:
@@ -380,7 +380,7 @@ class ExodiaHarness:
         Actions.click_on_color(self.client, self.arms, self.eyes, *args, **kwargs)
 
     def use_item_on(self, target_1: str, target_2: str) -> None:
-        Actions.use_item_on(self.eyes, self.arms, target_1, target_2)
+        Actions.use_x_on_y(self.eyes, self.arms, target_1, target_2)
 
 
 class HarnessStepper:

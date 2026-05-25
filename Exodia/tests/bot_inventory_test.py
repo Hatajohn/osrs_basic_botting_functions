@@ -23,7 +23,9 @@ Writes ``captures/inventory_test_overlay.png`` (gitignored) with grid overlay an
 green PASS/FAIL lines (font size 20) at the top-left of the capture.
 
 Offline runs also write ``captures/offline_inventory_detect.png`` — same style with
-item labels on occupied slots (known name or ``?``).
+item labels on occupied slots (known name, ``tmp:<id>`` fingerprint bucket, or ``?``).
+
+Fingerprint bucketing is on by default in this suite (``EXODIA_INV_FRAME_BUCKETS=1``).
 """
 from __future__ import annotations
 
@@ -50,9 +52,12 @@ from bot_inventory_detect import (
 )
 from bot_inventory_items import (
     draw_inventory_item_identify_overlay,
+    frame_bucket_id_from_label,
     identify_inventory_slot_items,
+    is_frame_bucket_label,
     items_directory,
     load_item_templates,
+    summarize_frame_fingerprint_buckets,
 )
 from tests.inventory_test_common import (
     capture_client_bgr,
@@ -91,6 +96,7 @@ class TestInventoryEyes(unittest.TestCase):
     def setUpClass(cls) -> None:
         os.chdir(_EXODIA_DIR)
         os.environ["EXODIA_INV_CALIB_USE_EEL"] = "0"
+        os.environ["EXODIA_INV_FRAME_BUCKETS"] = "1"
         inv_detect._outline_cache = None
         cls.result_lines = []
         cls.slot_items = None
@@ -280,9 +286,9 @@ class TestInventoryEyes(unittest.TestCase):
         templates = load_item_templates()
         if not templates:
             TestInventoryEyes._record(
-                "identify items: SKIP no templates in %s" % items_directory()
+                "identify templates: none in %s (fingerprints only)"
+                % items_directory()
             )
-            self.skipTest("no item templates in items/")
 
         return_diag = os.environ.get("EXODIA_MATCH_DEBUG", "").strip().lower() in (
             "1",
@@ -293,8 +299,9 @@ class TestInventoryEyes(unittest.TestCase):
             TestInventoryEyes.client,
             TestInventoryEyes.inv_rect,
             TestInventoryEyes.occ,
-            templates=templates,
+            templates=templates if templates else None,
             return_diagnostics=return_diag,
+            frame_buckets=True,
         )
         if slot_items is None:
             TestInventoryEyes._record("identify items: FAIL identification grid")
@@ -316,12 +323,19 @@ class TestInventoryEyes(unittest.TestCase):
                 is_named = (
                     label
                     and label != "?"
-                    and not (label.startswith("unknown:"))
+                    and not label.startswith("unknown:")
+                    and not is_frame_bucket_label(label)
                 )
                 if is_named:
                     identified.append([row, col])
                     TestInventoryEyes._record(
                         "identify (%d,%d): PASS %s score=%.3f"
+                        % (row, col, label, score)
+                    )
+                elif is_frame_bucket_label(label):
+                    unknown.append([row, col])
+                    TestInventoryEyes._record(
+                        "identify (%d,%d): %s score=%.3f (fingerprint bucket)"
                         % (row, col, label, score)
                     )
                 else:
@@ -339,10 +353,25 @@ class TestInventoryEyes(unittest.TestCase):
                             "identify (%d,%d): ? score=%.3f%s" % (row, col, score, rej)
                         )
 
-        TestInventoryEyes._record(
-            "identify items: %d known, %d unknown"
-            % (len(identified), len(unknown))
+        bucketed = sum(
+            1
+            for row in range(7)
+            for col in range(4)
+            if TestInventoryEyes.occ[row][col]
+            and is_frame_bucket_label(slot_items[row][col])
         )
+        still_unknown = sum(
+            1
+            for row in range(7)
+            for col in range(4)
+            if TestInventoryEyes.occ[row][col] and slot_items[row][col] == "?"
+        )
+        TestInventoryEyes._record(
+            "identify items: %d known, %d fingerprint-bucketed, %d still ?"
+            % (len(identified), bucketed, still_unknown)
+        )
+        for line in summarize_frame_fingerprint_buckets(slot_items, TestInventoryEyes.occ):
+            TestInventoryEyes._record(line)
 
         if not TestInventoryEyes.online:
             flax_ok = slot_items[0][0] == "flax"
@@ -356,7 +385,28 @@ class TestInventoryEyes(unittest.TestCase):
                     "flax",
                     "slot (%d,%d) should be flax" % (row, col),
                 )
-            self.assertEqual(slot_items[1][1], "?", "slot (1,1) should be unknown (coins)")
+            coins_tid = frame_bucket_id_from_label(slot_items[1][1])
+            self.assertIsNotNone(
+                coins_tid, "slot (1,1) coins should be tmp fingerprint id"
+            )
+            flax_ids = {
+                slot_items[r][c] for r, c in ((0, 0), (0, 2), (0, 3), (3, 2), (4, 1))
+            }
+            self.assertEqual(flax_ids, {"flax"})
+            self.assertNotIn(coins_tid, flax_ids)
+            self.assertGreaterEqual(
+                len(
+                    {
+                        frame_bucket_id_from_label(slot_items[r][c])
+                        for r in range(7)
+                        for c in range(4)
+                        if TestInventoryEyes.occ[r][c]
+                        and is_frame_bucket_label(slot_items[r][c])
+                    }
+                ),
+                1,
+                "offline fixture expects at least one tmp fingerprint bucket",
+            )
 
 
 def main(argv: Optional[List[str]] = None) -> int:

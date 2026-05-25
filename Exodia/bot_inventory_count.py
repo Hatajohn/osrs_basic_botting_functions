@@ -37,17 +37,83 @@ def _cell_inset_px() -> int:
     return max(0, int(os.environ.get("EXODIA_INV_CELL_INSET", "2")))
 
 
+def _runelite_tag_mask(hsv: np.ndarray) -> np.ndarray:
+    """
+    Pixels to ignore for template match — RuneLite item highlights (green / yellow / cyan).
+
+    Yellow ground-item tags are masked; stack-count band is median-filled separately.
+    """
+    green = cv2.inRange(hsv, (35, 80, 80), (95, 255, 255))
+    yellow = cv2.inRange(hsv, (12, 70, 100), (50, 255, 255))
+    cyan = cv2.inRange(hsv, (75, 70, 100), (110, 255, 255))
+    return cv2.bitwise_or(green, cv2.bitwise_or(yellow, cyan))
+
+
+def _mask_runelite_tags_in_gray(gray: np.ndarray, hsv: np.ndarray) -> np.ndarray:
+    tag_mask = _runelite_tag_mask(hsv)
+    if cv2.countNonZero(tag_mask) <= 0:
+        return gray
+    fill = int(np.median(gray[tag_mask == 0])) if np.any(tag_mask == 0) else 90
+    out = gray.copy()
+    out[tag_mask > 0] = fill
+    return out
+
+
+def _strip_runelite_tags_bgr(cell_bgr: np.ndarray) -> np.ndarray:
+    """Median-fill RuneLite highlight pixels in BGR (for cleaner saved templates)."""
+    if cell_bgr is None or cell_bgr.size == 0:
+        return cell_bgr
+    hsv = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2HSV)
+    tag_mask = _runelite_tag_mask(hsv)
+    if cv2.countNonZero(tag_mask) <= 0:
+        return cell_bgr
+    out = cell_bgr.copy()
+    fill = np.median(out[tag_mask == 0], axis=0).astype(np.uint8) if np.any(tag_mask == 0) else np.array(
+        (32, 42, 52), dtype=np.uint8
+    )
+    out[tag_mask > 0] = fill
+    return out
+
+
+def _normalize_slot_icon_gray(cell_bgr: np.ndarray) -> np.ndarray:
+    """
+    Center the item icon on a canonical slot canvas.
+
+    Icons sit at different offsets slot-to-slot; normalization makes template
+    match stable after moving items around the grid.
+    """
+    if cell_bgr is None or cell_bgr.size == 0:
+        return cell_bgr
+    h, w = cell_bgr.shape[:2]
+    gray = _slot_gray_for_match(cell_bgr)
+    hsv = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2HSV)
+    y_band, x_band = _stack_band_rect(h, w)
+    sat = hsv[:, :, 1]
+    body = np.ones((h, w), dtype=bool)
+    body[0:y_band, 0:x_band] = False
+    plate_ref = int(np.median(gray[0:y_band, x_band:])) if y_band > 0 and x_band < w else int(np.median(gray))
+    icon = body & (sat >= 28) & (gray > plate_ref + 6)
+    if not np.any(icon):
+        return gray
+    ys, xs = np.where(icon)
+    y0, y1 = int(ys.min()), int(ys.max())
+    x0, x1 = int(xs.min()), int(xs.max())
+    crop = gray[y0 : y1 + 1, x0 : x1 + 1]
+    if crop.size == 0:
+        return gray
+    canvas = np.full((h, w), plate_ref, dtype=np.uint8)
+    ih, iw = crop.shape[:2]
+    cy = max(0, (h - ih) // 2)
+    cx = max(0, (w - iw) // 2)
+    canvas[cy : cy + ih, cx : cx + iw] = crop
+    return canvas
+
+
 def _panel_gray_for_match(panel_bgr: np.ndarray) -> np.ndarray:
-    """Grayscale for full-panel template match (masks RuneLite green item tags)."""
+    """Grayscale for full-panel template match (masks RuneLite item highlight tags)."""
     gray = cv2.cvtColor(panel_bgr, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(panel_bgr, cv2.COLOR_BGR2HSV)
-    tag_mask = cv2.inRange(hsv, (35, 80, 80), (95, 255, 255))
-    if cv2.countNonZero(tag_mask) > 0:
-        bg = gray[tag_mask == 0]
-        fill = int(np.median(bg)) if bg.size else 90
-        gray = gray.copy()
-        gray[tag_mask > 0] = fill
-    return gray
+    return _mask_runelite_tags_in_gray(gray, hsv)
 
 
 def _stack_band_rect(h: int, w: int) -> Tuple[int, int]:
@@ -70,17 +136,13 @@ def _fill_stack_band_in_gray(gray: np.ndarray, y1: int, x1: int) -> np.ndarray:
 
 def _slot_gray_for_match(cell_bgr: np.ndarray) -> np.ndarray:
     """
-    Grayscale for matching — masks RuneLite item-tag green so the base icon matches.
+    Grayscale for matching — masks RuneLite highlight tags (green / yellow / cyan).
+
     Optionally median-fills the stack-quantity band (``EXODIA_MATCH_STACK_MASK``).
     """
     gray = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(cell_bgr, cv2.COLOR_BGR2HSV)
-    # Neon green stack tags / item markers (common on sacred eels with RuneLite)
-    tag_mask = cv2.inRange(hsv, (35, 80, 80), (95, 255, 255))
-    if cv2.countNonZero(tag_mask) > 0:
-        fill = int(np.median(gray[tag_mask == 0])) if np.any(tag_mask == 0) else 90
-        gray = gray.copy()
-        gray[tag_mask > 0] = fill
+    gray = _mask_runelite_tags_in_gray(gray, hsv)
     if os.environ.get("EXODIA_MATCH_STACK_MASK", "1").strip().lower() not in (
         "0",
         "false",
@@ -93,7 +155,8 @@ def _slot_gray_for_match(cell_bgr: np.ndarray) -> np.ndarray:
     return gray
 
 
-def _slot_template_score(cell_bgr: np.ndarray, template_gray: np.ndarray) -> float:
+def _slot_gray_slide_score(cell_bgr: np.ndarray, template_gray: np.ndarray) -> float:
+    """Sliding ``matchTemplate`` on tag-masked full-tile gray."""
     if cell_bgr is None or cell_bgr.size == 0 or template_gray is None:
         return 0.0
     gray = _slot_gray_for_match(cell_bgr)
@@ -103,6 +166,21 @@ def _slot_template_score(cell_bgr: np.ndarray, template_gray: np.ndarray) -> flo
     res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, _ = cv2.minMaxLoc(res)
     return float(max_val)
+
+
+def _normalized_icon_match_score(cell_bgr: np.ndarray, template_bgr: np.ndarray) -> float:
+    """Compare icon-centered slot canvases (position-invariant)."""
+    if cell_bgr is None or cell_bgr.size == 0 or template_bgr is None or template_bgr.size == 0:
+        return 0.0
+    q = _normalize_slot_icon_gray(cell_bgr)
+    t = _normalize_slot_icon_gray(template_bgr)
+    if q.shape != t.shape:
+        return 0.0
+    return float(cv2.matchTemplate(q, t, cv2.TM_CCOEFF_NORMED)[0, 0])
+
+
+def _slot_template_score(cell_bgr: np.ndarray, template_gray: np.ndarray) -> float:
+    return _slot_gray_slide_score(cell_bgr, template_gray)
 
 
 def _stack_digit_roi(cell_bgr: np.ndarray) -> np.ndarray:

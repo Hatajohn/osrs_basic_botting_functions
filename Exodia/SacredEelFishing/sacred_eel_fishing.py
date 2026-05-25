@@ -166,21 +166,6 @@ def _locate_sacred_eels(bot_e) -> list:
     return points
 
 
-def use_knife_on_eel(bot_e, bot_a) -> bool:
-    """Click knife, then an eel (OSRS use-item order). Returns False if either is missing."""
-    knives = bot_e.locate_image(
-        filename=KNIFE_INV, inv=True, name="Knife", threshold=INV_TEMPLATE_THRESHOLD
-    )
-    eels = bot_e.locate_image(
-        filename=EEL_INV, inv=True, name="Sacred eel", threshold=INV_TEMPLATE_THRESHOLD
-    )
-    if not knives or not eels:
-        return False
-    bot_a.click_at(knives[0], rad=11)
-    _sleep_interruptible(random.uniform(0.12, 0.22))
-    bot_a.click_at(random.choice(eels), rad=11)
-    return True
-
 
 def _request_stop() -> None:
     _stop.set()
@@ -608,7 +593,6 @@ def _run_sacred_eel_session(args) -> None:
         inv_slots=inventory_occupied_slots,
         inv_full=inventory_is_full,
         locate_spots=_locate_sacred_eels,
-        use_knife_on_eel=use_knife_on_eel,
         spot_templates=SPOT_TEMPLATES,
         full_eel_count=FULL_EEL_COUNT,
         inv_slot_count=INV_SLOT_COUNT,

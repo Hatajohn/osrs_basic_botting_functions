@@ -7,7 +7,9 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from bot_inventory_actions import UseItemOnResult
 
 from bot_action_ui import (
     ACTION_FISHING,
@@ -30,6 +32,11 @@ from SacredEelFishing.sacred_eel_fsm import (
 class TestSacredEelFSM(unittest.TestCase):
     def setUp(self):
         self._events: list = []
+        self._use_x_on_y_patcher = patch(
+            "SacredEelFishing.sacred_eel_fsm.Actions.use_x_on_y",
+            return_value=UseItemOnResult(True),
+        )
+        self._use_x_on_y_patcher.start()
         configure_fsm(
             sleep_fn=lambda _s: None,
             stop_check=lambda: False,
@@ -37,7 +44,6 @@ class TestSacredEelFSM(unittest.TestCase):
             inv_slots=lambda _e: _e._inv_slots,
             inv_full=lambda _e: _e._inv_full,
             locate_spots=lambda _e: _e._spots,
-            use_knife_on_eel=lambda _e, _a: True,
             spot_templates=["spot.png"],
             full_eel_count=22,
             inv_slot_count=28,
@@ -47,6 +53,9 @@ class TestSacredEelFSM(unittest.TestCase):
             max_scale_actions=5,
             log_event=self._collect_event,
         )
+
+    def tearDown(self):
+        self._use_x_on_y_patcher.stop()
 
     def _collect_event(self, event: str, **fields) -> None:
         self._events.append((event, fields))
@@ -96,7 +105,6 @@ class TestSacredEelFSM(unittest.TestCase):
             inv_slots=lambda _e: _e._inv_slots,
             inv_full=lambda _e: False,
             locate_spots=track_spots,
-            use_knife_on_eel=lambda _e, _a: True,
             spot_templates=["spot.png"],
             full_eel_count=22,
             inv_slot_count=28,
@@ -129,7 +137,6 @@ class TestSacredEelFSM(unittest.TestCase):
             inv_slots=lambda _e: 10,
             inv_full=lambda _e: False,
             locate_spots=track_spots,
-            use_knife_on_eel=lambda _e, _a: True,
             spot_templates=["spot.png"],
             full_eel_count=22,
             inv_slot_count=28,
@@ -199,7 +206,6 @@ class TestSacredEelFSM(unittest.TestCase):
             inv_slots=lambda _e: 10,
             inv_full=lambda _e: False,
             locate_spots=track_spots,
-            use_knife_on_eel=lambda _e, _a: True,
             spot_templates=["spot.png"],
             full_eel_count=22,
             inv_slot_count=28,

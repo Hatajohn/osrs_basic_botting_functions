@@ -225,6 +225,14 @@ Outputs (local, gitignored except committed templates):
 
 Item templates: add cropped slot PNGs to **`items/`** (filename stem = item name, e.g. `flax.png` → `"flax"`). Matching uses the **full slot tile** (50×45) so `matchTemplate` can align icons that sit slightly off-center; occupancy still uses the inset crop.
 
+**Label unknown items interactively:**
+
+```bash
+cd Exodia && .venv/bin/python3 label_inventory_item.py
+```
+
+Click a slot or pick a fingerprint bucket in the sidebar, then **Label bucket…** / **Label slot…** to save `items/<name>.png` and re-identify. Non-interactive: `--name flax --slot 0,0` or `--name flax --bucket tmp:a1b2c3d4`. Requires `client_rect.json` and a graphical display (WSLg) for the GUI.
+
 Useful env overrides:
 
 | Variable | Purpose |
@@ -232,6 +240,9 @@ Useful env overrides:
 | `EXODIA_ITEMS_DIR` | Item template directory (default `items/`) |
 | `EXODIA_INV_ITEM_MATCH_THRESHOLD` | Min normalized score to accept a template (default `0.40`) |
 | `EXODIA_INV_ITEM_MATCH_INSET` | Slot crop inset for item match (default `0` = full tile) |
+| `EXODIA_INV_FRAME_BUCKETS` | Group unknown slots into ephemeral `tmp:<id>` buckets (default `0`; on in inventory tests + labeler) |
+| `EXODIA_BUCKET_TEMPLATE_MIN` | Cross-slot template threshold for tolerant bucketing (default `0.38`) |
+| `EXODIA_BUCKET_USE_SEEN_LOOSE` | Enable loose dHash+hue tier for bucketing (default `1` in labeler) |
 | `EXODIA_SEEN_ITEMS` | Register/match temp `unknown:<8-hex>` ids (default `0`; set `1` for manual runs) |
 | `EXODIA_MATCH_DEBUG` | Slot crop dumps + rejection lines in inventory test overlay |
 | `EXODIA_INV_DRAG_FROM` / `EXODIA_INV_DRAG_TO` | Force slot `row,col` instead of random pick (arms suite) |
