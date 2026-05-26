@@ -64,7 +64,6 @@ class TestSacredEelFSM(unittest.TestCase):
         bot_e = MagicMock()
         code = kwargs.get("action_code", 2)
         bot_e.get_action_text.return_value = code
-        bot_e.get_action_text_robust.return_value = code
         bot_e._eel_count = kwargs.get("eel_count", 0)
         bot_e._inv_slots = kwargs.get("inv_slots", 10)
         bot_e._inv_full = kwargs.get("inv_full", False)
@@ -168,7 +167,7 @@ class TestSacredEelFSM(unittest.TestCase):
             return ACTION_FISHING if post_click_polls[0] >= 2 else ACTION_NO_UI
 
         bot_e = MagicMock()
-        bot_e.get_action_text_robust.side_effect = get_action
+        bot_e.get_action_text.side_effect = get_action
         bot_e._eel_count = 0
         bot_e._inv_slots = 0
         bot_e._inv_full = False
@@ -215,7 +214,7 @@ class TestSacredEelFSM(unittest.TestCase):
             max_scale_actions=5,
         )
         ctx = self._ctx(state=SacredEelState.SEEK_SPOT, action_code=ACTION_NO_UI)
-        ctx.bot_e.get_action_text_robust.side_effect = get_action
+        ctx.bot_e.get_action_text.side_effect = get_action
         SacredEelMachine(ctx).step()
         self.assertEqual(len(spots_called), 1)
 

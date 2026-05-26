@@ -1,4 +1,8 @@
-# Imports
+"""
+Arms / input layer: mouse movement, clicks, drags, camera pan, and keyboard input.
+
+Use this when you need to act on screen coordinates without locating or deciding.
+"""
 import os
 import bot_env as Env
 import numpy as np
@@ -38,12 +42,11 @@ def _tween_pool(move_profile: str):
     return _TWEENS_NORMAL
 
 
-# This file is for the mouse movements and actions required for the bot to interact with the client
-class BotArms():
+class BotArms:
+    """Move, click, drag, pan camera, and send keys at screen coordinates."""
 
-
-    # Constructor
     def __init__(self, DEBUG=False):
+        """Question: How do I configure PyAutoGUI timing and debug mode for arms?"""
         self._DEBUG=DEBUG
         # Any duration less than this is rounded to 0.0 to instantly move the mouse.
         pyautogui.MINIMUM_DURATION = 0  # Default: 0.1
@@ -53,12 +56,11 @@ class BotArms():
         pyautogui.PAUSE = 0  # Default: 0.1
 
     def force_debug(self, debug):
+        """Question: How do I toggle debug overlays for arm actions?"""
         self._DEBUG = debug
 
-
-    # takes an array of points, a center point used to find the closest distance, 
-    # the win_rect, and then moves and clicks the mouse at about the specified point
     def click_here(self, points, center, rad=15, move_profile="tight"):
+        """Question: Which point in a list is closest to center, and click it?"""
         if points == []:
             return
         _dist = sys.maxsize
@@ -74,8 +76,8 @@ class BotArms():
         self.click_at(point, rad=rad, move_profile=move_profile)
 
 
-    # Move and click the mouse at a given position  
     def click_at(self, point, rad=15, duration=0.1, move_profile="tight"):
+        """Question: How do I move to a point and left-click (with jitter in radius)?"""
         if point is None or point == []:
             return
         if not isinstance(point, (list, tuple)) or len(point) < 2:
@@ -116,7 +118,7 @@ class BotArms():
         duration: float = 0.35,
         move_profile: str = "tight",
     ) -> None:
-        """Left-click drag from ``start`` to ``end`` (Win32 screen coordinates)."""
+        """Question: How do I left-click drag from start to end in screen coordinates?"""
         if start is None or end is None:
             return
         if len(start) < 2 or len(end) < 2:
@@ -163,8 +165,8 @@ class BotArms():
         time.sleep(random.uniform(0.06, 0.10))
 
 
-    # Go through the inventory and drop all items based on points passed
     def drop_all(self, points, rect, rad=12):
+        """Question: How do I shift-click drop items at inventory-relative points?"""
         if points == []:
             return
         pyautogui.keyDown("shift")
@@ -183,14 +185,12 @@ class BotArms():
             pyautogui.keyUp("shift")
 
 
-    # Should clamp n between minn and maxn
     def clamp(self, n, minn, maxn):
+        """Question: How do I clamp a coordinate inside bounds with margin?"""
         return max(min(math.floor(maxn - 10), n), math.floor(minn + 10))
 
-
     def keep_point_on_screen(self, point, x, y, w, h):
-        # Assume the point was generated with the image in mind, not the monitor
-        # Prevent the mouse from leaving the client area
+        """Question: How do I keep a point inside the client rectangle?"""
         print('CLAMP x y')
         x = self.clamp(point[0], x, x+w)
         y = self.clamp(point[1], y, y+h)
@@ -202,9 +202,8 @@ class BotArms():
         return [x, y]
 
 
-    # Move mouse to a point on the screen using Bezier curves
-    # move_profile: "tight" (default, dense UI), "normal", "open" (sparse / camera drags)
     def move_mouse(self, point, rad=9, duration=0.1, move_profile="tight"):
+        """Question: How do I move the cursor to a point (Bezier locally, smooth path on wsl_ps)?"""
         point = Env.pick_point_in_circle(point, rad)
         if self._DEBUG:
             debug_image = Env.screen_image([0, 0, 1920, 1040])
@@ -263,8 +262,8 @@ class BotArms():
             time.sleep(timeout)
         
 
-    # Need to address this -> I personally do not drag from the center of my screen, I just full send
     def control_camera(self, center, drag_to, rad=15):
+        """Question: How do I pan the camera with a middle-mouse drag?"""
         # Move the mouse somewhere around the center of the client screen
         print('CENTER ', center)
         print('DRAG TO ', drag_to)
@@ -291,8 +290,8 @@ class BotArms():
         Env.send_camera_arrow(direction, focus_xy=(focus[0], focus[1]), hold_ms=hold_ms)
         time.sleep(random.uniform(0.12, 0.22))
 
-    # Pan functions take the global client center and the window dimensions of the client
     def pan_right(self, center, win_rect, y_var=0, rand=False):
+        """Question: How do I rotate or pan the camera to the right?"""
         if Env.camera_rotate_mode() == "keys":
             self._camera_key_rotate("right", center)
             return
@@ -306,6 +305,7 @@ class BotArms():
 
 
     def pan_left(self, center, win_rect, y_var=0, rand=False):
+        """Question: How do I rotate or pan the camera to the left?"""
         if Env.camera_rotate_mode() == "keys":
             self._camera_key_rotate("left", center)
             return
@@ -319,18 +319,21 @@ class BotArms():
 
 
     def pan_up(self, center, win_rect):
+        """Question: How do I pan the camera up?"""
         point = [center[0], center[1] - math.floor(win_rect[3] / 2 * 0.90)]
         print('PAN UP TO ', point)
         self.control_camera(center, point)
 
 
     def pan_down(self, center, win_rect):
+        """Question: How do I pan the camera down?"""
         point = [center[0], center[1] + math.floor(win_rect[3] / 2 * 0.90)]
         print('PAN DOWN TO ', point)
         self.control_camera(center, point)
 
 
     def pan_to(self, point, center):
+        """Question: How do I pan the camera toward an arbitrary screen point?"""
         print('PAN TO ', point)
         self.control_camera(center, point)
 
@@ -343,11 +346,7 @@ class BotArms():
         distance_frac: float = 0.32,
         click_rad: int = 8,
     ) -> list:
-        """
-        Click the ground to walk the character (minimap/main view click).
-
-        ``center`` / ``win_rect`` match ``pan_left`` / ``pan_right`` (screen center + client size).
-        """
+        """Question: How do I click the ground to walk N/E/S/W from center?"""
         from bot_search import ground_click_target
 
         if center is None or win_rect is None or len(win_rect) < 4:
@@ -359,8 +358,8 @@ class BotArms():
         return target
 
 
-    # THIS DOES NOT WORK
     def hit_escape(self):
+        """Question: How do I press ESC? Broken/unreliable; not part of supported API."""
         pyautogui.keyDown('escape')
         time.sleep(random.uniform(0.03, 0.09))
         pyautogui.keyUp('escape')

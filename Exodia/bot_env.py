@@ -1,3 +1,8 @@
+"""
+Environment layer: screen capture, timing, and input backends (mss / pil / wsl_ps).
+
+Use this when you need to grab the screen, move or click the cursor, or pause with jitter.
+"""
 from __future__ import annotations
 
 import math
@@ -268,7 +273,7 @@ def _wsl_ensure_keybd_api() -> str:
 
 
 def wsl_windows_set_cursor(x: int, y: int) -> None:
-    """Move the Windows cursor (Win32 screen coords) from WSL via PowerShell."""
+    """Question: How do I move the Windows cursor to (x, y) instantly?"""
     cmd = (
         "Add-Type -AssemblyName System.Windows.Forms; "
         "[System.Windows.Forms.Cursor]::Position = "
@@ -308,7 +313,7 @@ def wsl_move_duration_ms(
     move_profile: str = "tight",
     hint_s: float = 0.1,
 ) -> int:
-    """Duration for a WSL cursor move from distance (px) and profile."""
+    """Question: How long should a WSL cursor move take for this distance?"""
     ms = int(95 + float(distance_px) * 0.20)
     ms = max(int(max(0.08, hint_s) * 1000), ms)
     if move_profile == "open":
@@ -321,7 +326,7 @@ def wsl_move_duration_ms(
 
 
 def wsl_windows_move_to(x: int, y: int, duration_ms: int = 300) -> None:
-    """Smooth move from current cursor to ``(x, y)`` in one PowerShell call."""
+    """Question: How do I smoothly move the Windows cursor to (x, y)?"""
     steps, step_ms = _wsl_motion_timing(duration_ms)
     cmd = (
         "Add-Type -AssemblyName System.Windows.Forms; "
@@ -353,7 +358,7 @@ def wsl_windows_move_path(points: Sequence[Tuple[int, int]], step_ms: int = 8) -
 
 
 def wsl_windows_click_current() -> None:
-    """Left-click at the current Windows cursor position."""
+    """Question: How do I left-click at the current cursor position?"""
     cmd = (
         _wsl_ensure_mouse_api()
         + "[Exodia.ExodiaMouse]::mouse_event(2,0,0,0,0); "
@@ -366,7 +371,7 @@ def wsl_windows_click_current() -> None:
 
 
 def wsl_windows_click(x: int, y: int) -> None:
-    """Left-click at Win32 screen coordinates from WSL."""
+    """Question: How do I teleport-click at Win32 screen coordinates?"""
     cmd = (
         "Add-Type -AssemblyName System.Windows.Forms; "
         "$p=New-Object System.Drawing.Point(%d,%d); "
@@ -383,7 +388,7 @@ def wsl_windows_click(x: int, y: int) -> None:
 
 
 def wsl_windows_left_drag_from_current(x1: int, y1: int, duration_ms: int = 350) -> None:
-    """Smooth left-button drag from the **current** cursor to ``(x1, y1)``."""
+    """Question: How do I left-drag from the current cursor to a target?"""
     steps, step_ms = _wsl_motion_timing(duration_ms)
     cmd = (
         "Add-Type -AssemblyName System.Windows.Forms; "
@@ -508,12 +513,7 @@ def send_camera_arrow(
     focus_xy: Optional[Tuple[int, int]] = None,
     hold_ms: int = 450,
 ) -> None:
-    """
-    Rotate camera by holding an arrow key for ``hold_ms``.
-
-    *focus_xy* moves the cursor over the client first; on ``wsl_ps`` also tries to
-    foreground the RuneLite window.
-    """
+    """Question: How do I rotate the camera with an arrow key?"""
     direction = direction.lower()
     if direction not in _VK_ARROW:
         raise ValueError("direction must be 'left' or 'right'")
@@ -540,7 +540,7 @@ def send_camera_arrow(
 
 
 def human_pause(base_seconds, jitter_ratio=0.35):
-    """Sleep base_seconds +/- random jitter (0 .. jitter_ratio*base). Keeps pacing less uniform."""
+    """Question: How do I sleep with human-like jitter?"""
     if base_seconds <= 0:
         return
     span = base_seconds * jitter_ratio
@@ -552,22 +552,7 @@ def human_pause(base_seconds, jitter_ratio=0.35):
 def screen_image(
     rect: Optional[Rect] = None, name: str = "BotEnv_Screenshot", DEBUG: bool = False
 ):
-    """
-    Capture BGR image. ``rect`` is [left, top, width, height] in **backend** screen coordinates.
-
-    When the capture pipeline is active (``EXODIA_CAPTURE_STREAM``), returns the latest
-    buffered frame without blocking on a new grab unless the buffer is stale.
-
-    Backends (``EXODIA_CAPTURE_BACKEND``):
-
-    - **mss** — default; X11-style. Often all-black under WSLg/XWayland.
-    - **pil** — Pillow ``ImageGrab`` (may error on some Wayland stacks).
-    - **wsl_ps** — Windows GDI via ``powershell.exe`` (WSL interop). Use **Win32** desktop
-      coordinates; primary monitor bounds come from ``Screen.PrimaryScreen.Bounds``.
-
-    When ``rect`` is None, geometry is the primary monitor (``mss`` monitor 1, or Windows primary
-    for ``wsl_ps``).
-    """
+    """Question: What BGR image is on screen (full monitor or rect)?"""
     if rect is None:
         left, top, w, h = _primary_monitor_left_top_wh()
     else:
@@ -589,13 +574,6 @@ def screen_image(
         debug_view(image, title=name)
 
     return image
-
-
-def screen_image_fast(
-    rect: Rect, name: str = "BotEnv_Fast", DEBUG: bool = False
-):
-    """Alias for :func:`screen_image` (same backend switch); use for clarity at call sites."""
-    return screen_image(rect=rect, name=name, DEBUG=DEBUG)
 
 
 def screen_regions(
@@ -632,6 +610,7 @@ def block_name(image, corner=None) -> np.ndarray:
 
 
 def debug_view(img, title="Debug Screenshot", scale=60):
+    """Question: How do I show a BGR frame in an OpenCV debug window?"""
     arr = np.asarray(img, dtype=np.uint8)
     image = arr.copy()
     image = resize_image(image, scale)
@@ -641,6 +620,7 @@ def debug_view(img, title="Debug Screenshot", scale=60):
 
 
 def pick_point_in_circle(point, rad=15):
+    """Question: What random point near this click target should I use?"""
     alpha = 2 * math.pi * random.random()
 
     u = random.random()

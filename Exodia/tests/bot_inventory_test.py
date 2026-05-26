@@ -75,7 +75,7 @@ _OFFLINE_DETECT_OUT = _EXODIA_DIR / "captures" / "offline_inventory_detect.png"
 
 
 class TestInventoryEyes(unittest.TestCase):
-    """Find inventory, count slots, identify items — capture/vision only."""
+    """Bind inventory to eyes, count slots, identify items — capture/vision only."""
 
     client: Optional[np.ndarray] = None
     meta: Optional[Dict[str, Any]] = None
@@ -159,12 +159,13 @@ class TestInventoryEyes(unittest.TestCase):
         for line in cls.result_lines:
             print("  %s" % line)
 
-    def test_find_inventory(self) -> None:
+    def test_bind_inventory(self) -> None:
+        """``bind_inventory_to_eyes`` locates panel rect and passes outline/grid checks."""
         assert TestInventoryEyes.client is not None
         if TestInventoryEyes.online:
             client, err = capture_client_bgr()
             if client is None:
-                TestInventoryEyes._record("find inventory: FAIL %s" % (err or "capture"))
+                TestInventoryEyes._record("bind inventory: FAIL %s" % (err or "capture"))
                 self.fail(err or "could not capture client frame")
             TestInventoryEyes.client = client
         else:
@@ -172,8 +173,8 @@ class TestInventoryEyes(unittest.TestCase):
 
         inv_rect, score, grid_score = locate_inventory_rect(client)
         if inv_rect is None:
-            TestInventoryEyes._record("find inventory: FAIL auto-detect")
-            self.fail("inventory auto-detect failed")
+            TestInventoryEyes._record("bind inventory: FAIL bind_inventory_to_eyes")
+            self.fail("bind_inventory_to_eyes failed")
 
         TestInventoryEyes.inv_rect = list(inv_rect)
         TestInventoryEyes.outline_score = float(score)
@@ -182,7 +183,7 @@ class TestInventoryEyes(unittest.TestCase):
         min_score = float(os.environ.get("EXODIA_INV_OUTLINE_MIN_SCORE", "0.55"))
         outline_ok = score >= min_score
         TestInventoryEyes._record(
-            "find inventory: %s rect=%s score=%.3f"
+            "bind inventory: %s rect=%s score=%.3f"
             % ("PASS" if outline_ok else "FAIL", inv_rect, score)
         )
         self.assertGreaterEqual(score, min_score)
@@ -218,7 +219,7 @@ class TestInventoryEyes(unittest.TestCase):
     def test_count_items(self) -> None:
         assert TestInventoryEyes.client is not None
         if TestInventoryEyes.inv_rect is None:
-            TestInventoryEyes._record("count items: FAIL (inventory not located — run find first)")
+            TestInventoryEyes._record("count items: FAIL (inventory not bound — run bind first)")
             self.fail("inventory not located")
 
         client = TestInventoryEyes.client
@@ -279,7 +280,7 @@ class TestInventoryEyes(unittest.TestCase):
         assert TestInventoryEyes.client is not None
         if TestInventoryEyes.inv_rect is None or TestInventoryEyes.occ is None:
             TestInventoryEyes._record(
-                "identify items: FAIL (inventory not located — run find/count first)"
+                "identify items: FAIL (inventory not bound — run bind/count first)"
             )
             self.fail("inventory not located")
 
@@ -430,7 +431,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     suite = unittest.TestSuite(
         [
-            TestInventoryEyes("test_find_inventory"),
+            TestInventoryEyes("test_bind_inventory"),
             TestInventoryEyes("test_count_items"),
             TestInventoryEyes("test_identify_items"),
         ]

@@ -1,0 +1,27 @@
+.about-modal {
+  width: min(440px, 90vw);
+  margin: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.about-modal h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.about-modal__detail {
+  margin: 0 0 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+}
+
+.about-modal footer {
+  display: flex;
+  justify-content: flex-end;
+}

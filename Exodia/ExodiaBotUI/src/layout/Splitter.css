@@ -1,0 +1,36 @@
+.splitter {
+  flex-shrink: 0;
+  background: var(--border);
+  border-radius: 2px;
+  transition: background 0.12s ease;
+  touch-action: none;
+  z-index: 2;
+}
+
+.splitter--vertical {
+  flex: 0 0 6px;
+  width: 6px;
+  margin: 4px 0;
+  cursor: col-resize;
+}
+
+.splitter--horizontal {
+  flex: 0 0 6px;
+  height: 6px;
+  margin: 0 4px;
+  cursor: row-resize;
+}
+
+.splitter:hover,
+.splitter:active {
+  background: var(--accent);
+}
+
+body.dashboard--dragging {
+  user-select: none;
+  cursor: inherit;
+}
+
+body.dashboard--dragging * {
+  cursor: inherit !important;
+}

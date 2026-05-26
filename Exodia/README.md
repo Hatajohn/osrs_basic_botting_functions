@@ -2,6 +2,8 @@
 
 Python automation harness for **RuneLite** (OSRS): capture the client window, interpret the screen with OpenCV/Tesseract, and drive mouse/keyboard. The layout is intentionally split so you can hang an **agent** (LLM, planner, or scripted policy) off a single decision API.
 
+**Architecture graph:** [`FUNCTIONS.md`](FUNCTIONS.md) (call edges, recipes) + [`FILES.md`](FILES.md) (file/import graph).
+
 ## Mental model
 
 | Piece | Module | Role |
@@ -31,6 +33,7 @@ Python automation harness for **RuneLite** (OSRS): capture the client window, in
 | **Agent (“brain”) + runtime** | `bot_harness.py` | `BotBrain` → `BrainCommand`s → `ExodiaHarness.step()`. |
 | **Legs** | `bot_legs.py` | Timed loop: `update_all()` on mods, then `run_tasks()`. |
 | **Runner** | `run_agent.py` | Canonical agent entrypoint. |
+| **Desktop UI** | `ExodiaBotUI/` | Electron control shell — debug vision, calibration, bot launcher (phased). |
 
 **Glue:** `bot_actions.py` — `bot_init`, `bot_update`, composites like `scan_for`, `click_on_image`, `use_item_on`.
 
@@ -283,7 +286,7 @@ Useful env overrides:
 | `EXODIA_BUCKET_TEMPLATE_MIN` | Cross-slot template threshold for tolerant bucketing (default `0.38`) |
 | `EXODIA_BUCKET_USE_SEEN_LOOSE` | Enable loose dHash+hue tier for bucketing (default `1` in labeler) |
 | `EXODIA_SEEN_ITEMS` | Register/match temp `unknown:<8-hex>` ids (default `0`; set `1` for manual runs) |
-| `EXODIA_MATCH_DEBUG` | Slot crop dumps + rejection lines in inventory test overlay |
+| `EXODIA_MATCH_DEBUG` | Rejection lines in inventory test overlay |
 | `EXODIA_INV_DRAG_FROM` / `EXODIA_INV_DRAG_TO` | Force slot `row,col` instead of random pick (arms suite) |
 | `EXODIA_INV_DRAG_ROUNDS` | Arms: consecutive drags (default `1`; round 2+ in `test_drag_multiple_rounds`) |
 | `EXODIA_INV_DRAG_SETTLE_S` | Wait after drag before re-capture (default `1.0`) |
@@ -322,6 +325,34 @@ pip install -r requirements.txt
 **Windows:** uses **pywin32** for window targeting (see `bot_client.py`).
 
 **Linux / WSLg:** use `requirements-minimal.txt` (Python 3.12+) and install **tesseract-ocr**, **xdotool**, **python3-tk**. Set `EXODIA_TESSERACT_CMD` if needed. Use **`EXODIA_CAPTURE_BACKEND=wsl_ps`** when `mss` returns black frames.
+
+### Desktop app (`ExodiaBotUI`)
+
+Graphical control shell for calibration, inventory debug overlays, and (in later phases) bot start/stop. Requires the same Python setup as above plus **Node.js 20+**.
+
+```bash
+cd Exodia/ExodiaBotUI
+npm install
+npm run dev
+```
+
+This starts Vite with HMR and launches Electron when the dev server is ready.
+
+**First run checklist:**
+
+1. **File → Preferences…** (`Ctrl+,`) — confirm **Exodia root** and **Python path** (defaults to `{exodiaRoot}/exodia/bin/python` if present, else `python3`; set to `.venv/bin/python` if you use a local venv).
+2. **Run smoke test** in Preferences — should print `ok` in the Log panel.
+3. **Calibrate** — RuneLite view → **Calibrate**, or **Preferences → Calibrate client rect** (runs `calibrate_client_rect.py` and opens the ROI picker).
+4. **Refresh** — RuneLite view → **Refresh** or **View → Refresh debug frame** (`F5`) to capture the client and show inventory detect/identify overlays.
+
+Production build (packaging later):
+
+```bash
+cd Exodia/ExodiaBotUI
+npm run build
+```
+
+**WSL / Linux:** GPU acceleration is disabled automatically if the window is blank. Open DevTools with `EXODIA_DEVTOOLS=1 npm run dev`. More UI details: [`ExodiaBotUI/README.md`](ExodiaBotUI/README.md).
 
 ### WSL + Windows RuneLite (recommended if RuneLite runs on Windows)
 
@@ -390,13 +421,15 @@ Environment alternatives:
 
 **UI regions (`bot_eyes` / `bot_inventory_detect` / `bot_inventory_items` / `bot_match_index`):** inventory panel via **`captures/osrs_inventory_base.png`** outline match (or `EXODIA_INV_OUTLINE_TEMPLATE`). Grid layout env: **`EXODIA_INV_GRID_OFFSET`**, **`EXODIA_INV_TILE`**, **`EXODIA_INV_TILE_GAP`**. Occupancy tuning: **`EXODIA_INV_CELL_STD_THRESHOLD`**, **`EXODIA_INV_EMPTY_BGR_MAX_DELTA`**, **`EXODIA_INV_CELL_INSET`**. Item identity: templates in **`items/`** (named + optional 8-char temp ids), gated match via **`bot_match_index`**, **`EXODIA_INV_ITEM_MATCH_THRESHOLD`**, **`EXODIA_SEEN_ITEMS`**, **`EXODIA_MATCH_STACK_MASK`**. Run **`python tests/bot_inventory_test.py`** for **`captures/inventory_test_overlay.png`**; with **`EXODIA_SEEN_ITEMS=1`**, unknown slots become **`unknown:<8-hex>`** and persist under **`items/`**. Cleanup: **`python -m bot_match_index cleanup --dry-run`**. Legacy **`images/ui_icons.png`** path still exists on `BotEyes.find_inventory()`. **`perception_envelope`** carries **`inventory_slot_occupancy`** (4×7 booleans). Set **`EXODIA_MASK_PANELS=0`** to skip UI blackout on `curr_client`.
 
-## Skill / example scripts (legacy)
+## Legacy example scripts
+
+Historical one-offs live under **`legacyCode/`** (not canonical entrypoints). See [`legacyCode/README.md`](legacyCode/README.md).
 
 | Script | Notes |
 |--------|--------|
-| `infernal_fishing.py` | **Deprecated** — redirects to `InfernalEelFishing.infernal_eel_fishing` |
-| `agility.py` | Color-based course sequence |
-| `WhyFletch.py` | Fixed-coordinate clicks |
+| `legacyCode/infernal_fishing.py` | **Deprecated** — redirects to `InfernalEelFishing.infernal_eel_fishing` |
+| `legacyCode/agility.py` | Color-based course sequence |
+| `legacyCode/WhyFletch.py` | Fixed-coordinate clicks |
 
 ## Related notes elsewhere in the repo
 

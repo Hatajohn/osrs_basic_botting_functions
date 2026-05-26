@@ -7,6 +7,10 @@ Coarse candidates come from playspace template matching; each hit is confirmed b
 2. **Cyan outline** — RuneLite object-marker diamond on the clickable tile below the icon.
 
 Reusable pieces work on any ``client_bgr`` crop and anchor point, not only the sacred eel FSM.
+
+**Cyan marker detection:** ``locate_cyan_marker_regions`` lives in this module (HSV mask +
+connected components, with tile-width splitting for merged blobs). ``bot_world_objects``
+imports it for world-object detection; env tuning uses ``EXODIA_WORLD_CYAN_*`` keys.
 """
 from __future__ import annotations
 
@@ -97,6 +101,7 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 def default_spot_verify_config() -> SpotVerifyConfig:
+    """Build ``SpotVerifyConfig`` from ``EXODIA_SPOT_*`` env vars; warn if eel icon missing."""
     icon_file = os.environ.get("EXODIA_SPOT_EEL_ICON", "osrs_sacredEelSpot_icon.png")
     cfg = SpotVerifyConfig(
         eel_icon_file=icon_file,

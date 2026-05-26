@@ -1,18 +1,22 @@
-# Infernal eel fishing: fish at infernal spots, crack full inventory with Imcando hammer.
-#
-# Labeled inventory items (via label_inventory_item.py → items/):
-#   infernal_eel — eel icon for bucket counting + use-on target
-#   hammer — Imcando hammer for cracking
-#
-# World spot templates (images/ under Botting/ cwd):
-#   infernal_eel_spot.png (default; override EXODIA_INFERNAL_SPOT_TEMPLATES)
-#
-# Run from Exodia:
-#   cd Exodia && source exodia/bin/activate && python -m InfernalEelFishing.infernal_eel_fishing
-#   — or — ./InfernalEelFishing/run_infernal_eel.sh
-#
-# Session log: Exodia/logs/infernal_eel_latest.log
-# Stop: F8 (EXODIA_STOP_HOTKEY) or Ctrl+C
+"""
+Infernal eel fishing entrypoint: FSM session loop with runtime bridge and logging.
+
+Use this when you need to run infernal eel fishing (fish at spots, crack with Imcando hammer at 28/28).
+
+Labeled inventory items (via label_inventory_item.py → items/):
+  infernal_eel — eel icon for bucket counting + use-on target
+  hammer — Imcando hammer for cracking
+
+World spot templates (images/ under Botting/ cwd):
+  infernal_eel_spot.png (default; override EXODIA_INFERNAL_SPOT_TEMPLATES)
+
+Run from Exodia:
+  cd Exodia && source exodia/bin/activate && python -m InfernalEelFishing.infernal_eel_fishing
+  — or — ./InfernalEelFishing/run_infernal_eel.sh
+
+Session log: Exodia/logs/infernal_eel_latest.log
+Stop: F8 (EXODIA_STOP_HOTKEY) or Ctrl+C
+"""
 
 import os
 import sys
@@ -51,6 +55,7 @@ import bot_client as Client
 import bot_eyes as Eyes
 from bot_action_ui import action_code_label, is_action_fishing
 from bot_gamestate import inventory_is_full
+from bot_inventory_detect import bind_inventory_to_eyes
 from bot_inventory_items import count_labeled_item_slots, read_inventory_labels
 from bot_perception_status import perception_status_from_eyes
 from bot_runtime import (
@@ -250,7 +255,7 @@ def _build_runtime_bridge(ctx: InfernalEelContext, machine: InfernalEelMachine, 
 
     def _refresh(_cmd: RuntimeCommand) -> str:
         Actions.bot_update(ctx.client, ctx.bot_e)
-        ctx.action_code = ctx.bot_e.get_action_text_robust(refresh=False)
+        ctx.action_code = ctx.bot_e.get_action_text(refresh=False)
         return "refreshed (action=%s)" % action_code_label(ctx.action_code)
 
     def _step(_cmd: RuntimeCommand) -> str:
@@ -313,7 +318,7 @@ def _eel_health_probe(ctx: InfernalEelContext) -> dict:
         },
         "spot_templates": {t: (Path("images") / t).is_file() for t in SPOT_TEMPLATES},
         "inventory_calibrated": bool(bot_e.inventory_rect),
-        "action_code": int(bot_e.get_action_text_robust(refresh=False)),
+        "action_code": int(bot_e.get_action_text(refresh=False)),
         "eel_slots": count_labeled_item_slots(slot_items, occ, EEL_ITEM_NAME),
         "inv_full": inventory_is_full(bot_e),
         "spots_visible": _last_spots_visible,
@@ -342,8 +347,8 @@ def _runtime_status_payload(ctx: InfernalEelContext, runtime: RuntimeBridge, bot
 
 def _print_startup_health(bot_e) -> None:
     global _last_spots_visible
-    bot_e.find_inventory(refresh_client=False)
-    code = bot_e.get_action_text_robust(refresh=False)
+    bind_inventory_to_eyes(bot_e, refresh_client=False)
+    code = bot_e.get_action_text(refresh=False)
     hint = " — will seek spot" if code != 0 else ""
     print("Health: action line →", action_code_label(code) + hint)
     print("Health: eel item", EEL_ITEM_NAME, "| hammer item", HAMMER_ITEM_NAME)
@@ -363,6 +368,10 @@ def _print_startup_health(bot_e) -> None:
 
 
 def _run_infernal_eel_session(args) -> None:
+    """Question: How do I run the infernal eel fishing FSM session loop?
+
+    Calls: ``bot_init``, ``InfernalEelMachine.step``, ``read_inventory_labels``, ``RuntimeBridge``.
+    """
     win_rect, rect_source = _resolve_client_rect(args)
     if rect_source != "xdotool":
         print("Window mode:", rect_source)

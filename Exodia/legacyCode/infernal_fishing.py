@@ -8,14 +8,24 @@ Run:
 This legacy script had inverted action gating, stack-blind inventory counting,
 and incorrect spot-click strategy. Do not use for production runs.
 """
+from __future__ import annotations
+
 import sys
+from pathlib import Path
+
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 if __name__ == "__main__":
     print(__doc__, file=sys.stderr)
     print("Launching InfernalEelFishing.infernal_eel_fishing ...", file=sys.stderr)
-    from InfernalEelFishing.infernal_eel_fishing import _ensure_images_cwd, _parse_args, _run_infernal_eel_session
+    from InfernalEelFishing.infernal_eel_fishing import (
+        _ensure_images_cwd,
+        _parse_args,
+        _run_infernal_eel_session,
+    )
     from InfernalEelFishing.infernal_eel_log import close_run_logger, install_run_logger
-    from pathlib import Path
 
     _ensure_images_cwd()
     args = _parse_args()

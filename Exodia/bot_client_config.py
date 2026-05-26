@@ -24,6 +24,7 @@ __all__ = [
 
 
 def default_client_rect_path() -> Path:
+    """Path to ``client_rect.json`` beside this module, or ``EXODIA_CLIENT_RECT_FILE``."""
     raw = os.environ.get("EXODIA_CLIENT_RECT_FILE", "").strip()
     if raw:
         return Path(raw).expanduser().resolve()
@@ -47,6 +48,7 @@ def load_client_rect(path: Optional[Path] = None) -> Optional[Rect]:
 
 
 def save_client_rect(rect: Rect, path: Optional[Path] = None, note: str = "") -> Path:
+    """Write ``rect`` as JSON (Windows primary screen coords) and return the path used."""
     p = path if path is not None else default_client_rect_path()
     payload = {
         "rect": {
@@ -64,6 +66,10 @@ def save_client_rect(rect: Rect, path: Optional[Path] = None, note: str = "") ->
 
 
 def rect_from_env() -> Optional[Rect]:
+    """Parse ``EXODIA_CLIENT_RECT`` (``LEFT,TOP,WIDTH,HEIGHT``) or return ``None`` if unset.
+
+    Raises ``ValueError`` when the env var is present but not four comma-separated integers.
+    """
     raw = os.environ.get("EXODIA_CLIENT_RECT", "").strip()
     if not raw:
         return None

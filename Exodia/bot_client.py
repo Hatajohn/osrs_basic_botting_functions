@@ -1,3 +1,11 @@
+"""
+Locate and track the RuneLite game client window on screen.
+
+``ClientWindow`` searches by title (Win32 or xdotool on Linux) and refreshes
+``win_rect`` (``[left, top, width, height]`` in screen coordinates).
+``FixedClientWindow`` skips search when geometry is already known (``--rect``,
+``EXODIA_CLIENT_RECT``, or ``client_rect.json`` via ``bot_client_config``).
+"""
 #importsEnv
 import platform
 import time
@@ -12,9 +20,18 @@ else:
 
 
 class ClientWindow:
-    """Find and track the RuneLite window; exposes ``win_rect`` for Eyes and capture alignment."""
+    """Find and track the RuneLite window for Eyes and capture alignment.
+
+    ``win_rect`` holds ``[left, top, width, height]`` in screen coordinates.
+    ``get_window_rect()`` returns whether geometry was refreshed; read the rect
+    from ``win_rect``, not from the return value.
+    """
 
     def __init__(self, DEBUG=False, window_title_substring="RuneLite"):
+        """Search for a visible window whose title contains ``window_title_substring``.
+
+        Raises ``RuneLiteNotFoundException`` when no matching window is found.
+        """
         self.runelite = window_title_substring
         self.id = None
         self.win_rect = []
@@ -26,6 +43,10 @@ class ClientWindow:
         self._find_window(force=True)
 
     def update(self):
+        """Re-find the window if needed and refresh ``win_rect``.
+
+        Returns ``True`` when ``get_window_rect()`` succeeds, else ``False``.
+        """
         self._find_window(force=False)
         return self.get_window_rect()
 
@@ -111,6 +132,11 @@ class ClientWindow:
             self.id = hwnd
 
     def get_window_rect(self):
+        """Refresh ``win_rect`` from the current window handle.
+
+        Returns ``True`` on success, ``False`` when ``id`` is missing or geometry
+        query fails. Geometry is read from ``self.win_rect``.
+        """
         if self.id is None:
             return False
         try:
@@ -133,20 +159,27 @@ class ClientWindow:
 
 
 class RuneLiteNotFoundException(Exception):
-    pass
+    """Raised when ``ClientWindow`` cannot locate a matching RuneLite window."""
 
 
 class FixedClientWindow:
-    """Use a known screen rect when automatic window search fails (``--rect``)."""
+    """Use a known screen rect when automatic window search fails (``--rect``).
+
+    ``get_window_rect()`` always returns ``True``; geometry lives on ``win_rect``
+    and is not re-queried from the OS.
+    """
 
     def __init__(self, win_rect: list):
+        """Store ``win_rect`` as ``[left, top, width, height]`` (integers)."""
         self.runelite = "fixed"
         self.id = "fixed"
         self.win_rect = [int(v) for v in win_rect]
         self._DEBUG = False
 
     def update(self):
+        """No-op for fixed geometry; returns ``True``."""
         return True
 
     def get_window_rect(self):
+        """Return ``True``; geometry is fixed on ``win_rect`` (not re-read from the OS)."""
         return True

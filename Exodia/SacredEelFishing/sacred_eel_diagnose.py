@@ -23,6 +23,13 @@ import cv2
 import bot_actions as Actions
 import bot_client as Client
 from bot_client_config import load_client_rect
+from bot_gamestate import inventory_is_full, occupied_cell_count
+from bot_inventory_items import (
+    count_labeled_item_slots,
+    read_inventory_labels,
+    slot_label_bucket_counts,
+)
+from .sacred_eel_fsm import EEL_ITEM_NAME, KNIFE_ITEM_NAME
 from .sacred_eel_log import LOGS_DIR, ensure_logs_dir
 
 
@@ -48,6 +55,8 @@ def main() -> int:
     print("cwd:", os.getcwd())
     print("client_rect:", rect)
     print("capture:", os.environ.get("EXODIA_CAPTURE_BACKEND", "mss"))
+    print("eel item label:", EEL_ITEM_NAME)
+    print("knife item label:", KNIFE_ITEM_NAME)
 
     templates = [
         "osrs_sacredEelSpot.png",
@@ -63,6 +72,10 @@ def main() -> int:
         print("FAIL: missing templates:", ", ".join(missing))
     else:
         print("OK: all templates present")
+
+    for stem in (EEL_ITEM_NAME, KNIFE_ITEM_NAME):
+        p = Path("items") / ("%s.png" % stem)
+        print("item template %s: %s" % (stem, "OK" if p.is_file() else "MISSING"))
 
     try:
         client, bot_e, _bot_a = Actions.bot_init(win_rect=rect)
@@ -94,11 +107,9 @@ def main() -> int:
     else:
         print("WARN: inventory not calibrated (ui_icons.png match failed)")
 
-    code_color = bot_e.get_action_text(refresh=False)
-    code_robust = bot_e.get_action_text_robust(refresh=False)
+    code = bot_e.get_action_text(refresh=False)
     labels = {0: "FISHING (green)", 1: "IDLE (red)", 2: "no fishing UI (seek spot)"}
-    print("action line color:", code_color, labels.get(code_color, "?"))
-    print("action line robust:", code_robust, labels.get(code_robust, "?"))
+    print("action line:", code, labels.get(code, "?"))
 
     bot_e.find_action_strip_rect(refresh_client=False)
     ax, ay, aw, ah = bot_e.action_strip_roi_client()
@@ -108,7 +119,6 @@ def main() -> int:
     if strip.size:
         cv2.imwrite(str(diag_dir / "action_strip.png"), strip)
 
-    from bot_inventory_count import count_sacred_eels
     from bot_spot_verify import default_spot_verify_config, locate_sacred_eel_spots
 
     spot_thr = float(os.environ.get("EXODIA_SPOT_THRESHOLD", "0.45"))
@@ -130,6 +140,15 @@ def main() -> int:
             % (i, c.spot_score, c.eel_score, c.cyan_ratio, c.template, c.click_xy)
         )
 
+    slot_items, occ = read_inventory_labels(bot_e)
+    eel_slots = count_labeled_item_slots(slot_items, occ, EEL_ITEM_NAME)
+    n = occupied_cell_count(occ)
+    full = inventory_is_full(bot_e)
+    print("eel labeled slots:", eel_slots, "| occupied:", n, "/ 28 | inv_full:", full)
+    buckets = slot_label_bucket_counts(slot_items, occ)
+    for label, count in buckets[:12]:
+        print("  bucket %s x%d" % (label, count))
+
     from bot_inventory_count import count_inventory_quantity, count_inventory_stacks
 
     eel_thr = float(os.environ.get("EXODIA_INV_TEMPLATE_THRESHOLD", "0.28"))
@@ -138,13 +157,14 @@ def main() -> int:
     panel = bot_e._inventory_panel_bgr_for_slots()
     panel_wh = "%dx%d" % (panel.shape[1], panel.shape[0]) if panel is not None and panel.size else "?"
     print(
-        "sacred eels: %d total (stack qty, thr=%.2f) | %d icon regions (legacy) | panel %s"
+        "legacy template count: %d total (stack qty, thr=%.2f) | %d icon regions | panel %s"
         % (qty, eel_thr, stacks, panel_wh)
     )
-    if qty <= 3 and occ and sum(1 for r in occ for c in r if c) >= 6:
+    if eel_slots <= 3 and occ and sum(1 for r in occ for c in r if c) >= 6:
         print(
-            "WARN: many occupied slots but low eel count — try EXODIA_INV_PANEL_WIDTH=205 "
-            "or EXODIA_INV_PANEL_RECT=L,T,W,H if columns are clipped"
+            "WARN: many occupied slots but low eel label count — check items/%s.png "
+            "or EXODIA_INV_PANEL_WIDTH=205 / EXODIA_INV_PANEL_RECT=L,T,W,H"
+            % EEL_ITEM_NAME
         )
     for name, inv_flag, fname, thr in [
         ("knife", True, "osrs_knife.png", 0.35),
@@ -157,21 +177,14 @@ def main() -> int:
         )
         print("locate %s: %d raw hit(s) (thr=%.2f)" % (name, len(hits) if hits else 0, thr))
 
-    occ = bot_e.compute_inventory_slot_occupancy()
-    if occ:
-        n = sum(1 for row in occ for c in row if c)
-        print("OK: inventory slots occupied:", n, "/ 28")
-    else:
-        print("WARN: slot occupancy unavailable")
-
     try:
         from bot_overlay import draw_bot_overlay
 
         ov = draw_bot_overlay(
             bot_e,
-            action_code=code_robust,
-            eel_count=qty,
-            inv_slots=n if occ else None,
+            action_code=code,
+            eel_count=eel_slots,
+            inv_slots=n,
             spot_clicks=[c.click_xy for c in verified] if verified else None,
         )
         if ov is not None:

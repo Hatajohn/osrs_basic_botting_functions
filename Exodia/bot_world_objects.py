@@ -1,11 +1,15 @@
 """
 World object template detection in the main playspace (outside inventory).
 
-Primary path: find RuneLite **cyan tile markers**, then match the world icon template
-in the window above each marker (skips the player true tile — no eel sprite there).
+Primary path: find RuneLite **cyan tile markers** via
+``bot_spot_verify.locate_cyan_marker_regions``, then match the world icon template
+in a padded window around each marker (skips inventory hits and markers with no icon).
 
 Fallback: full playspace template scan when ``EXODIA_WORLD_CYAN_FIRST=0`` or
 ``EXODIA_WORLD_CYAN_FALLBACK=1`` and the cyan path finds nothing.
+
+No eel/cyan spot verification — template match only. Reuses
+``bot_spot_verify.dedupe_spot_candidates`` for near-duplicate suppression.
 """
 from __future__ import annotations
 
@@ -48,6 +52,7 @@ __all__ = [
 
 
 def captures_dir() -> Path:
+    """Root directory for capture PNGs (``EXODIA_CAPTURES_DIR`` or ``<exodia>/captures``)."""
     raw = os.environ.get("EXODIA_CAPTURES_DIR", "").strip()
     if raw:
         p = Path(raw).expanduser()
@@ -56,6 +61,7 @@ def captures_dir() -> Path:
 
 
 def capture_template_path(name: str) -> Path:
+    """Resolve ``captures/<name>.png`` (``.png`` suffix optional on ``name``)."""
     stem = name.strip()
     if stem.lower().endswith(".png"):
         stem = stem[:-4]
@@ -90,11 +96,13 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 def world_template_names() -> List[str]:
+    """Parse comma-separated ``EXODIA_WORLD_TEMPLATES`` (default ``osrs_infernalEel``)."""
     raw = os.environ.get("EXODIA_WORLD_TEMPLATES", "osrs_infernalEel").strip()
     return [t.strip() for t in raw.split(",") if t.strip()]
 
 
 def world_cyan_first_enabled() -> bool:
+    """True when ``EXODIA_WORLD_CYAN_FIRST`` is set (default on)."""
     return _env_bool("EXODIA_WORLD_CYAN_FIRST", True)
 
 
@@ -146,6 +154,8 @@ def _icon_search_roi_for_cyan_region(
 
 @dataclass
 class WorldObjectHit:
+    """One template match for a world object in client and screen coordinates."""
+
     name: str
     client_xy: List[int]
     screen_xy: List[int]
@@ -154,6 +164,8 @@ class WorldObjectHit:
 
 @dataclass
 class WorldObjectLocateResult:
+    """Aggregate result from ``locate_world_objects`` / ``locate_world_objects_from_eyes``."""
+
     hits: List[WorldObjectHit]
     search_roi: Optional[List[int]]
     inventory_filtered: int
@@ -350,6 +362,14 @@ def locate_world_objects(
     dedupe_radius_px: Optional[int] = None,
     eyes: Optional["Eyes.BotEyes"] = None,
 ) -> WorldObjectLocateResult:
+    """
+    Find world objects on a client BGR frame.
+
+    Cyan-first path: ``locate_cyan_marker_regions`` → template match in icon window per
+    marker → dedupe. Falls back to full playspace scan when disabled or empty (see env).
+
+    Returns hits plus diagnostic fields (search ROI, cyan regions, filter counts).
+    """
     if client_bgr is None or client_bgr.size == 0:
         return WorldObjectLocateResult([], None, 0)
 
@@ -414,6 +434,11 @@ def locate_world_objects_from_eyes(
     template_names: Sequence[str],
     **kwargs: object,
 ) -> WorldObjectLocateResult:
+    """
+    ``locate_world_objects`` using ``BotEyes`` capture and panel rects.
+
+    Uses unmasked client BGR when available so cyan markers are visible.
+    """
     client_bgr = _client_bgr_for_spot_ops(eyes)
     if client_bgr is None or client_bgr.size == 0:
         return WorldObjectLocateResult([], None, 0)

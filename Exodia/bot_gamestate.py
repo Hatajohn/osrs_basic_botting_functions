@@ -1,7 +1,13 @@
 """
 Canonical agent-facing game state snapshot built from ``BotEyes`` perception.
 
-Maps screen capture + OCR into a JSON-serializable ``GameState`` for ``Observation.meta``.
+Simple — ``GameState`` dataclass, ``occupied_cell_count``, ``inventory_is_full``,
+``game_state_to_dict`` serialization.
+
+Compound — ``build_game_state``: action-strip + dialogue OCR and inventory via
+``read_inventory_labels`` (``bot_inventory_items``). Item labels land on
+``perception_envelope["inventory_slot_items"]`` only; ``GameState`` carries
+occupancy counts, not per-slot names.
 """
 from __future__ import annotations
 
@@ -10,6 +16,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from bot_action_ui import ACTION_FISHING
 from bot_eyes import INV_SLOTS
+from bot_inventory_items import read_inventory_labels
 
 if TYPE_CHECKING:
     import bot_eyes as Eyes
@@ -27,7 +34,7 @@ __all__ = [
 
 @dataclass
 class GameState:
-    """One timestep sensory summary for agent policy code."""
+    """Question: What sensory summary does the agent have this tick (screen-only)?"""
 
     tick: int
     action_busy: bool
@@ -46,16 +53,23 @@ class GameState:
 
 
 def occupied_cell_count(grid: Optional[List[List[bool]]]) -> Optional[int]:
+    """Question: How many ``True`` cells are in an occupancy grid?"""
     if grid is None:
         return None
     return sum(1 for row in grid for cell in row if cell)
 
 
-def inventory_is_full(eyes: "Eyes.BotEyes", *, slot_count: int = INV_SLOTS) -> bool:
-    """True when occupied inventory cells reach ``slot_count`` (default 28)."""
+def _inventory_occupancy_from_eyes(eyes: "Eyes.BotEyes") -> Optional[List[List[bool]]]:
     pe = eyes.perception_envelope or {}
     occ = pe.get("inventory_slot_occupancy")
-    n = occupied_cell_count(occ)
+    if occ is None:
+        occ = eyes.compute_inventory_slot_occupancy()
+    return occ
+
+
+def inventory_is_full(eyes: "Eyes.BotEyes", *, slot_count: int = INV_SLOTS) -> bool:
+    """Question: Is the inventory full (occupied cells ≥ ``slot_count``, default 28)?"""
+    n = occupied_cell_count(_inventory_occupancy_from_eyes(eyes))
     return n is not None and n >= slot_count
 
 
@@ -65,10 +79,12 @@ def build_game_state(
     *,
     frame_paths: Optional[Dict[str, str]] = None,
 ) -> GameState:
-    """
-    Build ``GameState`` from current ``BotEyes`` frames (caller must have refreshed).
+    """Question: What is the canonical game-state snapshot from current ``BotEyes`` frames?
 
-    Uses ``get_action_text_with_ocr(refresh=False)`` to avoid an extra capture.
+    Compound: ``get_action_text_with_ocr(refresh=False)``, ``ocr_dialogue_roi``, and
+    ``read_inventory_labels`` for occupancy. Updates ``perception_envelope`` with
+    ``inventory_slot_occupancy`` and ``inventory_slot_items`` (labels not on
+    ``GameState``). Caller must have refreshed capture/geometry first.
     """
     code, ocr_action = eyes.get_action_text_with_ocr(refresh=False)
     ocr_dialogue = eyes.ocr_dialogue_roi()
@@ -81,13 +97,17 @@ def build_game_state(
     if dialogue is not None:
         dialogue = dialogue.strip() or None
 
-    pe = eyes.perception_envelope or {}
-    occupied = pe.get("inventory_slot_occupancy")
-    calibrated = bool(pe.get("inventory_rect_client_local"))
+    slot_items, occupied = read_inventory_labels(eyes)
+    pe = eyes.perception_envelope
+    if pe is not None:
+        pe["inventory_slot_occupancy"] = occupied
+        pe["inventory_slot_items"] = slot_items
+
+    calibrated = bool((pe or {}).get("inventory_rect_client_local"))
     item_count = occupied_cell_count(occupied)
 
     rect = list(eyes.client_rect) if eyes.client_rect is not None else []
-    backend = str(pe.get("capture_backend") or "")
+    backend = str((pe or {}).get("capture_backend") or "")
 
     return GameState(
         tick=tick,
@@ -105,4 +125,5 @@ def build_game_state(
 
 
 def game_state_to_dict(state: GameState) -> Dict[str, Any]:
+    """Question: How do I serialize ``GameState`` for observation meta or logs?"""
     return state.to_dict()

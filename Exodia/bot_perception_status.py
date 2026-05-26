@@ -1,5 +1,9 @@
 """
 Lightweight ``BotEyes`` snapshot for ``runtime_status.json`` (no FSM imports).
+
+Simple — read-only summary from the current frame: ``capture_mean``,
+``inventory_calibrated``, ``action_code`` via :func:`perception_status_from_eyes`.
+Fishing scripts merge the result into :meth:`RuntimeBridge.publish_status` each tick.
 """
 from __future__ import annotations
 
@@ -12,14 +16,19 @@ __all__ = ["perception_status_from_eyes"]
 
 
 def perception_status_from_eyes(eyes: "Eyes.BotEyes") -> Dict[str, Any]:
-    """Build nested ``perception`` fields for :meth:`RuntimeBridge.publish_status`."""
+    """Question: What lightweight perception fields go in ``runtime_status.json``?
+
+    Returns ``{"perception": {capture_mean, inventory_calibrated, action_code}}``.
+    Uses ``get_action_text(refresh=False)`` — refresh ``BotEyes`` first (e.g. after
+    ``bot_update``).
+    """
     pe = eyes.perception_envelope or {}
     capture_mean = None
     frame = eyes.curr_client
     if frame is not None and getattr(frame, "size", 0) > 0:
         capture_mean = float(frame.mean())
     calibrated = bool(pe.get("inventory_rect_client_local"))
-    action_code = int(eyes.get_action_text_robust(refresh=False))
+    action_code = int(eyes.get_action_text(refresh=False))
     return {
         "perception": {
             "capture_mean": capture_mean,

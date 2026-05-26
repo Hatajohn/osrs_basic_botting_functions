@@ -1,5 +1,7 @@
 """
-State machine for infernal eel fishing.
+Infernal eel FSM: when to fish, seek spots, or crack eels at full inventory.
+
+Use this when you need state transitions for infernal eel fishing (not the session loop).
 
 States
 ------
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
     import bot_client as Client
     import bot_eyes as Eyes
 
+# ``items/<stem>.png`` labels for eel bucket count + hammer→eel use-on (env overrides).
 EEL_ITEM_NAME = os.environ.get("EXODIA_INFERNAL_EEL_ITEM", "infernal_eel")
 HAMMER_ITEM_NAME = os.environ.get("EXODIA_INFERNAL_HAMMER_ITEM", "hammer")
 EEL_INV_TEMPLATE = os.environ.get("EXODIA_INFERNAL_EEL_TEMPLATE", "infernal_eel_fish.png")
@@ -124,7 +127,7 @@ class InfernalEelContext:
 
     def refresh(self, *, record_progress: bool = False) -> None:
         Actions.bot_update(self.client, self.bot_e)
-        self.action_code = self.bot_e.get_action_text_robust(refresh=False)
+        self.action_code = self.bot_e.get_action_text(refresh=False)
         self.slot_items, self.occupancy = read_inventory_labels(self.bot_e)
         self.eel_count = count_labeled_item_slots(
             self.slot_items, self.occupancy, EEL_ITEM_NAME
@@ -234,7 +237,10 @@ def _locate_spots(bot_e: "Eyes.BotEyes") -> list:
 
 
 class InfernalEelMachine:
-    """One ``step()`` = one state action (or cracking sub-step)."""
+    """Question: How do I advance infernal eel fishing one FSM step (fish / seek spot / crack)?
+
+    One ``step()`` = one state action (or cracking sub-step). States: FISHING, SEEK_SPOT, CRACKING.
+    """
 
     def __init__(self, ctx: InfernalEelContext):
         self.ctx = ctx

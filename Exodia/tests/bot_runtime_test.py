@@ -193,7 +193,7 @@ def _mock_eyes(*, action_code: int, capture_mean: float = 5.0, calibrated: bool 
         "inventory_rect_client_local": [0, 0, 10, 10] if calibrated else None,
     }
     eyes.curr_client = np.full((4, 4, 3), capture_mean, dtype=np.uint8)
-    eyes.get_action_text_robust.return_value = action_code
+    eyes.get_action_text.return_value = action_code
     return eyes
 
 

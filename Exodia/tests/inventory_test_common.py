@@ -14,7 +14,7 @@ import numpy as np
 
 from bot_inventory_actions import clear_inventory_hover
 from bot_inventory_detect import (
-    auto_detect_inventory_rect,
+    bind_inventory_to_eyes,
     inventory_occupancy_from_client,
     match_inventory_by_outline,
     validate_inventory_rect,
@@ -124,16 +124,38 @@ def capture_client_bgr() -> Tuple[Optional[np.ndarray], Optional[str]]:
     return bgr, None
 
 
+def inventory_test_eyes(
+    client: np.ndarray,
+    *,
+    client_rect: Optional[Sequence[int]] = None,
+):
+    """``BotEyes`` with ``curr_client`` set for ``bind_inventory_to_eyes`` tests."""
+    from bot_eyes import BotEyes
+
+    h, w = client.shape[:2]
+    if client_rect is None:
+        from bot_client_config import load_client_rect
+
+        client_rect = load_client_rect()
+    if not client_rect or len(client_rect) != 4:
+        client_rect = [0, 0, w, h]
+    eyes = BotEyes(win_rect=[int(v) for v in client_rect], DEBUG=False)
+    eyes.curr_client = client
+    return eyes
+
+
 def locate_inventory_rect(
     client: np.ndarray,
 ) -> Tuple[Optional[List[int]], float, float]:
     """
-    Find inventory panel on ``client`` — must succeed before count/identify.
+    Bind inventory panel on ``client`` via ``bind_inventory_to_eyes`` — must succeed
+    before count/identify.
 
     Returns ``(rect, outline_score_at_rect, grid_score)``.
     """
-    rect = auto_detect_inventory_rect(client)
-    if rect is None or len(rect) != 4:
+    eyes = inventory_test_eyes(client)
+    rect = bind_inventory_to_eyes(eyes, refresh_client=False, force=True)
+    if not rect or len(rect) != 4:
         return None, 0.0, 0.0
     grid = float(validate_inventory_rect(client, rect))
     outline_score = 0.0

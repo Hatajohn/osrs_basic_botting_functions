@@ -1,4 +1,15 @@
-#imports
+"""
+Vision layer for Exodia: screen capture, UI layout, template/color search, OCR.
+
+``BotEyes`` holds the latest client frame, inventory rect/crop (when bound), and
+JSON-serializable ``perception_envelope``. Call ``capture_frame()`` (or ``update()``)
+once per tick, then use read-only helpers such as ``locate_image``, ``get_action_text``,
+and ``check_inventory``.
+
+Inventory panel binding is ``bot_inventory_detect.bind_inventory_to_eyes`` — ``BotEyes``
+does not auto-detect inventory. ``bot_inventory_detect`` may import underscored vision
+helpers from this module (``load_template_gray``, ``match_template_peaks``, etc.).
+"""
 from __future__ import annotations
 
 import copy
@@ -17,6 +28,8 @@ from sklearn.cluster import DBSCAN
 import bot_env as Env
 
 _DEFAULT_COLOR_BOUNDARIES = [([180, 0, 180], [220, 20, 220])]
+
+# --- Action strip (ROI helpers) ---
 
 # Legacy default (top-left). Prefer ``resolve_action_strip_roi_client`` from inventory layout.
 _ACTION_STRIP_RECT_CLIENT = [25, 50, 100, 30]
@@ -183,6 +196,8 @@ def _clamp_roi(width, height, roi):
     sh = max(1, min(sh, height - sy))
     return sx, sy, sw, sh
 
+
+# --- Inventory (grid layout) ---
 
 INV_COLS = 4
 INV_ROWS = 7
@@ -498,6 +513,16 @@ def _mask_and_contours_bgr(image_bgr, boundaries):
     return thresh, contours
 
 
+# Public aliases for vision helpers consumed by ``bot_inventory_detect`` and tooling.
+clamp_roi = _clamp_roi
+inventory_search_roi = _inventory_search_roi
+load_template_gray = _load_template_gray
+load_template_gray_and_mask = _load_template_gray_and_mask
+match_template_peaks = _match_template_peaks
+parse_rect_env = _parse_rect_env
+
+# --- OCR ---
+
 def resolve_tesseract_cmd(explicit=None):
     """Prefer explicit arg, then EXODIA_TESSERACT_CMD, then PATH, then 'tesseract'."""
     if explicit:
@@ -535,6 +560,12 @@ def run_ocr(
 
 # This class handles object recognition and the images required for the rest of the bot to function
 class BotEyes():
+    """
+    Screen capture, UI layout, template/color search, and OCR for one game client.
+
+    Typical tick: ``capture_frame()`` or ``update()``, then ``get_action_text(refresh=False)``,
+    ``locate_image``, ``check_inventory``, etc. without triggering another grab.
+    """
     def __init__(self, win_rect=[], DEBUG=False, tesseract_cmd=None):
         self.tesseract_path = resolve_tesseract_cmd(tesseract_cmd)
         pytesseract.pytesseract.tesseract_cmd = self.tesseract_path
@@ -595,21 +626,8 @@ class BotEyes():
             self.inventory_rect[3],
         ]
 
-    # Updates the inventory image
-    def check_inventory(self):
-        """Crop the inventory slot grid from ``curr_client`` using ``inventory_rect`` (same frame as the client grab)."""
-        if self.curr_client is None:
-            self.curr_inventory = None
-            return
-        if self.inventory_rect is None or len(self.inventory_rect) != 4:
-            self.curr_inventory = None
-            return
-        h0, w0 = self.curr_client.shape[:2]
-        sx, sy, sw, sh = _clamp_roi(w0, h0, self.inventory_rect)
-        self.curr_inventory = self.curr_client[sy : sy + sh, sx : sx + sw].copy()
+    # --- Capture ---
 
-
-    # Updates the client image from stream buffer or sync grab.
     def check_client(self):
         """Capture client rectangle into ``curr_client`` (alias for ``capture_frame``)."""
         self.capture_frame()
@@ -629,9 +647,7 @@ class BotEyes():
         """Pull latest frame (buffer copy when stream active) and derive crops/masks."""
         self.find_center()
         self.curr_client = Env.screen_image(rect=self.client_rect, DEBUG=self._DEBUG)
-        if self.inventory_rect is None:
-            self.find_inventory(refresh_client=False)
-        else:
+        if self.inventory_rect is not None:
             self._sync_inventory_global()
         self.find_action_strip_rect(refresh_client=False)
         self.check_inventory()
@@ -727,12 +743,18 @@ class BotEyes():
             pe["inventory_cell_debug_scores"] = inv_std_grid
         self.perception_envelope = pe
 
-    # Grab inventory screenshot region after ensuring layout is known.
-    def grab_inventory(self):
-        try:
-            if self.inventory_rect is None:
-                self.find_inventory(refresh_client=False)
-            if self._DEBUG and self.inventory_global is not None:
+    # --- Inventory ---
+
+    def check_inventory(self) -> None:
+        """Crop the inventory slot grid from ``curr_client`` using ``inventory_rect``."""
+        if self.curr_client is None:
+            self.curr_inventory = None
+            return
+        if self.inventory_rect is None or len(self.inventory_rect) != 4:
+            self.curr_inventory = None
+            return
+        if self._DEBUG and self.inventory_global is not None:
+            try:
                 screenshot_check = Env.screen_image()
                 ix, iy, iw, ih = self.inventory_global
                 screenshot_check = cv2.rectangle(
@@ -743,90 +765,14 @@ class BotEyes():
                     thickness=2,
                 )
                 Env.debug_view(screenshot_check, title="True inventory position")
-        except Exception:
-            return False
-        self.check_inventory()
-        return True
+            except Exception:
+                pass
+        h0, w0 = self.curr_client.shape[:2]
+        sx, sy, sw, sh = _clamp_roi(w0, h0, self.inventory_rect)
+        self.curr_inventory = self.curr_client[sy : sy + sh, sx : sx + sw].copy()
 
+    # --- Locate ---
 
-    # Locate the inventory on the client screen and returns the corners
-    def find_inventory(
-        self,
-        threshold=0.38,
-        search_roi=None,
-        *,
-        refresh_client: bool = True,
-        force: bool = False,
-    ):
-        """
-        Auto-detect the 4×7 inventory grid (``bot_inventory_detect``).
-
-        Runs full detection once at startup; later ``update()`` calls only crop the cached
-        rect. Pass ``force=True`` or set ``EXODIA_INV_FORCE_RECALIB=1`` to search again.
-        """
-        _ = threshold
-        force = force or os.environ.get("EXODIA_INV_FORCE_RECALIB", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        if (
-            not force
-            and self.inventory_rect is not None
-            and len(self.inventory_rect) == 4
-        ):
-            if refresh_client or self.curr_client is None:
-                self.check_client()
-            self._sync_inventory_global()
-            self.check_inventory()
-            return self.inventory_rect
-
-        if refresh_client or self.curr_client is None:
-            self.check_client()
-        image = self.curr_client
-        if image is None or image.size == 0:
-            return []
-
-        from bot_inventory_detect import auto_detect_inventory_rect, validate_inventory_rect
-
-        auto_off = os.environ.get("EXODIA_INV_AUTO", "1").strip().lower() not in (
-            "0",
-            "false",
-            "no",
-        )
-        if not auto_off:
-            return []
-
-        rect = auto_detect_inventory_rect(image, last_rect=None, search_roi=search_roi)
-        if rect is None:
-            self.inventory_rect = None
-            self.inventory_global = None
-            self.curr_inventory = None
-            return []
-
-        if os.environ.get("EXODIA_INV_DEBUG", "").strip().lower() in ("1", "true", "yes"):
-            print(
-                "find_inventory: auto -> %s (score %.1f)"
-                % (rect, validate_inventory_rect(image, rect))
-            )
-
-        self.inventory_rect = rect
-        self.inventory_global = [
-            rect[0] + self.client_rect[0],
-            rect[1] + self.client_rect[1],
-            rect[2],
-            rect[3],
-        ]
-        if self._DEBUG:
-            vis = copy.deepcopy(image)
-            ix, iy, iw, ih = rect
-            cv2.rectangle(vis, (ix, iy), (ix + iw, iy + ih), (0, 0, 255), 2)
-            Env.debug_view(vis, "inventory_rect")
-        self.check_inventory()
-        return self.inventory_rect
-
-
-    # Locate the chat area on the client screen and returns the corners
     def find_chat(self, image, threshold=0.7):
         """Returns chat ROI corners in image coords, or ``None`` if template missing or no match."""
         image_gray = cv2.cvtColor(Env.resize_image(image, scale_percent=70), cv2.COLOR_BGR2GRAY)
@@ -886,13 +832,6 @@ class BotEyes():
         if sw <= 0 or sh <= 0:
             return None
         return base[sy : sy + sh, sx : sx + sw].copy()
-
-    def resolve_inventory_slot_items(self) -> Optional[List[List[Optional[str]]]]:
-        """
-        Per-slot item identity (name, id, hash, …). **Not implemented** — returns ``None``.
-        Use with :meth:`compute_inventory_slot_occupancy` for empty vs full; wire templates/embeddings later.
-        """
-        return None
 
     def _inventory_panel_bgr_for_slots(self) -> Optional[np.ndarray]:
         """Same pixels as ``curr_inventory`` when possible; else crops unmasked client."""
@@ -1162,7 +1101,7 @@ class BotEyes():
         """
         if inv:
             if self.curr_inventory is None or getattr(self.curr_inventory, "size", 0) == 0:
-                self.grab_inventory()
+                self.check_inventory()
             if self.curr_inventory is None or self.curr_inventory.size == 0:
                 return LocateImageResult(filename, False, "no_inventory_crop", [])
             img_rgb = copy.deepcopy(self.curr_inventory)
@@ -1237,98 +1176,8 @@ class BotEyes():
             inv=inv, filename=filename, threshold=threshold, name=name, search_roi=search_roi
         )
         return [m.screen_xy[:] for m in detailed.matches]
-    # Locate an image within the client scene by attempting to match based on features
-    def find_image_in_scene(self, image_path):
-        """ORB + homography: returns projected template center ``[gx, gy]`` in screen coords, or ``None``."""
-        self.update()
-        img_rgb = copy.deepcopy(self.curr_client)
 
-        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        if image is None or image.size == 0:
-            print("find_image_in_scene: could not load", image_path)
-            return None
-        scene = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
-
-        if self._DEBUG:
-            Env.debug_view(image)
-            Env.debug_view(scene)
-
-        orb = cv2.ORB_create()
-        keypoints_image, descriptors_image = orb.detectAndCompute(image, None)
-        keypoints_scene, descriptors_scene = orb.detectAndCompute(scene, None)
-
-        if (
-            descriptors_image is None
-            or descriptors_scene is None
-            or len(descriptors_image) < 2
-            or len(descriptors_scene) < 2
-        ):
-            print("find_image_in_scene: insufficient descriptors")
-            return None
-
-        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-        matches = bf.match(descriptors_image, descriptors_scene)
-
-        MIN_MATCH_COUNT = 10
-        if len(matches) < MIN_MATCH_COUNT:
-            print("Not enough matches are found - %d/%d" % (len(matches), MIN_MATCH_COUNT))
-            return None
-
-        src_pts = np.float32([keypoints_image[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-        dst_pts = np.float32([keypoints_scene[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-
-        M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-        if M is None:
-            print("find_image_in_scene: homography failed")
-            return None
-
-        matches_mask = mask.ravel().tolist()
-
-        draw_params = dict(matchColor=(0, 255, 0), singlePointColor=None, matchesMask=matches_mask, flags=2)
-        result_img = cv2.drawMatches(image, keypoints_image, scene, keypoints_scene, matches, None, **draw_params)
-
-        if self._DEBUG:
-            Env.debug_view(result_img, "Detecting image in scene")
-
-        ih, iw = image.shape[:2]
-        corners = np.float32([[0, 0], [iw, 0], [iw, ih], [0, ih]]).reshape(-1, 1, 2)
-        projected = cv2.perspectiveTransform(corners, M)
-        cx = float(np.mean(projected[:, 0, 0]))
-        cy = float(np.mean(projected[:, 0, 1]))
-        return [cx + self.client_rect[0], cy + self.client_rect[1]]
-
-    def ocr_action_text_roi(self, psm: int = 7, scale: Optional[float] = None) -> Dict[str, Any]:
-        """OCR on the action-text strip (client-local ROI ``_ACTION_STRIP_RECT_CLIENT``)."""
-        src = self._client_bgr_for_text_crops()
-        if src is None:
-            return {"roi": "action_strip", "text": "", "error": "no_client_frame"}
-        h0, w0 = src.shape[:2]
-        roi = list(self.action_strip_roi_client())
-        sx, sy, sw, sh = _clamp_roi(w0, h0, roi)
-        crop = src[sy : sy + sh, sx : sx + sw]
-        text = run_ocr(crop, psm=psm, scale=scale)
-        return {
-            "roi": "action_strip",
-            "rect_client_local": [sx, sy, sw, sh],
-            "text": text,
-        }
-
-    def ocr_dialogue_roi(self, psm: int = 6, scale: Optional[float] = 0.75) -> Dict[str, Any]:
-        """OCR on the bottom chat strip defined by ``chat_rect`` (client-local)."""
-        src = self._client_bgr_for_text_crops()
-        if src is None:
-            return {"roi": "dialogue_chat_strip", "text": "", "error": "no_client_frame"}
-        if self.chat_rect is None or len(self.chat_rect) != 4:
-            return {"roi": "dialogue_chat_strip", "text": "", "error": "no_chat_rect"}
-        h0, w0 = src.shape[:2]
-        sx, sy, sw, sh = _clamp_roi(w0, h0, self.chat_rect)
-        crop = src[sy : sy + sh, sx : sx + sw]
-        text = run_ocr(crop, psm=psm, scale=scale)
-        return {
-            "roi": "dialogue_chat_strip",
-            "rect_client_local": [sx, sy, sw, sh],
-            "text": text,
-        }
+    # --- Action strip ---
 
     def _action_text_color_code_from_resized(self, img: np.ndarray) -> int:
         """Tri-state from green vs red contour heuristics on resized action-strip BGR image."""
@@ -1459,8 +1308,6 @@ class BotEyes():
             self.find_action_strip_rect(refresh_client=False)
         if self.action_strip_rect is not None and len(self.action_strip_rect) == 4:
             return tuple(int(v) for v in self.action_strip_rect)
-        if self.inventory_rect is None or len(self.inventory_rect) != 4:
-            self.find_inventory(refresh_client=False)
         fw, fh = (0, 0)
         src = self._client_bgr_for_text_crops()
         if src is not None and src.size > 0:
@@ -1482,9 +1329,9 @@ class BotEyes():
         sx, sy, sw, sh = _clamp_roi(w0, h0, [ax, ay, aw, ah])
         return src[sy : sy + sh, sx : sx + sw].copy()
 
-    def get_action_text(self, refresh: bool = True) -> int:
+    def get_action_text(self, refresh: bool = True, template_threshold: float = 0.26) -> int:
         """
-        Heuristic action line state from **color contour** detection (not full OCR).
+        Tri-state action line: color heuristics with template fallback.
 
         Returns:
             **0** — green-styled region suggests an active skill action line.
@@ -1494,25 +1341,14 @@ class BotEyes():
         ROI is placed **left of the inventory** when ``inventory_rect`` is calibrated
         (override with ``EXODIA_ACTION_STRIP_RECT`` or ``EXODIA_ACTION_STRIP_LEFT_OF_INV=0``).
 
+        If the player has not fished recently, the Fishing / NOT fishing strip is
+        usually hidden — color and templates both return **2**. Callers should seek a
+        fishing spot, not wait in FISHING state.
+
         Args:
             refresh: If ``True`` (default), calls ``update()`` first. If ``False``, crops
                 the action strip from the current ``curr_client`` frame.
-        """
-        if refresh:
-            self.update()
-        else:
-            self.find_action_strip_rect(refresh_client=False)
-        return self._action_text_color_code_from_strip()
-
-    def get_action_text_robust(
-        self, refresh: bool = True, template_threshold: float = 0.26
-    ) -> int:
-        """
-        ``get_action_text`` with template fallback on the **action strip ROI only**.
-
-        If the player has not fished recently, the Fishing / NOT fishing strip is
-        usually hidden — color and templates both return **2** (no UI). Callers
-        should seek a fishing spot, not wait in FISHING state.
+            template_threshold: Minimum template match score for fallback detection.
         """
         if refresh:
             self.update()
@@ -1585,13 +1421,48 @@ class BotEyes():
 
     def get_action_text_with_ocr(self, refresh: bool = True) -> Tuple[int, Dict[str, Any]]:
         """
-        Same tri-state as ``get_action_text``, plus ``ocr_action_text_roi()`` on ``curr_client``.
+        Same tri-state as ``get_action_text`` (color + template fallback), plus OCR payload.
 
         If ``refresh`` is ``True``, ``get_action_text`` runs first (includes ``update()``).
         """
         code = self.get_action_text(refresh=refresh)
         ocr_meta = self.ocr_action_text_roi()
         return code, ocr_meta
+
+    # --- OCR ---
+
+    def ocr_action_text_roi(self, psm: int = 7, scale: Optional[float] = None) -> Dict[str, Any]:
+        """OCR on the action-text strip (client-local ROI from ``action_strip_roi_client``)."""
+        src = self._client_bgr_for_text_crops()
+        if src is None:
+            return {"roi": "action_strip", "text": "", "error": "no_client_frame"}
+        h0, w0 = src.shape[:2]
+        roi = list(self.action_strip_roi_client())
+        sx, sy, sw, sh = _clamp_roi(w0, h0, roi)
+        crop = src[sy : sy + sh, sx : sx + sw]
+        text = run_ocr(crop, psm=psm, scale=scale)
+        return {
+            "roi": "action_strip",
+            "rect_client_local": [sx, sy, sw, sh],
+            "text": text,
+        }
+
+    def ocr_dialogue_roi(self, psm: int = 6, scale: Optional[float] = 0.75) -> Dict[str, Any]:
+        """OCR on the bottom chat strip defined by ``chat_rect`` (client-local)."""
+        src = self._client_bgr_for_text_crops()
+        if src is None:
+            return {"roi": "dialogue_chat_strip", "text": "", "error": "no_client_frame"}
+        if self.chat_rect is None or len(self.chat_rect) != 4:
+            return {"roi": "dialogue_chat_strip", "text": "", "error": "no_chat_rect"}
+        h0, w0 = src.shape[:2]
+        sx, sy, sw, sh = _clamp_roi(w0, h0, self.chat_rect)
+        crop = src[sy : sy + sh, sx : sx + sw]
+        text = run_ocr(crop, psm=psm, scale=scale)
+        return {
+            "roi": "dialogue_chat_strip",
+            "rect_client_local": [sx, sy, sw, sh],
+            "text": text,
+        }
     
 #Main
 if __name__ == "__main__":

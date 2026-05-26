@@ -1,19 +1,20 @@
 """
-Automatic OSRS inventory panel detection (4×7 grid, client-local coords).
+Inventory detect layer — composes ``bot_eyes`` vision primitives.
 
-No manual ``EXODIA_INV_PANEL_RECT`` required unless you want to override.
+Panel rect, 4×7 grid, slot occupancy (client-local coords). Callers bind detection onto
+``BotEyes`` via ``bind_inventory_to_eyes`` instead of ``BotEyes.find_inventory``.
 
-Primary path: masked template match on the **dark inventory frame outline** from
-``captures/osrs_inventory_base.png`` (override with ``EXODIA_INV_OUTLINE_TEMPLATE``).
-Interior slots are ignored so item icons do not break localization.
-
-Fallback: grid-structure scoring in the bottom-right; optional ``ui_icons.png`` hint.
+Primary path: masked outline match on ``captures/osrs_inventory_base.png``; fallback:
+grid-structure search in the bottom-right with optional ``ui_icons.png`` hint.
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from bot_eyes import BotEyes
 
 import cv2
 import numpy as np
@@ -56,6 +57,7 @@ def _env_int(key: str, default: int) -> int:
 
 
 def inventory_panel_size() -> Tuple[int, int]:
+    """Question: What width and height (px) should the inventory panel use?"""
     trim_r = _env_int("EXODIA_INV_PANEL_TRIM_RIGHT", 0)
     if not os.environ.get("EXODIA_INV_PANEL_WIDTH", "").strip():
         assets = _load_inventory_outline_assets()
@@ -68,6 +70,7 @@ def inventory_panel_size() -> Tuple[int, int]:
 
 
 def inventory_outline_template_path() -> Path:
+    """Question: Which PNG is the inventory dark-frame outline template?"""
     raw = os.environ.get("EXODIA_INV_OUTLINE_TEMPLATE", "").strip()
     if raw:
         p = Path(raw).expanduser()
@@ -81,10 +84,9 @@ def build_inventory_outline_mask(
     band_frac: Optional[float] = None,
     dark_threshold: Optional[int] = None,
 ) -> np.ndarray:
-    """
-    Mask for ``matchTemplate(..., mask=...)``: dark frame band + Canny edges on the border ring.
+    """Question: How do we mask only the dark inventory border for template match?
 
-    Ignores the slot interior so filled inventories still match the empty reference outline.
+    Ignores slot interiors so filled inventories still match the empty reference outline.
     """
     gray = cv2.cvtColor(template_bgr, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape[:2]
@@ -204,11 +206,9 @@ def match_inventory_by_outline(
     *,
     threshold: Optional[float] = None,
 ) -> Optional[Tuple[List[int], float]]:
-    """
-    Locate inventory via dark-outline template match.
+    """Question: Where is the inventory panel via masked outline template match?
 
-    Returns ``([x, y, w, h], score)`` for the full inventory panel in client-local
-    coords. The invisible 4×7 slot grid spans this entire rectangle.
+    Returns ``([x, y, w, h], score)`` in client-local coords; the 4×7 grid spans the rect.
     """
     assets = _load_inventory_outline_assets()
     if assets is None or client_bgr is None or client_bgr.size == 0:
@@ -246,7 +246,7 @@ def match_inventory_by_outline(
 def inventory_panel_corners(inventory_rect: Sequence[int]) -> Tuple[
     Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]
 ]:
-    """Return TL, TR, BR, BL pixel corners for ``[x, y, w, h]``."""
+    """Question: What are the four pixel corners of an inventory ``[x, y, w, h]`` rect?"""
     fx, fy, fw, fh = (int(v) for v in inventory_rect[:4])
     tl = (fx, fy)
     tr = (fx + fw, fy)
@@ -258,11 +258,7 @@ def inventory_panel_corners(inventory_rect: Sequence[int]) -> Tuple[
 def inventory_grid_divider_lines(
     inventory_rect: Sequence[int],
 ) -> Tuple[List[int], List[int]]:
-    """
-    Grid line positions for the 4×7 layout inside ``inventory_rect``.
-
-    Lines mark tile edges (gaps sit between consecutive lines).
-    """
+    """Question: Where are the 4×7 grid divider lines inside ``inventory_rect``?"""
     from bot_eyes import inventory_grid_layout
 
     fx, fy, _fw, _fh = (int(v) for v in inventory_rect[:4])
@@ -279,11 +275,9 @@ def inventory_occupancy_from_client(
     client_bgr: np.ndarray,
     inventory_rect: Sequence[int],
 ) -> Tuple[Optional[List[List[bool]]], int, Optional[List[float]]]:
-    """
-    Classify 28 inventory slots on a client frame crop.
+    """Question: Which inventory slots are empty vs occupied on this frame?
 
     Returns ``(occupancy_7x4, occupied_count, empty_prototype_bgr)``.
-    Empty slots match the brown plate (low variance + color near calibrated background).
     """
     from bot_eyes import analyze_inventory_panel_occupancy
 
@@ -312,7 +306,7 @@ def draw_inventory_occupancy_overlay(
     occupied_color_bgr: Tuple[int, int, int] = (0, 120, 255),
     alpha: Optional[float] = None,
 ) -> np.ndarray:
-    """Translucent tiles: cyan-ish = empty, orange = occupied."""
+    """Question: How do I visualize empty vs occupied slots on a debug image?"""
     from bot_eyes import inventory_grid_cell_xywh
 
     vis = client_bgr.copy()
@@ -358,7 +352,7 @@ def draw_inventory_outline_overlay(
     grid_alpha: Optional[float] = None,
     corner_radius: int = 4,
 ) -> np.ndarray:
-    """Return a copy of ``client_bgr`` with the inventory outline and optional 4×7 grid."""
+    """Question: How do I draw the panel outline and optional 4×7 grid on a debug image?"""
     from bot_eyes import inventory_grid_cell_xywh
 
     vis = client_bgr.copy()
@@ -389,6 +383,7 @@ def draw_inventory_outline_overlay(
 
 
 def panel_width_candidates() -> List[int]:
+    """Question: Which panel widths should grid-search calibration try?"""
     w, _ = inventory_panel_size()
     extra = os.environ.get("EXODIA_INV_CALIB_WIDTHS", "").strip()
     if extra:
@@ -419,9 +414,7 @@ def _sidebar_penalty(panel_bgr: np.ndarray) -> float:
 
 
 def score_inventory_grid_panel(panel_bgr: np.ndarray) -> float:
-    """
-    Score how well ``panel_bgr`` looks like a 4×7 inventory (no item templates required).
-    """
+    """Question: How well does this crop look like a 4×7 inventory grid?"""
     occ, std_grid, _ = analyze_inventory_panel_occupancy(panel_bgr)
     if occ is None or std_grid is None:
         return 0.0
@@ -476,7 +469,7 @@ def _eel_peak_bonus(panel_bgr: np.ndarray) -> float:
 def validate_inventory_rect(
     client_bgr: np.ndarray, rect_xywh: Sequence[int]
 ) -> float:
-    """Quick score for an existing rect (fast path on each ``update()``)."""
+    """Question: How good is this candidate inventory rect on the current frame?"""
     if client_bgr is None or client_bgr.size == 0 or len(rect_xywh) != 4:
         return 0.0
     h0, w0 = client_bgr.shape[:2]
@@ -494,7 +487,7 @@ def refine_inventory_rect(
     span_px: Optional[int] = None,
     step_px: Optional[int] = None,
 ) -> List[int]:
-    """Nudge ``[x,y,w,h]`` to maximize grid score."""
+    """Question: Can we nudge this rect to improve its grid score?"""
     ix, iy, iw, ih = (int(v) for v in rect_xywh[:4])
     span = span_px if span_px is not None else _env_int("EXODIA_INV_REFINE_SPAN", 14)
     step = step_px if step_px is not None else _env_int("EXODIA_INV_REFINE_STEP", 2)
@@ -513,7 +506,7 @@ def refine_inventory_rect(
 def trim_sidebar_from_rect(
     client_bgr: np.ndarray, rect_xywh: Sequence[int]
 ) -> List[int]:
-    """Shrink width while the right edge looks like tab icons, not item slots."""
+    """Question: Should we shrink the rect to exclude the RuneLite tab column?"""
     ix, iy, iw, ih = (int(v) for v in rect_xywh[:4])
     best = [ix, iy, iw, ih]
     best_score = validate_inventory_rect(client_bgr, best)
@@ -594,7 +587,7 @@ def template_anchor_center(
     *,
     threshold: float = 0.38,
 ) -> Optional[Tuple[int, int]]:
-    """Optional hint from ``ui_icons.png`` / ``Session_Inventory.png`` (top-left of match)."""
+    """Question: Where is a coarse inventory hint from legacy UI icon templates?"""
     gray = cv2.cvtColor(client_bgr, cv2.COLOR_BGR2GRAY)
     h0, w0 = gray.shape[:2]
     off_x, off_y = 0, 0
@@ -637,9 +630,7 @@ def auto_detect_inventory_rect(
     last_rect: Optional[Sequence[int]] = None,
     search_roi: Optional[List[int]] = None,
 ) -> Optional[List[int]]:
-    """
-    Detect ``[x, y, width, height]`` of the 4×7 inventory grid in **client-local** coords.
-    """
+    """Question: What is the inventory panel ``[x, y, w, h]`` in client-local coords?"""
     _ = last_rect
     manual = _parse_rect_env("EXODIA_INV_PANEL_RECT")
     if manual:
@@ -688,11 +679,84 @@ def auto_detect_inventory_rect(
     return rect
 
 
-def calibrate_inventory_rect_from_client(
-    client_bgr: np.ndarray,
+def apply_inventory_rect_to_eyes(eyes: BotEyes, rect: Sequence[int]) -> None:
+    """Write client-local inventory rect onto BotEyes and sync screen-global coords."""
+    eyes.inventory_rect = list(rect)
+    eyes.inventory_global = [
+        rect[0] + eyes.client_rect[0],
+        rect[1] + eyes.client_rect[1],
+        rect[2],
+        rect[3],
+    ]
+
+
+def bind_inventory_to_eyes(
+    eyes: BotEyes,
     *,
-    min_filled_slots: int = 1,
+    refresh_client: bool = False,
+    force: bool = False,
+    search_roi=None,
 ) -> Optional[List[int]]:
-    """Back-compat wrapper — ``min_filled_slots`` ignored; uses grid score instead."""
-    _ = min_filled_slots
-    return auto_detect_inventory_rect(client_bgr)
+    """
+    Question: Detect inventory panel and write rect + crop onto BotEyes?
+
+    Uses ``eyes.curr_client`` + ``auto_detect_inventory_rect``; sets ``eyes.inventory_rect``,
+    ``eyes.inventory_global``, calls ``eyes.check_inventory()`` for crop.
+    """
+    force = force or os.environ.get("EXODIA_INV_FORCE_RECALIB", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if (
+        not force
+        and eyes.inventory_rect is not None
+        and len(eyes.inventory_rect) == 4
+    ):
+        if refresh_client or eyes.curr_client is None:
+            eyes.check_client()
+        eyes._sync_inventory_global()
+        eyes.check_inventory()
+        return eyes.inventory_rect
+
+    if refresh_client or eyes.curr_client is None:
+        eyes.check_client()
+    image = eyes.curr_client
+    if image is None or image.size == 0:
+        return []
+
+    auto_off = os.environ.get("EXODIA_INV_AUTO", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+    if not auto_off:
+        return []
+
+    rect = auto_detect_inventory_rect(image, last_rect=None, search_roi=search_roi)
+    if rect is None:
+        eyes.inventory_rect = None
+        eyes.inventory_global = None
+        eyes.curr_inventory = None
+        return []
+
+    if os.environ.get("EXODIA_INV_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+        print(
+            "bind_inventory_to_eyes: auto -> %s (score %.1f)"
+            % (rect, validate_inventory_rect(image, rect))
+        )
+
+    apply_inventory_rect_to_eyes(eyes, rect)
+
+    if eyes._DEBUG:
+        import copy
+
+        import bot_env as Env
+
+        vis = copy.deepcopy(image)
+        ix, iy, iw, ih = rect
+        cv2.rectangle(vis, (ix, iy), (ix + iw, iy + ih), (0, 0, 255), 2)
+        Env.debug_view(vis, "inventory_rect")
+
+    eyes.check_inventory()
+    return eyes.inventory_rect

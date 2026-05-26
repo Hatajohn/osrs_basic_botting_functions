@@ -1,5 +1,11 @@
 """
-Playspace search helpers: camera pan and ground-click relocation.
+Playspace search: ROI/walk geometry (simple) and camera-pan / ground-relocate loops (compound).
+
+Simple — math only, no I/O: ``playspace_search_roi``, ``ground_click_target``,
+``walk_direction_for_attempt``.
+
+Compound — multi-step via injectable callbacks: ``search_with_camera_pan`` (locate → pan →
+optional ground walk), ``click_random_hit``.
 
 Use ``search_with_camera_pan`` when the target may appear after rotating the camera.
 Add ``relocate`` / ``max_relocate_attempts`` to click the ground and walk the character
@@ -34,8 +40,7 @@ def playspace_search_roi(
     inventory_rect: Optional[Sequence[int]] = None,
     chat_rect: Optional[Sequence[int]] = None,
 ) -> Optional[List[int]]:
-    """
-    Client-local ROI excluding inventory (right) and chat/footer (bottom).
+    """Question: What client-local ROI excludes inventory and chat?
 
     When ``inventory_rect`` / ``chat_rect`` are known, tighten the ROI to the
     playspace left of the inventory panel and above the chat strip.
@@ -57,7 +62,10 @@ def playspace_search_roi(
 
 
 def walk_direction_for_attempt(attempt_index: int) -> str:
-    """Rotate through N/E/S/W so relocation does not always walk the same way."""
+    """Question: Which compass direction should relocation walk on this attempt?
+
+    Rotates through N/E/S/W so repeated relocates do not always walk the same way.
+    """
     return WALK_DIRECTIONS[int(attempt_index) % len(WALK_DIRECTIONS)]
 
 
@@ -69,8 +77,7 @@ def ground_click_target(
     distance_frac: float = 0.32,
     y_jitter_frac: float = 0.08,
 ) -> Point:
-    """
-    Screen coordinate to click the ground and walk ``direction`` from ``anchor_screen``.
+    """Question: Where on screen should I click to walk a direction from an anchor?
 
     ``client_rect`` is ``[left, top, width, height]`` (screen). ``anchor_screen`` is
     usually ``BotEyes.global_center``. Clicks stay in the left playspace (not on inventory).
@@ -112,11 +119,11 @@ def search_with_camera_pan(
     sleep_after_relocate_s: float = 3.0,
     on_relocate: Optional[Callable[[int, int], None]] = None,
 ) -> List[Point]:
-    """
-    Call ``locate()``; on empty results run ``pan()`` and retry.
+    """Question: How do I keep locating a target while panning (and optionally walking)?
 
-    When pans are exhausted and ``max_relocate_attempts`` > 0, calls ``relocate(attempt, max)``
-    (e.g. ground click to walk), waits, and locates again.
+    Calls ``locate()``; on empty results runs ``pan()`` and retries. When pans are exhausted
+    and ``max_relocate_attempts`` > 0, calls ``relocate(attempt, max)`` (e.g. ground click),
+    waits, and locates again.
 
     Returns the first non-empty hit list, or ``[]`` after all attempts.
     ``on_miss(attempt_index, max_pan_attempts)`` runs when a pan is about to happen.
@@ -154,7 +161,10 @@ def click_random_hit(
     click_fn: Callable[[Point], None],
     hits: Sequence[Point],
 ) -> bool:
-    """Click a random entry from ``hits`` using ``click_fn(point)``. Returns ``False`` if empty."""
+    """Question: How do I click one random match from a hit list?
+
+    Uses ``click_fn(point)``. Returns ``False`` when ``hits`` is empty.
+    """
     if not hits:
         return False
     click_fn(random.choice(list(hits)))

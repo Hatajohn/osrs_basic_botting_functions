@@ -1,7 +1,9 @@
-"""
-Inventory mouse actions: center cursor, click a grid slot, use slot-on-slot (OSRS use-item).
+"""Inventory actions layer: grid slot clicks and OSRS use-item-on (by slot or label).
 
-Coordinates are Win32 screen space from ``inventory_slot_screen_xy`` + ``client_rect``.
+Use this when you need to click inventory cells or use one item on another without
+template matching. Coordinates are Win32 screen space from ``inventory_slot_screen_xy``
+and ``client_rect``. Template-based use-on lives in ``bot_actions.use_x_on_y`` (imports
+``pick_distinct_screen_points`` and ``clear_inventory_hover`` from here).
 """
 from __future__ import annotations
 
@@ -16,7 +18,11 @@ from bot_eyes import INV_COLS, INV_ROWS, inventory_slot_screen_xy
 
 @dataclass(frozen=True)
 class UseItemOnResult:
-    """Outcome of a use-item-on attempt (slot or template based)."""
+    """Question: What happened when I tried to use one inventory item on another?
+
+    Fields: ``ok``, ``reason``, optional ``missing_item``, ``source_slot``, ``dest_slot``.
+    Bool-coerces to ``ok``. Factory helpers: ``success()``, ``fail()``.
+    """
 
     ok: bool
     reason: str = "ok"
@@ -82,7 +88,10 @@ def closest_slot(
     reference: Tuple[int, int],
     candidates: Sequence[Tuple[int, int]],
 ) -> Optional[Tuple[int, int]]:
-    """Candidate slot nearest ``reference`` (Manhattan); ties → top-left."""
+    """Question: Which inventory slot is nearest another slot on the grid?
+
+    Manhattan distance; ties break toward top-left ``(row, col)``.
+    """
     if not candidates:
         return None
     return min(
@@ -176,7 +185,11 @@ def clear_inventory_hover(
     duration: float = 0.22,
     hover_clear_s: Optional[float] = None,
 ) -> Tuple[int, int]:
-    """Move mouse to client center; return that point."""
+    """Question: How do I move the mouse off inventory so item tooltips clear?
+
+    Moves to client center (also used before use-on clicks). Returns that screen point.
+    Settle time: ``EXODIA_INV_HOVER_CLEAR_S``.
+    """
     center = client_screen_center(client_rect)
     move_mouse_to_screen(center, rad=rad, duration=duration, hover_clear_s=hover_clear_s)
     return center
@@ -206,7 +219,11 @@ def click_inventory_slot(
     move_profile: str = "tight",
     focus: bool = True,
 ) -> bool:
-    """Move to slot center and left-click. Returns ``False`` if coords invalid."""
+    """Question: How do I left-click one inventory grid cell?
+
+    Moves to slot center and clicks. Returns ``False`` if ``(row, col)`` is out of range.
+    Click jitter: ``EXODIA_INV_CLICK_RAD``.
+    """
     xy = inventory_slot_screen_point(inventory_rect, client_rect, row, col)
     if xy is None:
         return False
@@ -233,11 +250,11 @@ def use_inventory_slot_on_slot(
     click_rad: Optional[int] = None,
     between_clicks_s: Optional[float] = None,
 ) -> UseItemOnResult:
-    """
-    OSRS use-item: click **source** slot, then **destination** slot.
+    """Question: How do I use the item in one inventory slot on another slot?
 
     ``source`` / ``destination`` are ``(row, col)``. When ``center_first`` is true,
-    the cursor moves to the client center before the first click (clears hover text).
+    clears hover via ``clear_inventory_hover`` before the first click. Gap between
+    clicks: ``EXODIA_INV_USE_ON_GAP_S``.
     """
     sr, sc = (int(source[0]), int(source[1]))
     dr, dc = (int(destination[0]), int(destination[1]))
@@ -328,12 +345,11 @@ def use_named_item_on_named_item(
     dest_slot: Optional[Tuple[int, int]] = None,
     center_first: bool = True,
 ) -> UseItemOnResult:
-    """
-    Use one named inventory item on another (e.g. hammer on infernal eel).
+    """Question: How do I use one labeled inventory item on another by item name?
 
-    When ``source_slot`` / ``dest_slot`` are omitted, picks a stable source slot
-    and the **closest** matching destination slot (Manhattan grid distance).
-    Source and destination must be **different** slots.
+    Calls: ``slots_matching_item`` → ``closest_slot`` (when slots omitted) →
+    ``use_inventory_slot_on_slot``. Omitted slots: stable top-left source, **closest**
+    dest to source (Manhattan). For PNG templates use ``bot_actions.use_x_on_y`` instead.
     """
     src_candidates = slots_matching_item(slot_items, source_item)
     dst_candidates = slots_matching_item(slot_items, dest_item)

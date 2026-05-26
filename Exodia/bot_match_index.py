@@ -1,8 +1,8 @@
 """
-Gated template matching with multi-signal diagnostics and seen-item fingerprint registry.
+Match index — template catalogs, fingerprint gates, and seen-item registry.
 
-Named templates live in ``items/flax.png``; auto-generated unknowns use 8-char hex
-stems under ``items/seen/<id>.png`` with ``items/fingerprints/<id>.json`` sidecars.
+Use this when you need to match slot crops against named ``items/*.png`` templates
+or persist unknown icons as temp-id fingerprints (``items/seen/``, ``items/fingerprints/``).
 """
 from __future__ import annotations
 
@@ -95,6 +95,7 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 def items_directory() -> Path:
+    """Question: Where is the canonical root ``items/`` directory for templates and seen data?"""
     raw = os.environ.get("EXODIA_ITEMS_DIR", "").strip()
     if raw:
         p = Path(raw).expanduser()
@@ -112,12 +113,12 @@ def _items_subdir(env_key: str, default_name: str, items_root: Optional[Path] = 
 
 
 def seen_images_directory(items_root: Optional[Path] = None) -> Path:
-    """Temp-id slot PNG crops (default ``items/seen/``)."""
+    """Question: Where are temp-id slot PNG crops stored (default ``items/seen/``)?"""
     return _items_subdir("EXODIA_SEEN_ITEMS_DIR", "seen", items_root)
 
 
 def seen_fingerprints_directory(items_root: Optional[Path] = None) -> Path:
-    """Temp-id JSON sidecars (default ``items/fingerprints/``)."""
+    """Question: Where are temp-id JSON fingerprint sidecars stored (default ``items/fingerprints/``)?"""
     return _items_subdir("EXODIA_SEEN_FINGERPRINTS_DIR", "fingerprints", items_root)
 
 
@@ -157,6 +158,9 @@ def is_unknown_label(label: Optional[str]) -> bool:
     if label in (None, "?"):
         return True
     return seen_id_from_label(label) is not None
+
+
+# --- Matching ---
 
 
 def _embed_icon_in_slot_canvas(bgr: np.ndarray) -> np.ndarray:
@@ -286,6 +290,7 @@ class MatchSignals:
 
 
 def extract_signals(cell_bgr: np.ndarray) -> MatchSignals:
+    """Question: What hue/edge/dHash/aspect fingerprint describes this slot BGR crop?"""
     if cell_bgr is None or cell_bgr.size == 0:
         z = np.zeros(_HUE_BINS, dtype=np.float32)
         return MatchSignals(
@@ -459,6 +464,7 @@ def gate_signals(
     *,
     entry_aspect: float = 1.0,
 ) -> Tuple[Tuple[RejectionReason, ...], Dict[str, float]]:
+    """Question: Do catalog and query fingerprints agree enough to allow template scoring?"""
     color_thr, edge_thr, size_thr, dhash_thr = _match_signal_thresholds()
     color_dist = _hist_l1(entry_sig.hue_hist, query_sig.hue_hist)
     edge_dist = _edge_diff(entry_sig.edge_vec, query_sig.edge_vec)
@@ -513,6 +519,9 @@ def _cross_template_score(
     return max(slide, norm)
 
 
+# --- Catalog ---
+
+
 class TemplateCatalog:
     """Named ``items/*.png`` templates (stems that are not 8-char hex ids)."""
 
@@ -551,6 +560,7 @@ class TemplateCatalog:
         priority_names: Sequence[str] = (),
         strict_gates: bool = False,
     ) -> MatchVerdict:
+        """Question: Which named template best matches this slot crop?"""
         thr = threshold if threshold is not None else _env_float(
             "EXODIA_INV_ITEM_MATCH_THRESHOLD", 0.40
         )
@@ -606,6 +616,47 @@ class TemplateCatalog:
             skipped_count=skipped,
             query_signals=sig_q,
         )
+
+
+def _load_png_entry(path: Path) -> Optional[Tuple[str, np.ndarray, np.ndarray, MatchSignals]]:
+    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if bgr is None or bgr.size == 0:
+        return None
+    stem = path.stem.lower()
+    signal_bgr = bgr if is_temp_item_id(stem) else _embed_icon_in_slot_canvas(bgr)
+    sig = extract_signals(signal_bgr)
+    clean_bgr = _strip_runelite_tags_bgr(bgr)
+    gray = _slot_gray_for_match(clean_bgr)
+    return stem, bgr, gray, sig
+
+
+def load_named_catalog(items_dir: Optional[Path] = None) -> TemplateCatalog:
+    """Question: What named ``items/*.png`` templates are available (excluding 8-char temp ids)?"""
+    root = items_dir if items_dir is not None else items_directory()
+    entries: List[TemplateEntry] = []
+    if not root.is_dir():
+        return TemplateCatalog(entries)
+    for path in sorted(root.glob("*.png")):
+        stem = path.stem.lower()
+        if is_temp_item_id(stem):
+            continue
+        loaded = _load_png_entry(path)
+        if loaded is None:
+            continue
+        _, bgr, gray, sig = loaded
+        entries.append(
+            TemplateEntry(
+                name=stem,
+                template_gray=gray,
+                template_bgr=bgr,
+                signals=sig,
+                aspect=sig.aspect,
+            )
+        )
+    return TemplateCatalog(entries)
+
+
+# --- Seen registry ---
 
 
 @dataclass
@@ -811,6 +862,8 @@ class SeenItemRegistry:
         threshold: Optional[float] = None,
     ) -> Tuple[Optional[str], MatchVerdict, bool]:
         """
+        Question: What label (``unknown:<id>``) fits this crop, registering a new id if needed?
+
         Returns ``(label, verdict, created)`` where label is ``unknown:<id>`` or ``None``.
         """
         if not _env_bool("EXODIA_SEEN_ITEMS", False):
@@ -964,45 +1017,12 @@ class SeenItemRegistry:
             self._write_sidecar(self._entries[canonical])
 
 
-def _load_png_entry(path: Path) -> Optional[Tuple[str, np.ndarray, np.ndarray, MatchSignals]]:
-    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-    if bgr is None or bgr.size == 0:
-        return None
-    stem = path.stem.lower()
-    signal_bgr = bgr if is_temp_item_id(stem) else _embed_icon_in_slot_canvas(bgr)
-    sig = extract_signals(signal_bgr)
-    clean_bgr = _strip_runelite_tags_bgr(bgr)
-    gray = _slot_gray_for_match(clean_bgr)
-    return stem, bgr, gray, sig
-
-
-def load_named_catalog(items_dir: Optional[Path] = None) -> TemplateCatalog:
-    root = items_dir if items_dir is not None else items_directory()
-    entries: List[TemplateEntry] = []
-    if not root.is_dir():
-        return TemplateCatalog(entries)
-    for path in sorted(root.glob("*.png")):
-        stem = path.stem.lower()
-        if is_temp_item_id(stem):
-            continue
-        loaded = _load_png_entry(path)
-        if loaded is None:
-            continue
-        _, bgr, gray, sig = loaded
-        entries.append(
-            TemplateEntry(
-                name=stem,
-                template_gray=gray,
-                template_bgr=bgr,
-                signals=sig,
-                aspect=sig.aspect,
-            )
-        )
-    return TemplateCatalog(entries)
-
-
 def load_seen_registry(items_dir: Optional[Path] = None) -> SeenItemRegistry:
+    """Question: What temp-id fingerprints are persisted on disk under ``items/seen/``?"""
     return SeenItemRegistry.load_from_disk(items_dir)
+
+
+# --- Cleanup ---
 
 
 @dataclass(frozen=True)

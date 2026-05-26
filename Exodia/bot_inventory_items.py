@@ -1,9 +1,14 @@
 """
-Per-slot inventory item identification via template match against ``items/*.png``.
+Inventory items layer — per-slot template match and fingerprint identity.
 
-Named templates: ``items/flax.png`` → ``"flax"``.
-Unmatched occupied slots: ``unknown:<8-hex>`` when ``EXODIA_SEEN_ITEMS=1``, else ``"?"``.
-Frame-local fingerprint buckets (tests / ``EXODIA_INV_FRAME_BUCKETS=1``): ``tmp:<8-hex>``.
+Use this when you need item names on occupied inventory slots: named ``items/*.png``
+templates, persistent ``unknown:<8-hex>`` (``EXODIA_SEEN_ITEMS=1``), or ephemeral
+``tmp:<8-hex>`` frame buckets (``EXODIA_INV_FRAME_BUCKETS=1``).
+
+Compound entry points:
+- ``read_inventory_labels(eyes)`` — occupancy from ``BotEyes`` state (``perception_envelope``
+  or ``compute_inventory_slot_occupancy``), then ``identify_inventory_slot_items``
+  with ``frame_buckets=True``.
 """
 from __future__ import annotations
 
@@ -29,14 +34,13 @@ from bot_match_index import (
     extract_signals,
     is_unknown_label,
     is_temp_item_id,
+    items_directory,
     load_named_catalog,
     load_seen_registry,
     seen_id_from_label,
     signals_same_item,
 )
 
-_EXODIA_DIR = Path(__file__).resolve().parent
-_DEFAULT_ITEMS_DIR = _EXODIA_DIR / "items"
 _UNKNOWN_LABEL = "?"
 _FRAME_BUCKET_PREFIX = "tmp:"
 
@@ -119,8 +123,7 @@ def slots_match_for_bucket(
     sig_a: Optional[MatchSignals] = None,
     sig_b: Optional[MatchSignals] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
-    """
-    Whether two slot BGR crops belong in the same fingerprint bucket.
+    """Question: Do two slot crops belong in the same ephemeral ``tmp:`` bucket?
 
     Tiers (first pass wins): symmetric ``signals_same_item``, template cross-score,
     optional seen-loose dHash+hue (``EXODIA_BUCKET_USE_SEEN_LOOSE``).
@@ -172,8 +175,7 @@ def apply_frame_fingerprint_buckets(
     *,
     inset: Optional[int] = None,
 ) -> Tuple[List[List[Optional[str]]], Dict[str, FrameFingerprintBucket]]:
-    """
-    Group occupied ``?`` slots into ephemeral ``tmp:<8-hex>`` labels by fingerprint.
+    """Question: Which occupied ``?`` slots share the same ephemeral ``tmp:<8-hex>`` id?
 
     Named template hits and persistent ``unknown:<id>`` labels are left unchanged.
     """
@@ -350,18 +352,10 @@ class SlotSameItemVerdict:
     signals_b: Optional[MatchSignals] = None
 
 
-def items_directory() -> Path:
-    raw = os.environ.get("EXODIA_ITEMS_DIR", "").strip()
-    if raw:
-        p = Path(raw).expanduser()
-        return p if p.is_absolute() else (_EXODIA_DIR / p).resolve()
-    return _DEFAULT_ITEMS_DIR.resolve()
-
-
 def load_item_templates(
     items_dir: Optional[Path] = None,
 ) -> Dict[str, np.ndarray]:
-    """Load named ``*.png`` templates as grayscale (excludes 8-char temp-id stems)."""
+    """Question: What named ``items/*.png`` templates are available as grayscale (skips temp ids)?"""
     root = items_dir if items_dir is not None else items_directory()
     if not root.is_dir():
         return {}
@@ -378,6 +372,7 @@ def load_item_templates(
 
 
 def load_item_catalog(items_dir: Optional[Path] = None) -> TemplateCatalog:
+    """Question: What gated ``TemplateCatalog`` wraps the named ``items/*.png`` templates?"""
     return load_named_catalog(items_dir)
 
 
@@ -390,10 +385,9 @@ def resolve_cell_item(
     frame_seen_ids: Optional[Dict[str, MatchSignals]] = None,
     frame_bumped: Optional[set] = None,
 ) -> Tuple[Optional[str], float, Optional[MatchVerdict], bool]:
-    """
-    Returns ``(label, score, verdict, created_temp)``.
+    """Question: What item label fits this slot crop (named, ``unknown:<id>``, or none)?
 
-    ``label`` is a named stem, ``unknown:<id>``, or ``None`` (caller maps to ``?``).
+    Returns ``(label, score, verdict, created_temp)``; ``None`` label means caller maps to ``?``.
     """
     if cell_bgr is None or cell_bgr.size == 0:
         return None, 0.0, None, False
@@ -458,11 +452,9 @@ def match_cell_to_item(
     catalog: Optional[TemplateCatalog] = None,
     seen_registry: Optional[SeenItemRegistry] = None,
 ) -> Tuple[Optional[str], float]:
-    """
-    Best template match for one slot crop.
+    """Question: Which named template best matches one slot crop (legacy dict path)?
 
     Returns ``(item_name, score)`` when accepted, else ``(None, best_score)``.
-    Legacy dict ``templates`` used when ``catalog`` is omitted.
     """
     cat = catalog
     if cat is None:
@@ -481,8 +473,7 @@ def match_cell_to_item(
 
 
 def inventory_slot_cell_looks_occupied(cell_bgr: np.ndarray) -> bool:
-    """
-    Heuristic: occupied slot vs empty brown plate (no panel context required).
+    """Question: Does this slot crop look occupied (vs empty brown plate)?
 
     Mirrors occupancy std threshold; optional Laplacian bump when
     ``EXODIA_INV_LAPLACE_MIN_VAR`` is set.
@@ -509,7 +500,7 @@ def crop_inventory_slot_bgr(
     *,
     inset: Optional[int] = None,
 ) -> Optional[np.ndarray]:
-    """Client-local BGR crop for one grid slot (full tile by default)."""
+    """Question: What is the client-local BGR crop for inventory grid ``(row, col)``?"""
     if client_bgr is None or client_bgr.size == 0 or len(inventory_rect) != 4:
         return None
     rect = tuple(int(v) for v in inventory_rect[:4])
@@ -553,12 +544,10 @@ def inventory_slot_crops_same_item(
     label_b: Optional[str] = None,
     require_occupied: bool = True,
 ) -> SlotSameItemVerdict:
-    """
-    Compare two slot BGR crops — same item type, identity not required.
+    """Question: Are two slot BGR crops the same item type (identity optional)?
 
     When both ``label_*`` are known and agree (named stem or same ``unknown:<id>``),
     returns early. Otherwise uses ``signals_same_item`` (hue / edge / dHash / aspect).
-    Stack counts may differ; empty slots are not items unless both are empty.
     """
     empty = {
         "color": 0.0,
@@ -615,8 +604,7 @@ def inventory_slots_same_item(
     slot_items: Optional[Sequence[Sequence[Optional[str]]]] = None,
     require_occupied: bool = True,
 ) -> SlotSameItemVerdict:
-    """
-    Compare grid slots ``(row, col)`` on a client frame.
+    """Question: Are two inventory grid slots the same item type on this client frame?
 
     Pass ``occupancy`` / ``slot_items`` when already computed; otherwise occupancy
     is inferred per-crop and labels are omitted.
@@ -683,17 +671,6 @@ def _item_match_inset_px(inventory_rect: Sequence[int]) -> int:
     return 0
 
 
-def _match_debug_enabled() -> bool:
-    return _env_bool("EXODIA_MATCH_DEBUG", False)
-
-
-def _dump_debug_slot(crop: np.ndarray, row: int, col: int) -> None:
-    out_dir = _EXODIA_DIR / "captures"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / ("debug_slot_%d_%d.png" % (row, col))
-    cv2.imwrite(str(path), crop)
-
-
 def identify_inventory_slot_items(
     client_bgr: np.ndarray,
     inventory_rect: Sequence[int],
@@ -711,8 +688,7 @@ def identify_inventory_slot_items(
     Dict[Tuple[int, int], float],
     Optional[Dict[Tuple[int, int], Dict[str, Any]]],
 ]:
-    """
-    Map occupied slots to item names from ``items/`` templates.
+    """Question: What item label occupies each inventory slot on this client frame?
 
     Returns ``(grid_7x4, scores, diagnostics_or_None)`` where grid cells are:
     ``None`` = empty, ``unknown:<id>`` or ``"?"`` = occupied unknown, else named stem.
@@ -759,8 +735,6 @@ def identify_inventory_slot_items(
                 continue
             x, y, w, h = cell
             crop = client_bgr[y : y + h, x : x + w]
-            if _match_debug_enabled():
-                _dump_debug_slot(crop, row, col)
 
             label, score, verdict, created = resolve_cell_item(
                 crop,
@@ -825,7 +799,8 @@ def draw_inventory_item_identify_overlay(
     label_color_bgr: Tuple[int, int, int] = (0, 255, 0),
     unknown_color_bgr: Tuple[int, int, int] = (0, 255, 255),
 ) -> np.ndarray:
-    """
+    """Question: How do I visualize occupancy plus item labels on a client frame?
+
     Same base as ``inventory_test_overlay``: occupancy tint + grid, plus item labels
     on occupied slots (name, ``unknown:<id>``, or ``?``).
     """
@@ -872,11 +847,7 @@ _NAME_SAFE_RE = re.compile(r"[^a-z0-9_]+")
 
 
 def normalize_item_template_name(raw: str) -> Optional[str]:
-    """
-    Sanitize a user-provided template name for ``items/<name>.png``.
-
-    Returns lowercase ``[a-z0-9_]`` stem, or ``None`` when invalid / temp-id-like.
-    """
+    """Question: What safe ``items/<name>.png`` stem should this user label become?"""
     if not raw or not str(raw).strip():
         return None
     name = str(raw).strip().lower().replace(" ", "_")
@@ -894,8 +865,7 @@ def save_named_item_template(
     items_dir: Optional[Path] = None,
     overwrite: bool = False,
 ) -> Path:
-    """
-    Write a full slot BGR crop to ``items/<name>.png``.
+    """Question: How do I persist a slot crop as a named ``items/<name>.png`` template?
 
     Raises ``ValueError`` for invalid names; ``FileExistsError`` when the file
     exists and ``overwrite`` is false.
@@ -968,7 +938,7 @@ def count_labeled_item_slots(
     occupancy: Sequence[Sequence[bool]],
     item_name: str,
 ) -> int:
-    """Occupied slots whose identify label matches ``item_name`` (case-insensitive)."""
+    """Question: How many occupied slots match this named item stem (case-insensitive)?"""
     needle = item_name.strip().lower()
     if not needle:
         return 0
@@ -988,7 +958,18 @@ def count_labeled_item_slots(
 def read_inventory_labels(eyes) -> Tuple[
     Sequence[Sequence[Optional[str]]], Sequence[Sequence[bool]]
 ]:
-    """Identify occupied inventory slots (``frame_buckets=True``) after ``bot_update``."""
+    """Question: What item labels and occupancy grid does the live ``BotEyes`` state have?
+
+    Compound: calls ``bind_inventory_to_eyes`` when ``eyes.inventory_rect`` is
+    missing or invalid; reads occupancy from ``eyes.perception_envelope`` (or
+    ``eyes.compute_inventory_slot_occupancy()``), then
+    ``identify_inventory_slot_items(..., frame_buckets=True)`` on ``eyes.curr_client``.
+    """
+    if eyes.inventory_rect is None or len(eyes.inventory_rect) != 4:
+        from bot_inventory_detect import bind_inventory_to_eyes
+
+        bind_inventory_to_eyes(eyes, refresh_client=False)
+
     pe = eyes.perception_envelope or {}
     occ = pe.get("inventory_slot_occupancy")
     if occ is None:

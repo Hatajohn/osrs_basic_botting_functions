@@ -1,12 +1,18 @@
 """
-Agent shell for Exodia: policy types + tick loop + body wiring.
+Agent runtime for Exodia: ``BotBrain`` policies, declarative ``BrainCommand`` types,
+and ``ExodiaHarness`` tick loop.
 
-**Agent = brain.** Whatever pilots the bot (LLM tools, planner, script) implements
-``BotBrain`` or uses ``CallbackBrain``. ``ExodiaHarness`` is only the runtime:
-refresh sensors, build ``Observation``, call ``brain.decide``, run declarative
-``BrainCommand`` objects, verify outcomes, and log actions.
+**Agent = brain.** Pilots (LLM tools, planners, scripts) implement ``BotBrain`` or
+``CallbackBrain``. ``ExodiaHarness`` is the body: refresh sensors, build
+``Observation``, call ``brain.decide``, execute ``BrainCommand`` objects via
+``bot_actions``, verify outcomes, and log.
 
-Typical loop: ``harness.refresh_geometry()`` then ``harness.step()``.
+**BrainCommand index** (see dataclass docstrings): ``CmdWait``, ``CmdWaitTicks``,
+``CmdLog``, ``CmdClickImage``, ``CmdClickColor``, ``CmdUseItemOn``.
+
+Typical loop: ``create_harness(...)`` or manual wiring, then
+``harness.refresh_geometry()`` + ``harness.step()`` — or queue ``HarnessStepper.tick``
+from ``BotLegs``.
 """
 from __future__ import annotations
 
@@ -76,22 +82,30 @@ class StepResult:
 
 @dataclass(frozen=True)
 class CmdWait:
+    """Wall-clock sleep for ``seconds``."""
+
     seconds: float
 
 
 @dataclass(frozen=True)
 class CmdWaitTicks:
+    """Sleep ``num`` OSRS ticks (× ``constants.OSRS_TICK_S``) plus ``adj`` seconds."""
+
     num: int
     adj: float = 0.0
 
 
 @dataclass(frozen=True)
 class CmdLog:
+    """Print ``message`` and include it in the tick action log."""
+
     message: str
 
 
 @dataclass(frozen=True)
 class CmdClickImage:
+    """Click ``template``; ``inv=True`` searches inventory. → ``click_on_image``."""
+
     template: str
     inv: bool = False
     refresh: bool = True
@@ -99,6 +113,8 @@ class CmdClickImage:
 
 @dataclass(frozen=True)
 class CmdClickColor:
+    """Click nearest ``color`` in client view (± ``range``). → ``click_on_color``."""
+
     color: Tuple[int, int, int]
     range: int = 20
     refresh: bool = True
@@ -106,6 +122,8 @@ class CmdClickColor:
 
 @dataclass(frozen=True)
 class CmdUseItemOn:
+    """Use inventory template ``target_1`` on ``target_2`` (closest dest). → ``use_x_on_y``."""
+
     target_1: str
     target_2: str
 
@@ -214,6 +232,12 @@ class ExodiaHarness:
         return json.dumps(payload, sort_keys=True, default=str)
 
     def observe(self, *, frame_paths: Optional[Dict[str, str]] = None) -> Observation:
+        """Question: What does the bot perceive right now (one tick snapshot)?
+
+        Builds ``Observation`` with game state, OCR meta, and optional capture tracks.
+        Increments the harness tick counter. Call ``refresh_geometry()`` first unless
+        invoked from ``step()``.
+        """
         self._tick += 1
         if self.frame_publisher is not None:
             self.frame_publisher.publish_from_eyes(self.eyes)
@@ -248,7 +272,11 @@ class ExodiaHarness:
         )
 
     def apply_commands(self, commands: Sequence[BrainCommand]) -> List[str]:
-        """Execute commands; return ``CmdLog`` messages for the action log."""
+        """Question: How do I run declarative brain commands without a full agent tick?
+
+        Maps each ``BrainCommand`` to ``bot_actions`` (or sleep/log). Returns
+        ``CmdLog`` messages for the action log.
+        """
         log_messages: List[str] = []
         for cmd in commands:
             if isinstance(cmd, CmdWait):
@@ -284,8 +312,11 @@ class ExodiaHarness:
         return log_messages
 
     def step(self, refresh: bool = True, force_agent: bool = False) -> StepResult:
-        """
-        One agent tick: refresh, observe, decide, apply, verify, log.
+        """Question: How do I run one full agent tick (observe → decide → act → verify)?
+
+        Refreshes geometry, builds observation, optionally skips brain when the
+        observation signature is unchanged, runs ``brain.decide``, applies commands,
+        verifies, and logs. Returns ``StepResult`` with before/after game state.
         """
         if refresh:
             self.refresh_geometry()
@@ -388,17 +419,28 @@ class ExodiaHarness:
         Actions.click_on_color(self.client, self.arms, self.eyes, *args, **kwargs)
 
     def use_item_on(self, target_1: str, target_2: str) -> None:
-        Actions.use_x_on_y(self.eyes, self.arms, target_1, target_2)
+        """Question: How do I imperatively use inventory item X on Y inside decide()?
+
+        Delegates to ``Actions.use_x_on_y`` (source template, dest template).
+        """
+        Actions.use_x_on_y(
+            self.eyes, self.arms, target_1, target_2, client=self.client,
+        )
 
 
 class HarnessStepper:
-    """Queue-friendly object for ``BotLegs.add_task(stepper, 'tick')``."""
+    """Question: How do I drive harness ticks from ``BotLegs``?
+
+    Queue-friendly wrapper for ``BotLegs.add_task(stepper, 'tick')``. Each ``tick()``
+    runs ``harness.step(refresh=True)`` and stores the result in ``last_result``.
+    """
 
     def __init__(self, harness: ExodiaHarness):
         self._harness = harness
         self.last_result: Optional[StepResult] = None
 
     def tick(self) -> None:
+        """Question: How do I advance the harness one step from a legs cycle?"""
         self.last_result = self._harness.step(refresh=True)
 
 
@@ -412,7 +454,11 @@ def create_harness(
     capture_pipeline: Optional["CapturePipeline"] = None,
     win_rect: Optional[Rect] = None,
 ) -> ExodiaHarness:
-    """Build ``ExodiaHarness`` from ``Actions.bot_init`` (one-liner for agent entrypoints)."""
+    """Question: How do I wire up ``ExodiaHarness`` in one call?
+
+    Runs ``Actions.bot_init`` and attaches optional brain, logger, frame publisher,
+    session recorder, and capture pipeline.
+    """
     client, eyes, arms = Actions.bot_init(DEBUG=DEBUG, win_rect=win_rect)
     return ExodiaHarness(
         client, eyes, arms,

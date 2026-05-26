@@ -1,0 +1,88 @@
+.panel__header--stacked {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scripts-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+}
+
+.scripts-panel__path {
+  margin: 0;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.file-tree__status,
+.file-tree__error {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.file-tree__error {
+  color: #f87171;
+}
+
+.file-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-tree__row:hover {
+  background: var(--surface-hover);
+}
+
+.file-tree__row--selected {
+  background: var(--accent-muted);
+}
+
+.file-tree__row--parent {
+  color: var(--text-muted);
+  font-style: italic;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-tree__icon {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.file-tree__icon--directory {
+  color: var(--accent);
+}
+
+.file-tree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

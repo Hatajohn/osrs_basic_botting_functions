@@ -1,8 +1,9 @@
 """
 Generic timed polling — reusable across bots and FSMs.
 
-Use :func:`poll_until` when you need to wait for a condition (UI change, inventory
-delta, dialogue, etc.) without tying logic to a specific minigame.
+``poll_until`` is a simple one-concern wait primitive (predicate loop with timeout;
+no perception wiring). Compound waits inject ``read_code`` / domain predicates — e.g.
+``bot_action_ui.wait_for_action_code`` — on top of this helper.
 """
 from __future__ import annotations
 
@@ -17,7 +18,10 @@ __all__ = ["PollResult", "poll_until"]
 
 @dataclass(frozen=True)
 class PollResult(Generic[T]):
-    """Outcome of :func:`poll_until`."""
+    """Question: What did :func:`poll_until` return?
+
+    Carries ``success``, last ``value``, ``elapsed_s``, ``polls``, and ``cancelled``.
+    """
 
     success: bool
     value: Optional[T]
@@ -35,15 +39,13 @@ def poll_until(
     stop_check: Callable[[], bool] = lambda: False,
     on_poll: Optional[Callable[[int, Optional[T]], None]] = None,
 ) -> PollResult[T]:
-    """
-    Poll ``predicate`` until it returns a value other than ``None``, timeout, or stop.
+    """Question: How do I wait until a predicate returns a non-``None`` value?
 
     ``predicate`` should return the success value when done, or ``None`` to keep
-    waiting (including when the success value itself is ``0`` or ``False``).
-    The returned :class:`PollResult` carries that value.
+    waiting. The returned :class:`PollResult` carries that value on success.
 
     Args:
-        predicate: Called each poll; truthy return ends the wait successfully.
+        predicate: Called each poll; non-``None`` return ends the wait successfully.
         timeout_s: Maximum wall time (seconds).
         interval_s: Sleep between polls (seconds).
         sleep_fn: Injectable sleep (tests, interruptible session sleep).

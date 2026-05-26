@@ -1,24 +1,30 @@
-# Sacred eel fishing: fish at sacred eel spots, scale full stacks with a knife.
-#
-# Reference images (in ../images/ relative to Exodia):
-#   osrs_sacredEelSpot.png, osrs_sacredEelSpot2.png — fishing spots in the playspace
-#   osrs_sacredEelSpot_icon.png — eel sprite for spot verification (above cyan tile)
-#   osrs_sacredEel.png — sacred eel icon in inventory
-#   osrs_knife.png — knife for scaling eels into scales
-#
-# Run from Exodia (recommended):
-#   cd Exodia && source exodia/bin/activate && python -m SacredEelFishing.sacred_eel_fishing
-#   — or — ./SacredEelFishing/run_sacred_eel.sh
-#
-# Session log (all stdout/stderr):
-#   Exodia/logs/sacred_eel_latest.log
-#   tail -f Exodia/logs/sacred_eel_latest.log
-# Paths: SacredEelFishing.sacred_eel_log.LOGS_DIR, SESSION_LOG_FILE
-#
-# Stop: press F8 (global hotkey) or Ctrl+C in the terminal.
-#
-# System packages (Linux/WSLg, once):
-#   sudo apt-get install -y python3-tk python3-dev tesseract-ocr xdotool
+"""Question: How do I run the sacred eel fishing bot end-to-end?
+
+Fish at verified sacred eel spots; scale with a knife when inventory is full or
+eel count reaches the stack threshold. Entry::
+
+    cd Exodia && source exodia/bin/activate
+    python -m SacredEelFishing.sacred_eel_fishing
+
+Or ``./SacredEelFishing/run_sacred_eel.sh``. Stop: F8 (``EXODIA_STOP_HOTKEY``) or Ctrl+C.
+
+Labeled inventory items (``label_inventory_item.py`` → ``items/``):
+
+- ``EEL_ITEM_NAME`` — default ``sacred_eel`` (``EXODIA_SACRED_EEL_ITEM``); slot counting + use-on target
+- ``KNIFE_ITEM_NAME`` — default ``knife`` (``EXODIA_SACRED_KNIFE_ITEM``); knife for scaling
+
+World / inventory templates (``images/`` under Botting/ cwd):
+
+- ``osrs_sacredEelSpot.png``, ``osrs_sacredEelSpot2.png`` — fishing spots in the playspace
+- ``osrs_sacredEelSpot_icon.png`` — eel sprite for spot verification (above cyan tile)
+- ``osrs_sacredEel.png``, ``osrs_knife.png`` — template fallback for ``use_x_on_y`` scaling
+
+Session log: ``Exodia/logs/sacred_eel_latest.log`` (``SacredEelFishing.sacred_eel_log``).
+
+System packages (Linux/WSLg, once)::
+
+    sudo apt-get install -y python3-tk python3-dev tesseract-ocr xdotool
+"""
 
 import os
 import random
@@ -69,9 +75,11 @@ from bot_runtime import (
     set_active_bridge,
 )
 from bot_session_events import close_session_events, install_session_events, log_event
-from bot_inventory_count import count_sacred_eels
+from bot_inventory_items import count_labeled_item_slots, read_inventory_labels
 from bot_spot_verify import locate_sacred_eel_spots, sacred_eel_spot_click_points
 from .sacred_eel_fsm import (
+    EEL_ITEM_NAME,
+    KNIFE_ITEM_NAME,
     SacredEelContext,
     SacredEelMachine,
     SacredEelState,
@@ -124,8 +132,13 @@ def _ensure_images_cwd() -> None:
 
 
 def count_sacred_eels_in_inventory(bot_e) -> int:
-    """Sacred eel stack count via ``bot_inventory_count`` (deduped template hits)."""
-    return count_sacred_eels(bot_e, threshold=INV_TEMPLATE_THRESHOLD)
+    """Question: How many occupied inventory slots hold the sacred eel item label?
+
+    Uses ``read_inventory_labels`` + ``count_labeled_item_slots`` with ``EEL_ITEM_NAME``
+    (``items/<EEL_ITEM_NAME>.png`` stem; override via ``EXODIA_SACRED_EEL_ITEM``).
+    """
+    slot_items, occ = read_inventory_labels(bot_e)
+    return count_labeled_item_slots(slot_items, occ, EEL_ITEM_NAME)
 
 
 def inventory_occupied_slots(bot_e) -> Optional[int]:
@@ -383,7 +396,7 @@ def _build_runtime_bridge(
 
     def _refresh(_cmd: RuntimeCommand) -> str:
         Actions.bot_update(ctx.client, ctx.bot_e)
-        ctx.action_code = ctx.bot_e.get_action_text_robust(refresh=False)
+        ctx.action_code = ctx.bot_e.get_action_text(refresh=False)
         return "refreshed (action=%s)" % action_code_label(ctx.action_code)
 
     def _step(_cmd: RuntimeCommand) -> str:
@@ -447,9 +460,13 @@ def _eel_health_probe(ctx: SacredEelContext) -> dict:
         for name in SPOT_TEMPLATES + [EEL_INV, KNIFE_INV]
     }
     return {
+        "items_labeled": {
+            EEL_ITEM_NAME: (Path("items") / ("%s.png" % EEL_ITEM_NAME)).is_file(),
+            KNIFE_ITEM_NAME: (Path("items") / ("%s.png" % KNIFE_ITEM_NAME)).is_file(),
+        },
         "templates": templates,
         "inventory_calibrated": bool(bot_e.inventory_rect),
-        "action_code": int(bot_e.get_action_text_robust(refresh=False)),
+        "action_code": int(bot_e.get_action_text(refresh=False)),
         "eel_count": count_sacred_eels_in_inventory(bot_e),
         "spots_visible": _last_spots_visible,
         "spot_verify_enabled": cfg.enabled,
@@ -478,11 +495,17 @@ def _runtime_status_payload(ctx: SacredEelContext, runtime: RuntimeBridge, bot_e
 
 def _print_startup_health(bot_e) -> None:
     """Log perception prerequisites before the FSM loop."""
-    bot_e.find_inventory(refresh_client=False)
-    code = bot_e.get_action_text_robust(refresh=False)
+    from bot_inventory_detect import bind_inventory_to_eyes
+
+    bind_inventory_to_eyes(bot_e, refresh_client=False)
+    code = bot_e.get_action_text(refresh=False)
     hint = " — will seek spot" if code != 0 else ""
     print("Health: action line →", action_code_label(code) + hint)
     print("Health: spot threshold", SPOT_TEMPLATE_THRESHOLD, "| inv template", INV_TEMPLATE_THRESHOLD)
+    print("Health: eel item", EEL_ITEM_NAME, "| knife item", KNIFE_ITEM_NAME)
+    for stem in (EEL_ITEM_NAME, KNIFE_ITEM_NAME):
+        p = Path("items") / ("%s.png" % stem)
+        print("Health: item template", stem, "OK" if p.is_file() else "MISSING")
     from bot_spot_verify import default_spot_verify_config
 
     svc = default_spot_verify_config()

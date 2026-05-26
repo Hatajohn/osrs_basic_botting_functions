@@ -1,0 +1,34 @@
+.dashboard {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.dashboard__center,
+.dashboard__right {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dashboard__pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dashboard__pane > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}

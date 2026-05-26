@@ -104,9 +104,9 @@ def main() -> int:
     else:
         print("WARN: inventory not calibrated (ui_icons.png match failed)")
 
-    code_robust = bot_e.get_action_text_robust(refresh=False)
+    code = bot_e.get_action_text(refresh=False)
     labels = {0: "FISHING (green)", 1: "IDLE (red)", 2: "no fishing UI (seek spot)"}
-    print("action line robust:", code_robust, labels.get(code_robust, "?"))
+    print("action line:", code, labels.get(code, "?"))
 
     slot_items, occ = read_inventory_labels(bot_e)
     eel_slots = count_labeled_item_slots(slot_items, occ, EEL_ITEM_NAME)

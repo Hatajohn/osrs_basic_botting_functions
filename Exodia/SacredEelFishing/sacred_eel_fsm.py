@@ -1,12 +1,16 @@
-"""
-State machine for sacred eel fishing.
+"""Question: How does the sacred eel fishing state machine advance each tick?
 
 Building blocks (reused by this FSM, usable elsewhere):
 
 - ``bot_wait.poll_until`` — generic timed polling
 - ``bot_action_ui`` — action-strip codes, predicates, ``wait_for_action_code``
-- ``bot_search`` — playspace ROI, ``search_with_camera_pan`` (+ optional walk relocate), ``click_random_hit``
+- ``bot_search`` — playspace ROI, ``search_with_camera_pan`` (+ optional walk relocate)
 - ``bot_env`` — capture/input backends, ``send_camera_arrow``, ``camera_arrow_hold_ms``
+
+Item labels (``items/<stem>.png`` via ``bot_inventory_items``):
+
+- ``EEL_ITEM_NAME`` — default ``sacred_eel`` (``EXODIA_SACRED_EEL_ITEM``); eel slot count + scale target
+- ``KNIFE_ITEM_NAME`` — default ``knife`` (``EXODIA_SACRED_KNIFE_ITEM``); knife source for scaling
 
 States
 ------
@@ -16,7 +20,7 @@ SCALING     — Inventory full or eel stack ready; knife → eel until no eels r
 
 Scaling sub-phases (within SCALING)
 ------------------------------------
-CLICK       — Click knife, then eel.
+CLICK       — Click knife, then eel (``use_x_on_y`` with ``osrs_knife.png`` / ``osrs_sacredEel.png``).
 WAIT_TICK   — Wait one game tick, refresh, re-count eels; loop or exit.
 """
 from __future__ import annotations
@@ -58,9 +62,12 @@ if TYPE_CHECKING:
     import bot_client as Client
     import bot_eyes as Eyes
 
-# Re-exported constants (set by sacred_eel_fishing before run).
+# Inventory template PNGs (images/) for use_x_on_y scaling fallback.
 EEL_INV = "osrs_sacredEel.png"
 KNIFE_INV = "osrs_knife.png"
+# Named item label stems (items/<stem>.png) for read_inventory_labels / count_labeled_item_slots.
+EEL_ITEM_NAME = os.environ.get("EXODIA_SACRED_EEL_ITEM", "sacred_eel")
+KNIFE_ITEM_NAME = os.environ.get("EXODIA_SACRED_KNIFE_ITEM", "knife")
 SPOT_TEMPLATES: list = []
 FULL_EEL_COUNT = 22
 INV_SLOT_COUNT = 28
@@ -129,7 +136,7 @@ class SacredEelContext:
         ``step()``), not during post-click waits or camera-pan polls.
         """
         Actions.bot_update(self.client, self.bot_e)
-        self.action_code = self.bot_e.get_action_text_robust(refresh=False)
+        self.action_code = self.bot_e.get_action_text(refresh=False)
         self.eel_count = _count_eels(self.bot_e)
         self.inv_slots = _inv_slots(self.bot_e)
         if record_progress:
@@ -221,7 +228,12 @@ def _after_scaling_done(ctx: SacredEelContext) -> SacredEelState:
 
 
 class SacredEelMachine:
-    """One ``step()`` = one state action (or scaling sub-step)."""
+    """Question: How does one sacred eel FSM tick advance (fish / seek / scale)?
+
+    One ``step()`` = one state action (or scaling sub-step). States: FISHING, SEEK_SPOT,
+    SCALING (CLICK / WAIT_TICK). ``should_throttle()`` is True for FISHING and SEEK_SPOT
+    so the outer loop polls on an interval; SCALING runs back-to-back until eels are gone.
+    """
 
     def __init__(self, ctx: SacredEelContext):
         self.ctx = ctx

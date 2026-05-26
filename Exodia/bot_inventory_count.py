@@ -1,14 +1,16 @@
 """
-Count inventory items by per-slot template match + stack quantity OCR.
+Legacy template-match inventory counting (diagnose / calibration only).
 
-OSRS stacks show a number on the icon (e.g. 24 eels in one slot). Matching the
-whole inventory only finds ~one peak per stack, so we scan each 4×7 cell and sum
-quantities.
+Production bots should use ``read_inventory_labels`` +
+``count_labeled_item_slots`` from ``bot_inventory_items`` (see infernal and sacred
+eel fishing). This module remains for template-threshold tuning: per-slot icon
+match, stack-quantity OCR, and full-panel peak fallback.
 """
 from __future__ import annotations
 
 import math
 import os
+import warnings
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
@@ -387,13 +389,11 @@ def count_inventory_stacks(
     dedupe_radius_px: Optional[int] = None,
     refresh_inventory: bool = False,
 ) -> int:
-    """Count distinct template hits on the inventory crop (legacy; undercounts stacked items)."""
+    """Question: How many distinct icon regions match this template (legacy; undercounts stacks)?"""
     if refresh_inventory:
         eyes.update()
     elif eyes.curr_inventory is None or getattr(eyes.curr_inventory, "size", 0) == 0:
-        if eyes.inventory_rect is None:
-            eyes.find_inventory(refresh_client=False)
-        eyes.grab_inventory()
+        eyes.check_inventory()
 
     thr = _default_threshold() if threshold is None else threshold
     radius = int(os.environ.get("EXODIA_INV_DEDUPE_RADIUS", "18"))
@@ -420,12 +420,7 @@ def count_inventory_objects(
     refresh_inventory: bool = False,
     mode: Optional[str] = None,
 ) -> int:
-    """
-    Return **total item count** in inventory for ``template_filename``.
-
-    Default ``mode=quantity``: each 4×7 slot is matched; stack OCR is summed.
-    ``mode=stacks``: legacy whole-inventory template peaks (one per icon region).
-    """
+    """Question: What is the total item count for this template (quantity or stacks mode)?"""
     count_mode = (mode or os.environ.get("EXODIA_INV_COUNT_MODE", "quantity")).strip().lower()
     if count_mode == "stacks":
         return count_inventory_stacks(
@@ -450,13 +445,11 @@ def count_inventory_quantity(
     threshold: Optional[float] = None,
     refresh_inventory: bool = False,
 ) -> int:
-    """Sum stack sizes for every slot whose icon matches ``template_filename``."""
+    """Question: What is the sum of stack OCR quantities for slots matching this template?"""
     if refresh_inventory:
         eyes.update()
     elif eyes.curr_inventory is None or getattr(eyes.curr_inventory, "size", 0) == 0:
-        if eyes.inventory_rect is None:
-            eyes.find_inventory(refresh_client=False)
-        eyes.grab_inventory()
+        eyes.check_inventory()
 
     panel = eyes._inventory_panel_bgr_for_slots()
     if panel is None or panel.size == 0:
@@ -507,7 +500,18 @@ def count_sacred_eels(
     threshold: Optional[float] = None,
     refresh_inventory: bool = False,
 ) -> int:
-    """Total sacred eel count (``osrs_sacredEel.png``), including stack quantities."""
+    """Question: How many sacred eels via legacy template match (diagnose only)?
+
+    Deprecated for production — use ``read_inventory_labels`` +
+    ``count_labeled_item_slots`` from ``bot_inventory_items`` instead.
+    """
+    warnings.warn(
+        "count_sacred_eels is deprecated; use "
+        "count_labeled_item_slots(read_inventory_labels(eyes), occ, item_name) "
+        "from bot_inventory_items",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     icon = os.environ.get("EXODIA_EEL_INV_TEMPLATE", "osrs_sacredEel.png")
     return count_inventory_objects(
         eyes,
