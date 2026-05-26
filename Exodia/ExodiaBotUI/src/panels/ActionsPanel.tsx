@@ -222,7 +222,7 @@ export function ActionsPanel({
         }
 
         const overlayNote = dry.clickPreview
-          ? '\n\nArrow in RuneLite view: red “Use” → green “On”.'
+          ? '\n\nRuneLite view: red “Use” and green “On” markers on inventory slots.'
           : '';
         if (
           !confirmInput(
@@ -523,36 +523,46 @@ export function ActionsPanel({
           />
         </label>
 
-        <div className="actions-panel__buttons">
-          <button
-            type="button"
-            className="btn btn--sm btn--primary"
-            disabled={disabled}
-            onClick={() => runAction(BLOCK_INV, templateArgs(template, templatePath))}
-          >
-            Click template in inventory
-          </button>
-          <button
-            type="button"
-            className="btn btn--sm btn--primary"
-            disabled={disabled}
-            onClick={() => runAction(BLOCK_WORLD, templateArgs(template, templatePath))}
-          >
-            Click template outside inventory
-          </button>
-          <button
-            type="button"
-            className="btn btn--sm btn--primary"
-            disabled={disabled}
-            onClick={() =>
-              runAction(BLOCK_USE_ON, {
-                sourceId: sourceId.trim(),
-                destId: destId.trim(),
-              })
-            }
-          >
-            Use item ID on item ID
-          </button>
+        <div className="actions-panel__button-columns">
+          <div className="actions-panel__button-group">
+            <span className="actions-panel__button-group-label">Click template</span>
+            <div className="actions-panel__button-group-actions">
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={disabled}
+                onClick={() => runAction(BLOCK_WORLD, templateArgs(template, templatePath))}
+              >
+                World
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={disabled}
+                onClick={() => runAction(BLOCK_INV, templateArgs(template, templatePath))}
+              >
+                Inventory
+              </button>
+            </div>
+          </div>
+          <div className="actions-panel__button-group">
+            <span className="actions-panel__button-group-label">Use item on item</span>
+            <div className="actions-panel__button-group-actions">
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={disabled}
+                onClick={() =>
+                  runAction(BLOCK_USE_ON, {
+                    sourceId: sourceId.trim(),
+                    destId: destId.trim(),
+                  })
+                }
+              >
+                Use on
+              </button>
+            </div>
+          </div>
         </div>
 
         {validationError && (

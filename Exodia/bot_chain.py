@@ -363,11 +363,12 @@ def _dispatch_use_item_id_on_item_id(
             sourceId=source_id,
             destId=dest_id,
         )
-    return _ok(
-        **preview,
-        source_slot=list(result.source_slot) if result.source_slot else None,
-        dest_slot=list(result.dest_slot) if result.dest_slot else None,
-    )
+    payload = dict(preview)
+    if result.source_slot:
+        payload["source_slot"] = list(result.source_slot)
+    if result.dest_slot:
+        payload["dest_slot"] = list(result.dest_slot)
+    return _ok(**payload)
 
 
 def dispatch(block_id: str, args: Optional[Dict[str, Any]] = None, *, dry_run: bool = False) -> Dict[str, Any]:

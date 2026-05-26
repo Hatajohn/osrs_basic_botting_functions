@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ActionClickPreview } from '../../shared/ipc';
 import './ActionClickOverlay.css';
 
@@ -10,8 +10,6 @@ type PointLayout = {
 type UseOnLayout = {
   from: PointLayout;
   to: PointLayout;
-  width: number;
-  height: number;
 };
 
 type ActionClickOverlayProps = {
@@ -64,17 +62,7 @@ function computeUseOnLayout(
   const from = clientXYToLayout(img, preview, preview.fromClientXY);
   const to = clientXYToLayout(img, preview, preview.toClientXY);
   if (!from || !to) return null;
-
-  const wrap = img.parentElement;
-  if (!wrap) return null;
-  const wrapRect = wrap.getBoundingClientRect();
-
-  return {
-    from,
-    to,
-    width: wrapRect.width,
-    height: wrapRect.height,
-  };
+  return { from, to };
 }
 
 function useOverlayLayout(
@@ -115,14 +103,14 @@ function isUseOnLayout(layout: PointLayout | UseOnLayout | null): layout is UseO
   return layout != null && 'from' in layout && 'to' in layout;
 }
 
-function UseOnArrowOverlay({
+function UseOnOverlay({
   layout,
   preview,
 }: {
   layout: UseOnLayout;
   preview: ActionClickPreview;
 }) {
-  const markerId = useId().replace(/:/g, '');
+  const { from, to } = layout;
   const title = [
     preview.label ?? preview.blockId,
     preview.sourceId && preview.destId
@@ -133,40 +121,8 @@ function UseOnArrowOverlay({
     .filter(Boolean)
     .join(' · ');
 
-  const { from, to, width, height } = layout;
-
   return (
-    <div className="action-click-overlay" aria-hidden>
-      <svg
-        className="action-click-overlay__arrow-svg"
-        width={width}
-        height={height}
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label={title}
-      >
-        <defs>
-          <marker
-            id={`use-on-arrow-${markerId}`}
-            markerWidth="8"
-            markerHeight="8"
-            refX="6"
-            refY="4"
-            orient="auto"
-            markerUnits="strokeWidth"
-          >
-            <path d="M0,0 L8,4 L0,8 z" fill="#facc15" />
-          </marker>
-        </defs>
-        <line
-          className="action-click-overlay__arrow-line"
-          x1={from.left}
-          y1={from.top}
-          x2={to.left}
-          y2={to.top}
-          markerEnd={`url(#use-on-arrow-${markerId})`}
-        />
-      </svg>
+    <div className="action-click-overlay" aria-hidden title={title}>
       <div
         className="action-click-overlay__marker action-click-overlay__marker--from"
         style={{ left: from.left, top: from.top }}
@@ -229,7 +185,7 @@ export function ActionClickOverlay({ preview, imageRef }: ActionClickOverlayProp
   if (!preview || !layout) return null;
 
   if (isUseOnLayout(layout)) {
-    return <UseOnArrowOverlay layout={layout} preview={preview} />;
+    return <UseOnOverlay layout={layout} preview={preview} />;
   }
 
   return <SingleClickOverlay marker={layout} preview={preview} />;
