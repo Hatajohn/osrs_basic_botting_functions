@@ -1,3 +1,12 @@
+import type {
+  BotManifestEntry,
+  BotRunInfo,
+  RuntimeStatusPayload,
+  StartBotRequest,
+  StartBotResult,
+  StopBotResult,
+  RuntimeCommandResult,
+} from './bots';
 import type { ExodiaSettings } from './settings';
 
 /** IPC channel names — shared between main, preload, and renderer. */
@@ -13,6 +22,14 @@ export const IPC = {
   SAVE_DEBUG_SNAPSHOT: 'debug:saveSnapshot',
   OPEN_LOGS_FOLDER: 'app:openLogsFolder',
   RUN_CALIBRATE_CLIENT_RECT: 'python:runCalibrateClientRect',
+  LIST_BOTS: 'bots:list',
+  GET_BOT_RUN: 'bots:getRun',
+  START_BOT: 'bots:start',
+  STOP_BOT: 'bots:stop',
+  BOT_RUNTIME_CMD: 'bots:runtimeCmd',
+  BOT_RUN_UPDATE: 'bots:runUpdate',
+  BOT_STATUS_UPDATE: 'bots:statusUpdate',
+  FETCH_GAME_PREVIEW: 'preview:fetchGamePreview',
 } as const;
 
 export type DebugFrameMode = 'inventory_identify' | 'raw_client' | 'inventory_grid';
@@ -93,6 +110,12 @@ export type SettingsResult = {
   };
 };
 
+export type GamePreviewResult = {
+  ok: boolean;
+  imageDataUrl?: string;
+  fetchedAt?: number;
+};
+
 export type ExodiaApi = {
   getSettings: () => Promise<SettingsResult>;
   setSettings: (partial: Partial<ExodiaSettings>) => Promise<SettingsResult>;
@@ -105,7 +128,25 @@ export type ExodiaApi = {
   saveDebugSnapshot: (imageDataUrl: string, defaultName?: string) => Promise<SaveSnapshotResult>;
   openLogsFolder: () => Promise<void>;
   runCalibrateClientRect: () => Promise<CalibrateClientRectResult>;
+  listBots: () => Promise<BotManifestEntry[]>;
+  getBotRun: () => Promise<BotRunInfo | null>;
+  startBot: (request: StartBotRequest) => Promise<StartBotResult>;
+  stopBot: () => Promise<StopBotResult>;
+  sendBotRuntimeCommand: (command: string) => Promise<RuntimeCommandResult>;
+  onBotRunUpdate: (callback: (run: BotRunInfo | null) => void) => () => void;
+  onBotStatusUpdate: (callback: (status: RuntimeStatusPayload | null) => void) => () => void;
+  fetchGamePreview: () => Promise<GamePreviewResult>;
 };
+
+export type {
+  BotManifestEntry,
+  BotRunInfo,
+  RuntimeStatusPayload,
+  StartBotRequest,
+  StartBotResult,
+  StopBotResult,
+  RuntimeCommandResult,
+} from './bots';
 
 declare global {
   interface Window {

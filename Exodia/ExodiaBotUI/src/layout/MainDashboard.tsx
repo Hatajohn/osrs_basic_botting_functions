@@ -4,6 +4,7 @@ import { BotTasksPanel } from '../panels/BotTasksPanel';
 import { LogPanel } from '../panels/LogPanel';
 import { RuneLiteViewPanel } from '../panels/RuneLiteViewPanel';
 import { ScriptsPanel } from '../panels/ScriptsPanel';
+import type { BotRunInfo, RuntimeStatusPayload } from '../../shared/bots';
 import type { LogEntry } from '../components/LogConsole';
 import type { DebugFrameMode, DebugFrameResult } from '../../shared/ipc';
 import { Splitter, useDashboardLayout } from './Splitter';
@@ -19,6 +20,11 @@ type MainDashboardProps = {
   debugMode: DebugFrameMode;
   onRefreshDebugFrame: () => void;
   onCalibrateClientRect: () => void;
+  botRun?: BotRunInfo | null;
+  runtimeStatus?: RuntimeStatusPayload | null;
+  previewLive?: boolean;
+  onTogglePreviewLive?: (live: boolean) => void;
+  botRunning?: boolean;
 };
 
 export function MainDashboard({
@@ -31,6 +37,11 @@ export function MainDashboard({
   debugMode,
   onRefreshDebugFrame,
   onCalibrateClientRect,
+  botRun,
+  runtimeStatus,
+  previewLive,
+  onTogglePreviewLive,
+  botRunning,
 }: MainDashboardProps) {
   const containerRef = useRef<HTMLElement>(null);
   const {
@@ -63,13 +74,21 @@ export function MainDashboard({
             debugMode={debugMode}
             onRefresh={onRefreshDebugFrame}
             onCalibrate={onCalibrateClientRect}
+            previewLive={previewLive}
+            onTogglePreviewLive={onTogglePreviewLive}
+            botRunning={botRunning}
           />
         </div>
 
         <Splitter orientation="horizontal" onDrag={resizeTasks} />
 
         <div className="dashboard__pane" style={{ flex: paneFlex(layout.tasksFlex) }}>
-          <BotTasksPanel debugResult={debugResult} loading={debugLoading} />
+          <BotTasksPanel
+            debugResult={debugResult}
+            loading={debugLoading}
+            botRun={botRun}
+            runtimeStatus={runtimeStatus}
+          />
         </div>
       </section>
 

@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC, type ExodiaApi, type LogLinePayload } from '../shared/ipc';
+import {
+  IPC,
+  type BotRunInfo,
+  type ExodiaApi,
+  type LogLinePayload,
+  type RuntimeStatusPayload,
+} from '../shared/ipc';
 
 const api: ExodiaApi = {
   getSettings: () => ipcRenderer.invoke(IPC.GET_SETTINGS),
@@ -20,6 +26,26 @@ const api: ExodiaApi = {
     ipcRenderer.invoke(IPC.SAVE_DEBUG_SNAPSHOT, imageDataUrl, defaultName),
   openLogsFolder: () => ipcRenderer.invoke(IPC.OPEN_LOGS_FOLDER),
   runCalibrateClientRect: () => ipcRenderer.invoke(IPC.RUN_CALIBRATE_CLIENT_RECT),
+  listBots: () => ipcRenderer.invoke(IPC.LIST_BOTS),
+  getBotRun: () => ipcRenderer.invoke(IPC.GET_BOT_RUN),
+  startBot: (request) => ipcRenderer.invoke(IPC.START_BOT, request),
+  stopBot: () => ipcRenderer.invoke(IPC.STOP_BOT),
+  sendBotRuntimeCommand: (command) => ipcRenderer.invoke(IPC.BOT_RUNTIME_CMD, command),
+  onBotRunUpdate: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, run: BotRunInfo | null) => {
+      callback(run);
+    };
+    ipcRenderer.on(IPC.BOT_RUN_UPDATE, listener);
+    return () => ipcRenderer.removeListener(IPC.BOT_RUN_UPDATE, listener);
+  },
+  onBotStatusUpdate: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: RuntimeStatusPayload | null) => {
+      callback(status);
+    };
+    ipcRenderer.on(IPC.BOT_STATUS_UPDATE, listener);
+    return () => ipcRenderer.removeListener(IPC.BOT_STATUS_UPDATE, listener);
+  },
+  fetchGamePreview: () => ipcRenderer.invoke(IPC.FETCH_GAME_PREVIEW),
 };
 
 contextBridge.exposeInMainWorld('exodia', api);

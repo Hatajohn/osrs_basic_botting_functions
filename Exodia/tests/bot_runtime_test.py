@@ -171,6 +171,37 @@ class TestBotRuntime(unittest.TestCase):
         self.assertEqual(out["perception"]["capture_mean"], 10.0)
         self.assertFalse(out["perception"]["inventory_calibrated"])
 
+    def test_agent_style_runtime_handlers(self):
+        import threading
+
+        bridge = RuntimeBridge(script_name="run_agent", enabled=True, poll_interval_s=0.0)
+        stop_event = threading.Event()
+
+        def _stop(_cmd: RuntimeCommand) -> str:
+            stop_event.set()
+            bridge.stop_reason = "user stop"
+            return "stop requested"
+
+        def _pause(_cmd: RuntimeCommand) -> str:
+            bridge.paused = True
+            return "paused"
+
+        def _resume(_cmd: RuntimeCommand) -> str:
+            bridge.paused = False
+            return "resumed"
+
+        bridge.register("stop", _stop)
+        bridge.register("pause", _pause)
+        bridge.register("resume", _resume)
+
+        bridge._handlers["stop"](RuntimeCommand(name="stop"))
+        self.assertTrue(stop_event.is_set())
+        self.assertEqual(bridge.stop_reason, "user stop")
+        bridge._handlers["pause"](RuntimeCommand(name="pause"))
+        self.assertTrue(bridge.paused)
+        bridge._handlers["resume"](RuntimeCommand(name="resume"))
+        self.assertFalse(bridge.paused)
+
     def test_snapshot_saves_client(self):
         with tempfile.TemporaryDirectory() as td:
             bot_e = MagicMock()

@@ -23,9 +23,43 @@ __all__ = [
     "FramePublisher",
     "CaptureStreamPublisher",
     "MJPEGStreamServer",
+    "publish_game_preview",
+    "GAME_PREVIEW_MAX_WIDTH",
 ]
 
 BOUNDARY = b"frame"
+GAME_PREVIEW_MAX_WIDTH = 640
+
+
+def _encode_jpeg(img, quality: int = 85) -> Optional[bytes]:
+    import cv2  # noqa: PLC0415
+
+    if img is None or not getattr(img, "size", 0):
+        return None
+    ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    return buf.tobytes() if ok else None
+
+
+def _resize_for_preview(img, max_width: int = GAME_PREVIEW_MAX_WIDTH):
+    import cv2  # noqa: PLC0415
+
+    if img is None or not getattr(img, "size", 0):
+        return None
+    h, w = img.shape[:2]
+    if w <= max_width:
+        return img
+    scale = max_width / float(w)
+    new_w = max_width
+    new_h = max(1, int(round(h * scale)))
+    return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
+def publish_game_preview(publisher: "FramePublisher", bgr, *, quality: int = 80) -> None:
+    """Downscaled full-client JPEG for Electron live preview."""
+    preview = _resize_for_preview(bgr)
+    data = _encode_jpeg(preview, quality=quality)
+    if data:
+        publisher.publish("game_preview", data)
 
 
 class FramePublisher:
@@ -38,6 +72,7 @@ class FramePublisher:
         "chat_strip",
         "playspace",
         "playspace_blobs",
+        "game_preview",
     )
 
     def __init__(self) -> None:
@@ -80,6 +115,7 @@ class FramePublisher:
             data = _encode(eyes.curr_client)
             if data:
                 self.publish("world_masked", data)
+            publish_game_preview(self, eyes.curr_client)
 
         inv = getattr(eyes, "curr_inventory", None)
         if inv is not None:
@@ -149,6 +185,7 @@ class CaptureStreamPublisher:
             snap = self._pipeline.buffer.latest_copy()
             pcache = self._pipeline.cache.snapshot()
             if snap is not None:
+                publish_game_preview(self._publisher, snap.bgr)
                 play = playspace_bgr_from_frame(snap.bgr)
                 if play is not None:
                     ok, buf = cv2.imencode(".jpg", play, [int(cv2.IMWRITE_JPEG_QUALITY), 85])

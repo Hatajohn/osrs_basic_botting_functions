@@ -17,6 +17,9 @@ import {
 import { refreshDebugFrame, saveDebugFrameSnapshot } from './debugFrame';
 import { runCalibrateClientRect } from './calibrateClientRect';
 import { listDirectory } from './files';
+import { loadBotsManifest } from './manifestLoader';
+import { fetchGamePreview } from './previewClient';
+import { ProcessManager } from './processManager';
 import { pythonExists } from './paths';
 import {
   getConfigFilePath,
@@ -36,6 +39,7 @@ if (process.platform === 'linux') {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let processManager: ProcessManager | null = null;
 
 function emitLog(line: string, stream: LogLinePayload['stream'] = 'system'): void {
   const payload: LogLinePayload = { line, stream, ts: Date.now() };
@@ -218,11 +222,57 @@ function registerIpc(): void {
     }
     return result;
   });
+
+  ipcMain.handle(IPC.LIST_BOTS, () => {
+    try {
+      return loadBotsManifest().bots;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      emitLog(message, 'stderr');
+      return [];
+    }
+  });
+
+  ipcMain.handle(IPC.GET_BOT_RUN, () => processManager?.getActiveRun() ?? null);
+
+  ipcMain.handle(IPC.START_BOT, async (_event, request: { botId: string; argValues?: Record<string, number | string | boolean> }) => {
+    if (!processManager) return { ok: false, error: 'Process manager not ready' };
+    return processManager.startBot(request.botId, request.argValues);
+  });
+
+  ipcMain.handle(IPC.STOP_BOT, async () => {
+    if (!processManager) return { ok: false, error: 'Process manager not ready' };
+    return processManager.stopBot();
+  });
+
+  ipcMain.handle(IPC.BOT_RUNTIME_CMD, async (_event, command: string) => {
+    if (!processManager) return { ok: false, error: 'Process manager not ready' };
+    return processManager.sendRuntimeCommand(command);
+  });
+
+  ipcMain.handle(IPC.FETCH_GAME_PREVIEW, async () => {
+    const frame = await fetchGamePreview();
+    if (!frame) return { ok: false };
+    return { ok: true, imageDataUrl: frame.imageDataUrl, fetchedAt: frame.fetchedAt };
+  });
 }
 
 app.whenReady().then(() => {
   registerIpc();
   createWindow();
+
+  processManager = new ProcessManager(
+    (line, stream) => emitLog(line, stream),
+    {
+      onRunUpdate: (run) => {
+        mainWindow?.webContents.send(IPC.BOT_RUN_UPDATE, run);
+      },
+      onStatusUpdate: (status) => {
+        mainWindow?.webContents.send(IPC.BOT_STATUS_UPDATE, status);
+      },
+    },
+  );
+
   emitLog('Exodia desktop ready.', 'system');
 
   app.on('activate', () => {
@@ -231,6 +281,8 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  processManager?.dispose();
+  processManager = null;
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -241,7 +293,7 @@ export function showAboutDialog(): void {
     title: 'About Exodia',
     message: 'Exodia Desktop',
     detail: [
-      'Version 0.1.0 (Phase 1)',
+      'Version 0.2.0 (Phase 2)',
       '',
       `Exodia root: ${resolved.resolvedExodiaRoot}`,
       `Python: ${resolved.resolvedPythonPath}`,

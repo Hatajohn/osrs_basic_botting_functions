@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "bots": [
+    {
+      "id": "sacred_eel",
+      "title": "Sacred eel fishing",
+      "kind": "bot",
+      "moduleArgv": ["-m", "SacredEelFishing.sacred_eel_fishing"],
+      "defaultArgv": [],
+      "runtimeScriptId": "sacred_eel_fishing",
+      "runtimeCommands": ["pause", "resume", "stop", "snapshot", "step", "health"],
+      "args": [
+        { "name": "maxCycles", "flag": "--max-cycles", "type": "number", "default": 30, "label": "Max FSM steps (0 = unlimited)" },
+        { "name": "interval", "flag": "--interval", "type": "number", "default": 6, "label": "Poll interval (seconds)" }
+      ]
+    },
+    {
+      "id": "agent_reference_fishing",
+      "title": "Agent (reference fishing)",
+      "kind": "bot",
+      "scriptArgv": ["run_agent.py"],
+      "defaultArgv": ["--brain", "reference_fishing", "--stream-port", "8765"],
+      "runtimeScriptId": "run_agent",
+      "runtimeCommands": ["pause", "resume", "stop", "health"],
+      "args": [
+        { "name": "maxMs", "flag": "--max-ms", "type": "number", "default": 0, "label": "Wall-clock cap (ms, 0 = unlimited)" },
+        { "name": "tickMs", "flag": "--tick-ms", "type": "number", "default": 600, "label": "Tick interval (ms)" }
+      ]
+    },
+    {
+      "id": "agent_idle",
+      "title": "Agent (idle)",
+      "kind": "bot",
+      "scriptArgv": ["run_agent.py"],
+      "defaultArgv": ["--brain", "idle", "--stream-port", "8765"],
+      "runtimeScriptId": "run_agent",
+      "runtimeCommands": ["pause", "resume", "stop", "health"],
+      "args": [
+        { "name": "maxMs", "flag": "--max-ms", "type": "number", "default": 0, "label": "Wall-clock cap (ms, 0 = unlimited)" }
+      ]
+    }
+  ]
+}

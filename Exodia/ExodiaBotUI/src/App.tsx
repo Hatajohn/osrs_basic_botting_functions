@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { MenuBar } from './components/MenuBar';
 import { useLogStream } from './components/LogConsole';
+import { useBotSession } from './hooks/useBotSession';
 import { MainDashboard } from './layout/MainDashboard';
 import type { MenuActionId, MenuItemDef } from './menu/menuConfig';
 import { debugModeForAction } from './menu/menuConfig';
@@ -35,6 +36,17 @@ function AboutModal({
 
 export default function App() {
   const [logEntries, clearLog, appendLog] = useLogStream();
+  const {
+    botRun,
+    runtimeStatus,
+    botRunning,
+    previewLive,
+    setPreviewLive,
+    liveImage,
+    stopBot,
+    pauseBot,
+    resumeBot,
+  } = useBotSession();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [aboutDetail, setAboutDetail] = useState('');
@@ -95,7 +107,7 @@ export default function App() {
           const { resolved, settings } = await window.exodia.getSettings();
           setAboutDetail(
             [
-              'Exodia Desktop v0.1.0 (Phase 1)',
+              'Exodia Desktop v0.2.0 (Phase 2)',
               '',
               `Exodia root: ${resolved.exodiaRoot}`,
               `Python: ${resolved.pythonPath}`,
@@ -129,6 +141,15 @@ export default function App() {
           if (mode) setDebugMode(mode);
           break;
         }
+        case 'botStop':
+          await stopBot();
+          break;
+        case 'botPause':
+          await pauseBot();
+          break;
+        case 'botResume':
+          await resumeBot();
+          break;
         case 'openLogsFolder':
           await window.exodia.openLogsFolder();
           break;
@@ -140,18 +161,20 @@ export default function App() {
           });
       }
     },
-    [clearLog, appendLog, debugMode, debugImage, refreshDebugFrame],
+    [clearLog, appendLog, debugMode, debugImage, refreshDebugFrame, stopBot, pauseBot, resumeBot],
   );
+
+  const displayImage = previewLive && botRunning && liveImage ? liveImage : debugImage;
 
   return (
     <div className="app">
       <MenuBar
         onAction={handleMenuAction}
         menuContext={{
-          botRunning: false,
+          botRunning,
           chainDirty: false,
-          previewLive: false,
-          hasDebugFrame: Boolean(debugImage),
+          previewLive: previewLive && botRunning,
+          hasDebugFrame: Boolean(displayImage),
           debugMode,
         }}
       />
@@ -159,12 +182,17 @@ export default function App() {
         logEntries={logEntries}
         onClearLog={clearLog}
         debugResult={debugResult}
-        debugImage={debugImage}
+        debugImage={displayImage}
         debugLoading={debugLoading}
         calibrating={calibrating}
         debugMode={debugMode}
         onRefreshDebugFrame={() => refreshDebugFrame(debugMode)}
         onCalibrateClientRect={runCalibrateClientRect}
+        botRun={botRun}
+        runtimeStatus={runtimeStatus}
+        previewLive={previewLive}
+        onTogglePreviewLive={setPreviewLive}
+        botRunning={botRunning}
       />
       <SettingsPage
         open={settingsOpen}

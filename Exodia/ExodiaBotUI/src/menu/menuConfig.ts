@@ -101,23 +101,20 @@ export const MENUS: MenuDef[] = [
       {
         id: 'botStop',
         label: 'Stop',
-        enabledWhen: 'never',
+        enabledWhen: 'botRunning',
         phase: 2,
-        stubMessage: 'Not available yet (Phase 2)',
       },
       {
         id: 'botPause',
         label: 'Pause',
-        enabledWhen: 'never',
+        enabledWhen: 'botRunning',
         phase: 2,
-        stubMessage: 'Not available yet (Phase 2)',
       },
       {
         id: 'botResume',
         label: 'Resume',
-        enabledWhen: 'never',
+        enabledWhen: 'botRunning',
         phase: 2,
-        stubMessage: 'Not available yet (Phase 2)',
       },
       {
         id: 'startWithSession',
@@ -259,9 +256,17 @@ export const PHASE1_ENABLED = new Set<MenuActionId>([
   'openLogsFolder',
 ]);
 
+/** Phase 2 enabled items. */
+export const PHASE2_ENABLED = new Set<MenuActionId>([
+  'botStop',
+  'botPause',
+  'botResume',
+]);
+
 export function isItemInteractive(item: MenuItemDef, ctx: MenuContext): boolean {
   if (PHASE0_ENABLED.has(item.id)) return true;
   if (PHASE1_ENABLED.has(item.id)) return isMenuItemEnabled(item, ctx);
+  if (PHASE2_ENABLED.has(item.id)) return isMenuItemEnabled(item, ctx);
   return isMenuItemEnabled(item, ctx);
 }
 

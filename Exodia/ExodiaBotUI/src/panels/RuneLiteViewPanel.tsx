@@ -9,6 +9,9 @@ type RuneLiteViewPanelProps = {
   debugMode: DebugFrameMode;
   onRefresh: () => void;
   onCalibrate: () => void;
+  previewLive?: boolean;
+  onTogglePreviewLive?: (live: boolean) => void;
+  botRunning?: boolean;
 };
 
 function formatMode(mode: DebugFrameMode): string {
@@ -37,18 +40,34 @@ export function RuneLiteViewPanel({
   debugMode,
   onRefresh,
   onCalibrate,
+  previewLive = false,
+  onTogglePreviewLive,
+  botRunning = false,
 }: RuneLiteViewPanelProps) {
   const hasImage = Boolean(imageDataUrl);
   const error = result && !result.ok ? result.error : undefined;
   const hint = result && !result.ok ? result.hint : undefined;
   const busy = loading || calibrating;
+  const modeLabel = previewLive && botRunning ? 'Live preview' : formatMode(debugMode);
 
   return (
     <section className="panel panel--runelite">
       <header className="panel__header">
         <h2 className="panel__title">RuneLite view</h2>
         <div className="panel__header-actions">
-          <span className="panel__badge panel__badge--offline">Debug</span>
+          <span className={`panel__badge${previewLive && botRunning ? ' panel__badge--live' : ''}`}>
+            {previewLive && botRunning ? 'Live' : 'Debug'}
+          </span>
+          {botRunning && onTogglePreviewLive && (
+            <button
+              type="button"
+              className={`btn btn--sm${previewLive ? ' btn--active' : ''}`}
+              onClick={() => onTogglePreviewLive(!previewLive)}
+              title="Toggle between live MJPEG preview and manual debug refresh"
+            >
+              {previewLive ? 'Debug frame' : 'Live preview'}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--sm"
@@ -62,7 +81,7 @@ export function RuneLiteViewPanel({
             type="button"
             className="btn btn--sm"
             onClick={onRefresh}
-            disabled={busy}
+            disabled={busy || (previewLive && botRunning)}
           >
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
@@ -76,11 +95,17 @@ export function RuneLiteViewPanel({
         )}
         {!loading && !hasImage && !error && (
           <div className="panel__placeholder">
-            <p>Click Refresh to capture the RuneLite client and show inventory overlays.</p>
-            <p className="panel__hint">Requires client_rect.json and a visible RuneLite window.</p>
+            <p>
+              {previewLive && botRunning
+                ? 'Waiting for live preview from the bot stream…'
+                : 'Click Refresh to capture the RuneLite client and show inventory overlays.'}
+            </p>
+            {!previewLive && (
+              <p className="panel__hint">Requires client_rect.json and a visible RuneLite window.</p>
+            )}
           </div>
         )}
-        {error && (
+        {error && !previewLive && (
           <div className="panel__error">
             <strong>{error}</strong>
             {hint && <p className="panel__hint">{hint}</p>}
@@ -96,17 +121,17 @@ export function RuneLiteViewPanel({
             <img
               className="panel__debug-image"
               src={imageDataUrl}
-              alt="RuneLite debug frame"
+              alt={previewLive && botRunning ? 'RuneLite live preview' : 'RuneLite debug frame'}
               draggable={false}
             />
           </div>
         )}
       </div>
       <footer className="panel__footer panel__footer--stats">
-        <span>Mode: {formatMode(debugMode)}</span>
-        {result?.ok && result.occupied != null && <span>Occupied: {result.occupied}</span>}
-        {result?.ok && result.unknown != null && <span>?: {result.unknown}</span>}
-        {result?.ok && result.tmpCount != null && <span>tmp: {result.tmpCount}</span>}
+        <span>Mode: {modeLabel}</span>
+        {!previewLive && result?.ok && result.occupied != null && <span>Occupied: {result.occupied}</span>}
+        {!previewLive && result?.ok && result.unknown != null && <span>?: {result.unknown}</span>}
+        {!previewLive && result?.ok && result.tmpCount != null && <span>tmp: {result.tmpCount}</span>}
         <span>Last refresh: {formatTime(result?.refreshedAt)}</span>
       </footer>
     </section>

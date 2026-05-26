@@ -10,12 +10,16 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 import bot_legs as Legs
 from bot_action_log import ActionLogger, make_run_id
 from bot_calibration import run_calibration
 from bot_harness import HarnessStepper, create_harness
+from bot_perception_status import perception_status_from_eyes
+from bot_runtime import RuntimeBridge, RuntimeCommand, set_active_bridge
 from bot_session import SessionRecorder
 from bot_stream import CaptureStreamPublisher, MJPEGStreamServer
 from bot_capture import (
@@ -35,6 +39,102 @@ def _load_brain(name: str):
         from bot_harness import IdleBrain
         return IdleBrain(), name
     raise ValueError("Unknown brain: %r (try reference_fishing or idle)" % name)
+
+
+def _env_runtime_default() -> bool:
+    raw = os.environ.get("EXODIA_RUNTIME", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _build_runtime_bridge(harness, stepper: HarnessStepper, *, enabled: bool, brain_name: str) -> RuntimeBridge:
+    bridge = RuntimeBridge(
+        script_name="run_agent",
+        enabled=enabled,
+        poll_interval_s=float(os.environ.get("EXODIA_RUNTIME_POLL_S", "0.5")),
+    )
+    stop_event = threading.Event()
+
+    def _stop(_cmd: RuntimeCommand) -> str:
+        stop_event.set()
+        bridge.stop_reason = "user stop"
+        return "stop requested"
+
+    def _pause(_cmd: RuntimeCommand) -> str:
+        bridge.paused = True
+        return "paused — write resume to continue"
+
+    def _resume(_cmd: RuntimeCommand) -> str:
+        bridge.paused = False
+        return "resumed"
+
+    def _health(_cmd: RuntimeCommand) -> str:
+        results = bridge.run_health()
+        return "health OK (%d probe(s))" % len(results)
+
+    bridge.register("stop", _stop)
+    bridge.register("pause", _pause)
+    bridge.register("resume", _resume)
+    bridge.register("health", _health)
+    bridge.register_health_probe(
+        lambda: {
+            "brain": brain_name,
+            "tick": harness._tick,
+            "inventory_calibrated": bool(
+                (harness.eyes.perception_envelope or {}).get("inventory_rect_client_local")
+            ),
+        }
+    )
+
+    def _runtime_status_payload() -> None:
+        bridge.merge_context(
+            brain=brain_name,
+            tick=harness._tick,
+            paused=bridge.paused,
+        )
+        if stepper.last_result is not None:
+            obs = stepper.last_result.observation
+            bridge.merge_context(
+                action_code=obs.action_text_code,
+                skipped_agent=stepper.last_result.skipped_agent,
+            )
+        bridge.publish_status(perception_status_from_eyes(harness.eyes))
+
+    bridge._agent_status_payload = _runtime_status_payload  # type: ignore[attr-defined]
+    bridge._agent_stop_event = stop_event  # type: ignore[attr-defined]
+    return bridge
+
+
+def _run_agent_loop(legs: Legs.BotLegs, stepper: HarnessStepper, runtime: RuntimeBridge, max_ms: int) -> None:
+    stop_event = getattr(runtime, "_agent_stop_event", threading.Event())
+    status_payload = getattr(runtime, "_agent_status_payload", None)
+    start = time.monotonic()
+    last_cycle = start
+    legs.update_all()
+
+    while True:
+        if stop_event.is_set() or legs.flag:
+            break
+        elapsed_ms = (time.monotonic() - start) * 1000.0
+        if max_ms > 0 and elapsed_ms >= max_ms:
+            print("Reached --max-ms %d — stopping." % max_ms)
+            break
+
+        for line in runtime.poll():
+            print("[runtime] %s" % line)
+
+        runtime.wait_while_paused(stop_event.is_set, time.sleep)
+
+        if status_payload is not None:
+            status_payload()
+
+        now = time.monotonic()
+        since_last_ms = (now - last_cycle) * 1000.0
+        if since_last_ms >= legs._t:
+            legs.update_all()
+            legs.run_tasks()
+            last_cycle = now
+        else:
+            time.sleep(0.005)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,6 +168,11 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=0,
         help="Optional wall-clock cap in ms (0=unlimited)",
+    )
+    p.add_argument(
+        "--no-runtime-control",
+        action="store_true",
+        help="Disable runtime_control.json / runtime_status.json polling",
     )
     args = p.parse_args(argv)
 
@@ -145,16 +250,26 @@ def main(argv: list[str] | None = None) -> int:
     legs._t = args.tick_ms
     if args.max_ms > 0:
         legs._max = args.max_ms
+
+    runtime_enabled = not args.no_runtime_control and _env_runtime_default()
+    runtime = _build_runtime_bridge(harness, stepper, enabled=runtime_enabled, brain_name=brain_name)
+    set_active_bridge(runtime)
+    if runtime.enabled:
+        print(runtime.control_help())
+    else:
+        print("Runtime control disabled (--no-runtime-control or EXODIA_RUNTIME=0).")
+
     legs.add_task(stepper, "tick", [])
 
     try:
-        legs.bot_loop()
+        _run_agent_loop(legs, stepper, runtime, args.max_ms)
     except KeyboardInterrupt:
         print("\nInterrupted.")
     finally:
         if stream is not None:
             stream.stop()
         stop_capture_pipeline()
+        set_active_bridge(None)
         logger.close(run_meta={
             "brain": brain_name,
             "stream_port": args.stream_port if args.stream_port > 0 else None,
