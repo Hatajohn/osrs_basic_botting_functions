@@ -517,7 +517,7 @@ Primary recipe only — see §2 for full stacks.
 
 | Entrypoint | Primary recipe |
 |------------|----------------|
-| `run_agent.py` | `create_harness` → `BotLegs` + `HarnessStepper.tick` |
+| `run_agent.py` | `create_harness` → `BotLegs` + `HarnessStepper.tick`; optional `--spec PATH` (markdown task specs, repeatable) |
 | `InfernalEelFishing/infernal_eel_fishing.py` | `bot_init` → poll loop → `InfernalEelMachine.step` |
 | `SacredEelFishing/sacred_eel_fishing.py` | `bot_init` → poll loop → `SacredEelMachine.step` |
 | `legacyCode/agility.py` (legacy example) | `click_on_color` + `mouse_fidgit` + `check_color` + `wait_ticks` |
@@ -537,7 +537,7 @@ Primary recipe only — see §2 for full stacks.
 - [ ] **Compound modifier actions** — shift+click drop wrapper; `drop_all` exists on arms but no script glue.
 - [ ] **World detect → infernal FSM** — `locate_world_objects` validated via overlay only.
 - [ ] **`bot_track` blobs** — v1 motion pipeline; not wired into spot seek.
-- [ ] **WSL input parity** — extend smooth paths for all drag/pan primitives.
+- [ ] **Agent brain reads spec markdown** — `run_agent.py --spec` loads paths; `ExodiaBotUI` Bots tab passes specs at start; brain integration TBD.
 
 Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/function-architecture-plan.md).
 

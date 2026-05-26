@@ -33,7 +33,7 @@ Python automation harness for **RuneLite** (OSRS): capture the client window, in
 | **Agent (“brain”) + runtime** | `bot_harness.py` | `BotBrain` → `BrainCommand`s → `ExodiaHarness.step()`. |
 | **Legs** | `bot_legs.py` | Timed loop: `update_all()` on mods, then `run_tasks()`. |
 | **Runner** | `run_agent.py` | Canonical agent entrypoint. |
-| **Desktop UI** | `ExodiaBotUI/` | Electron control shell — debug vision, calibration, bot launcher (phased). |
+| **Desktop UI** | `ExodiaBotUI/` | Electron control shell — debug vision, calibration, spec-driven agent launcher. |
 
 **Glue:** `bot_actions.py` — `bot_init`, `bot_update`, composites like `scan_for`, `click_on_image`, `use_item_on`.
 
@@ -328,7 +328,7 @@ pip install -r requirements.txt
 
 ### Desktop app (`ExodiaBotUI`)
 
-Graphical control shell for calibration, inventory debug overlays, and (in later phases) bot start/stop. Requires the same Python setup as above plus **Node.js 20+**.
+Graphical control shell for calibration, inventory debug overlays, and a spec-driven agent launcher. Requires the same Python setup as above plus **Node.js 20+**.
 
 ```bash
 cd Exodia/ExodiaBotUI
@@ -340,10 +340,18 @@ This starts Vite with HMR and launches Electron when the dev server is ready.
 
 **First run checklist:**
 
-1. **File → Preferences…** (`Ctrl+,`) — confirm **Exodia root** and **Python path** (defaults to `{exodiaRoot}/exodia/bin/python` if present, else `python3`; set to `.venv/bin/python` if you use a local venv).
+1. **File → Preferences…** (`Ctrl+,`) — confirm **Exodia root** and **Python path** (defaults to `{exodiaRoot}/exodia/bin/python` if present, else `python3`; set to `.venv/bin/python` if you use a local venv). Set **Scripts folder** to where your markdown task specs live (e.g. `PlansTODO/`).
 2. **Run smoke test** in Preferences — should print `ok` in the Log panel.
 3. **Calibrate** — RuneLite view → **Calibrate**, or **Preferences → Calibrate client rect** (runs `calibrate_client_rect.py` and opens the ROI picker).
 4. **Refresh** — RuneLite view → **Refresh** or **View → Refresh debug frame** (`F5`) to capture the client and show inventory detect/identify overlays.
+5. **Load a task spec** — **Scripts → Specs** (markdown files only) → select a `.md` file → **Load into Bots**.
+6. **Start agent** — **Scripts → Bots** → **Start agent** (runs `run_agent.py` with `--spec` for each loaded file). Logs stream to the Log panel; use **Bot → Stop/Pause/Resume** while running.
+
+Agent with specs from the CLI:
+
+```bash
+python run_agent.py --brain reference_fishing --spec PlansTODO/my_task.md
+```
 
 Production build (packaging later):
 

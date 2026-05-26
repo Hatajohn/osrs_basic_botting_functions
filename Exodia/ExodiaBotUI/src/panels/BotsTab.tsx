@@ -1,79 +1,52 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { BotManifestEntry, BotRunInfo } from '../../shared/bots';
+import type { BotSpecFile } from '../../shared/specs';
+import { AGENT_BOT_ID } from '../../shared/specs';
+import type { BotRunInfo } from '../../shared/bots';
 import './BotsTab.css';
 import './Panel.css';
 
-type ArgValues = Record<string, number | string | boolean>;
-
-function defaultArgValues(bot: BotManifestEntry): ArgValues {
-  const values: ArgValues = {};
-  for (const arg of bot.args ?? []) {
-    if (arg.default !== undefined) {
-      values[arg.name] = arg.default;
-    }
-  }
-  return values;
-}
+type BotsTabProps = {
+  specs: BotSpecFile[];
+  selectedSpecPath: string | null;
+  onSelectSpec: (path: string) => void;
+  onRemoveSpec: (path: string) => void;
+  onClearSpecs: () => void;
+};
 
 function isRunning(run: BotRunInfo | null): boolean {
   if (!run) return false;
   return run.state === 'running' || run.state === 'paused' || run.state === 'starting' || run.state === 'stopping';
 }
 
-export function BotsTab() {
-  const [bots, setBots] = useState<BotManifestEntry[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [argValues, setArgValues] = useState<ArgValues>({});
+export function BotsTab({
+  specs,
+  selectedSpecPath,
+  onSelectSpec,
+  onRemoveSpec,
+  onClearSpecs,
+}: BotsTabProps) {
   const [run, setRun] = useState<BotRunInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selected = bots.find((b) => b.id === selectedId) ?? null;
+  const selected = specs.find((s) => s.path === selectedSpecPath) ?? specs[0] ?? null;
   const active = isRunning(run);
 
-  const loadBots = useCallback(async () => {
-    const list = await window.exodia.listBots();
-    setBots(list);
-    if (list.length > 0 && !selectedId) {
-      setSelectedId(list[0].id);
-      setArgValues(defaultArgValues(list[0]));
-    }
-  }, [selectedId]);
-
   useEffect(() => {
-    loadBots();
     window.exodia.getBotRun().then(setRun);
     const unsubRun = window.exodia.onBotRunUpdate(setRun);
     return unsubRun;
-  }, [loadBots]);
-
-  const selectBot = (bot: BotManifestEntry) => {
-    setSelectedId(bot.id);
-    setArgValues(defaultArgValues(bot));
-    setError(null);
-  };
-
-  const updateArg = (name: string, type: string, raw: string) => {
-    setArgValues((prev) => {
-      const next = { ...prev };
-      if (type === 'number') {
-        const n = Number(raw);
-        next[name] = Number.isFinite(n) ? n : 0;
-      } else if (type === 'boolean') {
-        next[name] = raw === 'true';
-      } else {
-        next[name] = raw;
-      }
-      return next;
-    });
-  };
+  }, []);
 
   const handleStart = async () => {
-    if (!selected || active) return;
+    if (specs.length === 0 || active) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await window.exodia.startBot({ botId: selected.id, argValues });
+      const result = await window.exodia.startBot({
+        botId: AGENT_BOT_ID,
+        specPaths: specs.map((s) => s.path),
+      });
       if (!result.ok && result.error) {
         setError(result.error);
       }
@@ -108,20 +81,55 @@ export function BotsTab() {
 
   return (
     <div className="bots-tab">
+      <div className="bots-tab__header">
+        <p className="bots-tab__hint">
+          Loaded task specs for the agent. Choose markdown files in the Specs tab.
+        </p>
+        {specs.length > 0 && !active && (
+          <button type="button" className="btn btn--sm" onClick={onClearSpecs}>
+            Clear all
+          </button>
+        )}
+      </div>
+
       <ul className="bots-tab__list">
-        {bots.length === 0 && <li className="bots-tab__empty">No bots in manifest.</li>}
-        {bots.map((bot) => (
-          <li key={bot.id}>
+        {specs.length === 0 && (
+          <li className="bots-tab__empty">
+            No specs loaded. Open the Specs tab and load a <code>.md</code> file.
+          </li>
+        )}
+        {specs.map((spec) => (
+          <li key={spec.path}>
             <button
               type="button"
-              className={`bots-tab__item${selectedId === bot.id ? ' bots-tab__item--selected' : ''}${run?.botId === bot.id && active ? ' bots-tab__item--active' : ''}`}
-              onClick={() => selectBot(bot)}
-              disabled={active && run?.botId !== bot.id}
+              className={`bots-tab__item${selected?.path === spec.path ? ' bots-tab__item--selected' : ''}${active ? ' bots-tab__item--locked' : ''}`}
+              onClick={() => onSelectSpec(spec.path)}
+              disabled={active}
             >
-              <span className="bots-tab__title">{bot.title}</span>
-              {bot.note && <span className="bots-tab__note">{bot.note}</span>}
-              {run?.botId === bot.id && active && (
-                <span className={`bots-tab__state bots-tab__state--${run.state}`}>{run.state}</span>
+              <span className="bots-tab__title">{spec.name}</span>
+              <span className="bots-tab__note" title={spec.path}>
+                {spec.path}
+              </span>
+              {!active && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="bots-tab__remove"
+                  title="Remove spec"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveSpec(spec.path);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onRemoveSpec(spec.path);
+                    }
+                  }}
+                >
+                  ×
+                </span>
               )}
             </button>
           </li>
@@ -129,66 +137,52 @@ export function BotsTab() {
       </ul>
 
       {selected && (
-        <div className="bots-tab__controls">
-          {(selected.args ?? []).length > 0 && (
-            <div className="bots-tab__args">
-              {selected.args!.map((arg) => (
-                <label key={arg.name} className="bots-tab__arg">
-                  <span>{arg.label ?? arg.name}</span>
-                  {arg.type === 'boolean' ? (
-                    <input
-                      type="checkbox"
-                      checked={Boolean(argValues[arg.name])}
-                      onChange={(e) => updateArg(arg.name, arg.type, String(e.target.checked))}
-                      disabled={active}
-                    />
-                  ) : (
-                    <input
-                      type={arg.type === 'number' ? 'number' : 'text'}
-                      value={String(argValues[arg.name] ?? '')}
-                      onChange={(e) => updateArg(arg.name, arg.type, e.target.value)}
-                      disabled={active}
-                    />
-                  )}
-                </label>
-              ))}
-            </div>
-          )}
-
-          <div className="bots-tab__actions">
-            {!active && (
-              <button type="button" className="btn btn--primary btn--sm" onClick={handleStart} disabled={busy}>
-                {busy ? 'Starting…' : 'Start'}
-              </button>
-            )}
-            {active && (
-              <>
-                {run?.state !== 'paused' && run?.runtimeCommands.includes('pause') && (
-                  <button type="button" className="btn btn--sm" onClick={handlePause} disabled={busy}>
-                    Pause
-                  </button>
-                )}
-                {run?.state === 'paused' && run?.runtimeCommands.includes('resume') && (
-                  <button type="button" className="btn btn--sm" onClick={handleResume} disabled={busy}>
-                    Resume
-                  </button>
-                )}
-                <button type="button" className="btn btn--sm" onClick={handleStop} disabled={busy}>
-                  {busy ? 'Stopping…' : 'Stop'}
-                </button>
-              </>
-            )}
-          </div>
-
-          {error && <p className="bots-tab__error">{error}</p>}
-          {active && run && (
-            <p className="bots-tab__meta">
-              pid {run.pid ?? '—'}
-              {run.startedAt ? ` · started ${new Date(run.startedAt).toLocaleTimeString()}` : ''}
-            </p>
-          )}
+        <div className="bots-tab__preview">
+          <h3 className="bots-tab__preview-title">{selected.name}</h3>
+          <pre className="bots-tab__preview-body">{selected.content}</pre>
         </div>
       )}
+
+      <div className="bots-tab__controls">
+        <div className="bots-tab__actions">
+          {!active && (
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={handleStart}
+              disabled={busy || specs.length === 0}
+              title={specs.length === 0 ? 'Load at least one spec first' : undefined}
+            >
+              {busy ? 'Starting…' : 'Start agent'}
+            </button>
+          )}
+          {active && (
+            <>
+              {run?.state !== 'paused' && run?.runtimeCommands.includes('pause') && (
+                <button type="button" className="btn btn--sm" onClick={handlePause} disabled={busy}>
+                  Pause
+                </button>
+              )}
+              {run?.state === 'paused' && run?.runtimeCommands.includes('resume') && (
+                <button type="button" className="btn btn--sm" onClick={handleResume} disabled={busy}>
+                  Resume
+                </button>
+              )}
+              <button type="button" className="btn btn--sm" onClick={handleStop} disabled={busy}>
+                {busy ? 'Stopping…' : 'Stop'}
+              </button>
+            </>
+          )}
+        </div>
+
+        {error && <p className="bots-tab__error">{error}</p>}
+        {active && run && (
+          <p className="bots-tab__meta">
+            {run.botTitle} · pid {run.pid ?? '—'}
+            {run.startedAt ? ` · started ${new Date(run.startedAt).toLocaleTimeString()}` : ''}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

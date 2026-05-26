@@ -6,6 +6,27 @@
   overflow: hidden;
 }
 
+.bots-tab__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  flex-shrink: 0;
+}
+
+.bots-tab__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.bots-tab__hint code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
 .bots-tab__list {
   list-style: none;
   margin: 0;
@@ -44,8 +65,57 @@
   background: var(--accent-muted);
 }
 
-.bots-tab__item--active {
-  border-left: 3px solid var(--accent);
+.bots-tab__item--locked {
+  opacity: 0.7;
+}
+
+.bots-tab__remove {
+  margin-left: auto;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bots-tab__remove:hover {
+  color: #f87171;
+}
+
+.bots-tab__preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.bots-tab__preview-title {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  flex-shrink: 0;
+}
+
+.bots-tab__preview-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
 }
 
 .bots-tab__item:disabled {
@@ -80,7 +150,6 @@
 .bots-tab__controls {
   flex-shrink: 0;
   padding: 8px 10px;
-  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -156,6 +225,25 @@
 .scripts-panel__tab--active {
   color: var(--text);
   border-bottom-color: var(--accent);
+}
+
+.scripts-panel__tab-badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.scripts-panel__load-row {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.file-tree__row--loaded .file-tree__name {
+  color: var(--accent);
 }
 
 .scripts-panel__tab-body {

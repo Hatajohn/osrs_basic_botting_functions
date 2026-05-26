@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileEntry } from '../../shared/ipc';
+import type { BotSpecFile } from '../../shared/specs';
 import { BotsTab } from './BotsTab';
 import './BotsTab.css';
 import './ScriptsPanel.css';
@@ -9,7 +10,7 @@ type ScriptsPanelProps = {
   onPathChange?: (path: string) => void;
 };
 
-type TabId = 'browse' | 'bots';
+type TabId = 'bots' | 'specs';
 
 export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
   const [tab, setTab] = useState<TabId>('bots');
@@ -20,11 +21,14 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
   const [loading, setLoading] = useState(true);
   const [parentPath, setParentPath] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [loadedSpecs, setLoadedSpecs] = useState<BotSpecFile[]>([]);
+  const [selectedSpecPath, setSelectedSpecPath] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadDirectory = useCallback(async (dirPath: string) => {
     setLoading(true);
     setError(null);
-    const result = await window.exodia.listDirectory(dirPath);
+    const result = await window.exodia.listDirectory(dirPath, { markdownOnly: true });
     setBrowsePath(result.path);
     setParentPath(result.parentPath);
     setEntries(result.entries);
@@ -40,7 +44,7 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
   }, [loadDirectory]);
 
   useEffect(() => {
-    if (tab === 'browse') {
+    if (tab === 'specs') {
       loadRoot();
     }
   }, [tab, loadRoot]);
@@ -52,6 +56,35 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
     setSelectedPath(null);
     await loadDirectory(result.path);
   };
+
+  const loadSpecFromEntry = useCallback(async (entry: FileEntry) => {
+    if (entry.kind !== 'file') return;
+    setLoadError(null);
+    const result = await window.exodia.readTextFile(entry.path);
+    if (!result.ok || !result.content) {
+      setLoadError(result.error ?? 'Failed to read spec file');
+      return;
+    }
+
+    const spec: BotSpecFile = {
+      path: result.path,
+      name: result.name ?? entry.name,
+      content: result.content,
+      loadedAt: Date.now(),
+    };
+
+    setLoadedSpecs((prev) => {
+      const idx = prev.findIndex((s) => s.path === spec.path);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = spec;
+        return next;
+      }
+      return [...prev, spec];
+    });
+    setSelectedSpecPath(spec.path);
+    setTab('bots');
+  }, []);
 
   const openEntry = (entry: FileEntry) => {
     if (entry.kind === 'directory') {
@@ -66,13 +99,25 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
     if (parentPath) loadDirectory(parentPath);
   };
 
+  const removeSpec = (path: string) => {
+    setLoadedSpecs((prev) => prev.filter((s) => s.path !== path));
+    setSelectedSpecPath((current) => (current === path ? null : current));
+  };
+
+  const clearSpecs = () => {
+    setLoadedSpecs([]);
+    setSelectedSpecPath(null);
+  };
+
   const canGoUp = parentPath !== null;
+  const selectedEntry = entries.find((e) => e.path === selectedPath) ?? null;
+  const canLoadSelected = selectedEntry?.kind === 'file';
 
   return (
     <section className="panel panel--scripts">
       <header className="panel__header panel__header--stacked">
         <h2 className="panel__title">Scripts</h2>
-        {tab === 'browse' && (
+        {tab === 'specs' && (
           <button type="button" className="btn btn--sm" onClick={chooseFolder}>
             Choose folder…
           </button>
@@ -88,25 +133,48 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
           onClick={() => setTab('bots')}
         >
           Bots
+          {loadedSpecs.length > 0 && (
+            <span className="scripts-panel__tab-badge">{loadedSpecs.length}</span>
+          )}
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'browse'}
-          className={`scripts-panel__tab${tab === 'browse' ? ' scripts-panel__tab--active' : ''}`}
-          onClick={() => setTab('browse')}
+          aria-selected={tab === 'specs'}
+          className={`scripts-panel__tab${tab === 'specs' ? ' scripts-panel__tab--active' : ''}`}
+          onClick={() => setTab('specs')}
         >
-          Browse
+          Specs
         </button>
       </div>
 
       <div className="panel__body scripts-panel scripts-panel__tab-body">
-        {tab === 'bots' && <BotsTab />}
-        {tab === 'browse' && (
+        {tab === 'bots' && (
+          <BotsTab
+            specs={loadedSpecs}
+            selectedSpecPath={selectedSpecPath}
+            onSelectSpec={setSelectedSpecPath}
+            onRemoveSpec={removeSpec}
+            onClearSpecs={clearSpecs}
+          />
+        )}
+        {tab === 'specs' && (
           <>
             <p className="scripts-panel__path" title={browsePath || rootPath}>
               {browsePath || rootPath || 'No folder selected'}
             </p>
+
+            {canLoadSelected && (
+              <div className="scripts-panel__load-row">
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => selectedEntry && loadSpecFromEntry(selectedEntry)}
+                >
+                  Load into Bots
+                </button>
+              </div>
+            )}
 
             {canGoUp && (
               <button type="button" className="file-tree__row file-tree__row--parent" onClick={goUp}>
@@ -118,8 +186,9 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
             <div className="file-tree">
               {loading && <p className="file-tree__status">Loading…</p>}
               {!loading && error && <p className="file-tree__error">{error}</p>}
+              {!loading && loadError && <p className="file-tree__error">{loadError}</p>}
               {!loading && !error && entries.length === 0 && (
-                <p className="file-tree__status">Folder is empty.</p>
+                <p className="file-tree__status">No markdown files in this folder.</p>
               )}
               {!loading &&
                 !error &&
@@ -127,12 +196,18 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
                   <button
                     key={entry.path}
                     type="button"
-                    className={`file-tree__row${selectedPath === entry.path ? ' file-tree__row--selected' : ''}`}
+                    className={`file-tree__row${selectedPath === entry.path ? ' file-tree__row--selected' : ''}${loadedSpecs.some((s) => s.path === entry.path) ? ' file-tree__row--loaded' : ''}`}
                     onClick={() => openEntry(entry)}
-                    onDoubleClick={() => entry.kind === 'directory' && openEntry(entry)}
+                    onDoubleClick={() => {
+                      if (entry.kind === 'directory') {
+                        openEntry(entry);
+                      } else {
+                        void loadSpecFromEntry(entry);
+                      }
+                    }}
                   >
                     <span className={`file-tree__icon file-tree__icon--${entry.kind}`}>
-                      {entry.kind === 'directory' ? '▸' : '·'}
+                      {entry.kind === 'directory' ? '▸' : '◆'}
                     </span>
                     <span className="file-tree__name">{entry.name}</span>
                   </button>

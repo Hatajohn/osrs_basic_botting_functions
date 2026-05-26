@@ -16,7 +16,7 @@ import {
 } from '../shared/ipc';
 import { refreshDebugFrame, saveDebugFrameSnapshot } from './debugFrame';
 import { runCalibrateClientRect } from './calibrateClientRect';
-import { listDirectory } from './files';
+import { listDirectory, readTextFile } from './files';
 import { loadBotsManifest } from './manifestLoader';
 import { fetchGamePreview } from './previewClient';
 import { ProcessManager } from './processManager';
@@ -178,7 +178,11 @@ function registerIpc(): void {
     return { canceled: false, path: folder };
   });
 
-  ipcMain.handle(IPC.LIST_DIRECTORY, (_event, dirPath: string) => listDirectory(dirPath));
+  ipcMain.handle(IPC.LIST_DIRECTORY, (_event, dirPath: string, options?: { markdownOnly?: boolean }) =>
+    listDirectory(dirPath, options),
+  );
+
+  ipcMain.handle(IPC.READ_TEXT_FILE, (_event, filePath: string) => readTextFile(filePath));
 
   ipcMain.handle(IPC.REFRESH_DEBUG_FRAME, async (_event, mode?: DebugFrameMode) => {
     const frameMode = mode ?? 'inventory_identify';
@@ -235,9 +239,9 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.GET_BOT_RUN, () => processManager?.getActiveRun() ?? null);
 
-  ipcMain.handle(IPC.START_BOT, async (_event, request: { botId: string; argValues?: Record<string, number | string | boolean> }) => {
+  ipcMain.handle(IPC.START_BOT, async (_event, request: { botId?: string; specPaths?: string[]; argValues?: Record<string, number | string | boolean> }) => {
     if (!processManager) return { ok: false, error: 'Process manager not ready' };
-    return processManager.startBot(request.botId, request.argValues);
+    return processManager.startBot(request.botId, request.argValues, request.specPaths);
   });
 
   ipcMain.handle(IPC.STOP_BOT, async () => {

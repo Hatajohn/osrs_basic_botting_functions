@@ -46,7 +46,14 @@ def _env_runtime_default() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
-def _build_runtime_bridge(harness, stepper: HarnessStepper, *, enabled: bool, brain_name: str) -> RuntimeBridge:
+def _build_runtime_bridge(
+    harness,
+    stepper: HarnessStepper,
+    *,
+    enabled: bool,
+    brain_name: str,
+    spec_paths: list[Path],
+) -> RuntimeBridge:
     bridge = RuntimeBridge(
         script_name="run_agent",
         enabled=enabled,
@@ -90,6 +97,7 @@ def _build_runtime_bridge(harness, stepper: HarnessStepper, *, enabled: bool, br
             brain=brain_name,
             tick=harness._tick,
             paused=bridge.paused,
+            spec_files=[str(p) for p in spec_paths],
         )
         if stepper.last_result is not None:
             obs = stepper.last_result.observation
@@ -174,7 +182,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Disable runtime_control.json / runtime_status.json polling",
     )
+    p.add_argument(
+        "--spec",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Markdown task spec file (repeatable). Agent reads these to understand the task.",
+    )
     args = p.parse_args(argv)
+
+    spec_paths = [Path(p).expanduser().resolve() for p in (args.spec or [])]
+    spec_paths = [p for p in spec_paths if str(p)]
+    for spec_path in spec_paths:
+        if not spec_path.is_file():
+            print("ERROR: spec file not found:", spec_path, file=sys.stderr)
+            return 1
+        if spec_path.suffix.lower() != ".md":
+            print("ERROR: spec must be a markdown (.md) file:", spec_path, file=sys.stderr)
+            return 1
 
     run_id = make_run_id()
     log_dir = Path(args.log_dir)
@@ -244,6 +269,18 @@ def main(argv: list[str] | None = None) -> int:
         print("MJPEG stream:", stream.base_url)
 
     print("Action log:", logger.jsonl_path)
+    if spec_paths:
+        print("Task specs (%d):" % len(spec_paths))
+        for spec_path in spec_paths:
+            print("  -", spec_path)
+            try:
+                preview = spec_path.read_text(encoding="utf-8").strip().splitlines()
+                for line in preview[:3]:
+                    print("    |", line[:120])
+                if len(preview) > 3:
+                    print("    | … (%d more lines)" % (len(preview) - 3))
+            except OSError as exc:
+                print("    | (could not read: %s)" % exc)
 
     stepper = HarnessStepper(harness)
     legs = Legs.BotLegs(mods=[harness.client, harness.eyes])
@@ -252,7 +289,13 @@ def main(argv: list[str] | None = None) -> int:
         legs._max = args.max_ms
 
     runtime_enabled = not args.no_runtime_control and _env_runtime_default()
-    runtime = _build_runtime_bridge(harness, stepper, enabled=runtime_enabled, brain_name=brain_name)
+    runtime = _build_runtime_bridge(
+        harness,
+        stepper,
+        enabled=runtime_enabled,
+        brain_name=brain_name,
+        spec_paths=spec_paths,
+    )
     set_active_bridge(runtime)
     if runtime.enabled:
         print(runtime.control_help())

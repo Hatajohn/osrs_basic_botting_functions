@@ -283,9 +283,10 @@ Deprecated *functions*: [`FUNCTIONS.md`](FUNCTIONS.md) §6.
 
 | Path | Layer | Status | Imported by | Role | FUNCTIONS |
 |------|-------|--------|-------------|------|-----------|
-| `ExodiaBotUI/` | external-ui | — | — (no Python imports) | Phase 0 Electron shell; settings, script browser | §7 note |
+| `ExodiaBotUI/` | external-ui | — | — (no Python imports) | Electron shell; debug vision, spec browser, agent launcher | §7 note |
+| `ExodiaBotUI/bots.manifest.json` | external-ui | — | — | Internal agent runner config for Start agent | — |
 
-See [`ExodiaBotUI/README.md`](ExodiaBotUI/README.md). **Graph hole:** disconnected from bot execution today (Python smoke test only).
+See [`ExodiaBotUI/README.md`](ExodiaBotUI/README.md). Spawns `run_agent.py` with `--spec` paths from loaded markdown task specs.
 
 ---
 
@@ -312,7 +313,7 @@ Mirrors [`FUNCTIONS.md`](FUNCTIONS.md) §9:
 
 - **`bot_world_objects`** — test-only branch; not wired into infernal FSM.
 - **`bot_track`** — infra optional; experimental, not spot seek.
-- **`ExodiaBotUI`** — disconnected node; no bot spawn yet.
+- **`ExodiaBotUI`** — spawns agent via manifest; brain spec ingestion still evolving.
 - **`GameState`** — no per-slot item labels on dataclass (labels on `perception_envelope` only).
 - **`SacredEelStepper`** — planned; fishing still uses bespoke poll loops.
 

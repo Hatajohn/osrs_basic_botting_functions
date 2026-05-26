@@ -57,7 +57,8 @@ export type RuntimeStatusPayload = {
 };
 
 export type StartBotRequest = {
-  botId: string;
+  botId?: string;
+  specPaths?: string[];
   argValues?: Record<string, number | string | boolean>;
 };
 

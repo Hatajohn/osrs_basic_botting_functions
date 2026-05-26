@@ -70,11 +70,14 @@ export class ProcessManager {
   }
 
   async startBot(
-    botId: string,
+    botId?: string,
     argValues?: Record<string, number | string | boolean>,
+    specPaths?: string[],
   ): Promise<StartBotResult> {
+    const resolvedBotId = botId?.trim() || 'agent_reference_fishing';
+
     if (this.run && this.run.state !== 'idle') {
-      const error = `Cannot start "${botId}": ${this.run.botTitle} is already ${this.run.state}`;
+      const error = `Cannot start "${resolvedBotId}": ${this.run.botTitle} is already ${this.run.state}`;
       this.sink(error, 'stderr');
       return { ok: false, error };
     }
@@ -88,9 +91,9 @@ export class ProcessManager {
       return { ok: false, error };
     }
 
-    const bot = findBot(manifest, botId);
+    const bot = findBot(manifest, resolvedBotId);
     if (!bot) {
-      const error = `Unknown bot id: ${botId}`;
+      const error = `Unknown bot id: ${resolvedBotId}`;
       this.sink(error, 'stderr');
       return { ok: false, error };
     }
@@ -106,7 +109,8 @@ export class ProcessManager {
     }
 
     const userArgv = buildArgvFromArgs(bot, argValues);
-    const spawnArgs = this.buildSpawnArgs(bot, resolvedExodiaRoot, userArgv);
+    const specArgv = (specPaths ?? []).flatMap((specPath) => ['--spec', specPath]);
+    const spawnArgs = this.buildSpawnArgs(bot, resolvedExodiaRoot, [...userArgv, ...specArgv]);
     const runId = randomUUID();
     const usesStream = botUsesStream(bot);
 

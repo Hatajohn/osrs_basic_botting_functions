@@ -18,6 +18,7 @@ export const IPC = {
   LOG_LINE: 'log:line',
   SELECT_SCRIPTS_FOLDER: 'files:selectScriptsFolder',
   LIST_DIRECTORY: 'files:listDirectory',
+  READ_TEXT_FILE: 'files:readTextFile',
   REFRESH_DEBUG_FRAME: 'debug:refresh',
   SAVE_DEBUG_SNAPSHOT: 'debug:saveSnapshot',
   OPEN_LOGS_FOLDER: 'app:openLogsFolder',
@@ -87,10 +88,23 @@ export type FileEntry = {
   kind: 'file' | 'directory';
 };
 
+export type ListDirectoryOptions = {
+  /** When true, list directories plus `.md` files only. */
+  markdownOnly?: boolean;
+};
+
 export type ListDirectoryResult = {
   path: string;
   parentPath: string | null;
   entries: FileEntry[];
+  error?: string;
+};
+
+export type ReadTextFileResult = {
+  ok: boolean;
+  path: string;
+  name?: string;
+  content?: string;
   error?: string;
 };
 
@@ -123,7 +137,8 @@ export type ExodiaApi = {
   quit: () => Promise<void>;
   onLogLine: (callback: (payload: LogLinePayload) => void) => () => void;
   selectScriptsFolder: () => Promise<SelectFolderResult>;
-  listDirectory: (dirPath: string) => Promise<ListDirectoryResult>;
+  listDirectory: (dirPath: string, options?: ListDirectoryOptions) => Promise<ListDirectoryResult>;
+  readTextFile: (filePath: string) => Promise<ReadTextFileResult>;
   refreshDebugFrame: (mode?: DebugFrameMode) => Promise<DebugFrameResult>;
   saveDebugSnapshot: (imageDataUrl: string, defaultName?: string) => Promise<SaveSnapshotResult>;
   openLogsFolder: () => Promise<void>;
