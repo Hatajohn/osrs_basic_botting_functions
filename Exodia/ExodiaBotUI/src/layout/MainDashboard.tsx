@@ -6,7 +6,7 @@ import { RuneLiteViewPanel } from '../panels/RuneLiteViewPanel';
 import { ScriptsPanel } from '../panels/ScriptsPanel';
 import type { BotRunInfo, RuntimeStatusPayload } from '../../shared/bots';
 import type { LogEntry } from '../components/LogConsole';
-import type { DebugFrameMode, DebugFrameResult } from '../../shared/ipc';
+import type { ActionClickPreview, DebugFrameMode, DebugFrameResult } from '../../shared/ipc';
 import { Splitter, useDashboardLayout } from './Splitter';
 import './MainDashboard.css';
 
@@ -25,6 +25,9 @@ type MainDashboardProps = {
   previewLive?: boolean;
   onTogglePreviewLive?: (live: boolean) => void;
   botRunning?: boolean;
+  actionClickPreview?: ActionClickPreview | null;
+  onActionClickPreview?: (preview: ActionClickPreview | null) => void;
+  onPrepareClickPreview?: () => Promise<void>;
 };
 
 export function MainDashboard({
@@ -42,6 +45,9 @@ export function MainDashboard({
   previewLive,
   onTogglePreviewLive,
   botRunning,
+  actionClickPreview,
+  onActionClickPreview,
+  onPrepareClickPreview,
 }: MainDashboardProps) {
   const containerRef = useRef<HTMLElement>(null);
   const {
@@ -77,6 +83,7 @@ export function MainDashboard({
             previewLive={previewLive}
             onTogglePreviewLive={onTogglePreviewLive}
             botRunning={botRunning}
+            actionClickPreview={actionClickPreview}
           />
         </div>
 
@@ -102,7 +109,11 @@ export function MainDashboard({
         <Splitter orientation="horizontal" onDrag={resizeActions} />
 
         <div className="dashboard__pane" style={{ flex: paneFlex(layout.actionsFlex) }}>
-          <ActionsPanel />
+          <ActionsPanel
+            botRunning={botRunning}
+            onActionClickPreview={onActionClickPreview}
+            onPrepareClickPreview={onPrepareClickPreview}
+          />
         </div>
       </section>
     </main>

@@ -53,7 +53,34 @@ python run_agent.py --brain reference_fishing --stream-port 8765 --spec /path/to
 
 Startup logs print a short preview of each spec. Runtime status includes `context.spec_files`.
 
-## Phase features (current)
+## Phase status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 0 — Foundation | **Complete** | Menu, dashboard, Preferences, smoke test, log console |
+| 1 — Debug vision | **Complete** | Debug frame refresh, calibrate, save snapshot |
+| 2 — Bot launcher | **Complete** | See below |
+| 3+ | Not started | Simple actions, chains, play-by-play, tools, packaging |
+
+### Phase 2 — complete
+
+Delivered:
+
+- Process manager with Start / Stop / Pause / Resume and single-active-bot guard
+- Subprocess stdout/stderr streamed to the Log panel in real time
+- Runtime status polling (`logs/runtime_status.json`) in **Current bot tasks**
+- Live MJPEG preview (`game_preview`) while the agent runs with `--stream-port`
+- `run_agent.py` RuntimeBridge (stop, pause, resume, health) and `--spec` for markdown task files
+- **Specs** tab (markdown-only file tree) → **Bots** tab (loaded spec preview + **Start agent**)
+
+Intentional deltas from the original plan:
+
+- **Bots tab** is spec-driven (markdown task files), not a manifest bot picker. `bots.manifest.json` still defines the agent runner internally.
+- **Sacred eel** is not exposed in the Bots UI; start via CLI (`python -m SacredEelFishing.sacred_eel_fishing`). Process manager still supports manifest bots if re-exposed later.
+- **File → Save session snapshot** remains stubbed (Phase 7).
+- Agent **brain reading spec content** is wired at the CLI/status layer; full planner integration is a follow-up (see `FUNCTIONS.md` §9).
+
+## Phase features (reference)
 
 ### Foundation (Phase 0)
 

@@ -6,7 +6,7 @@ import { MainDashboard } from './layout/MainDashboard';
 import type { MenuActionId, MenuItemDef } from './menu/menuConfig';
 import { debugModeForAction } from './menu/menuConfig';
 import { SettingsPage } from './pages/SettingsPage';
-import type { DebugFrameMode, DebugFrameResult } from '../shared/ipc';
+import type { ActionClickPreview, DebugFrameMode, DebugFrameResult } from '../shared/ipc';
 import './App.css';
 
 function AboutModal({
@@ -55,6 +55,7 @@ export default function App() {
   const [debugImage, setDebugImage] = useState<string | undefined>();
   const [debugLoading, setDebugLoading] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
+  const [actionClickPreview, setActionClickPreview] = useState<ActionClickPreview | null>(null);
 
   const refreshDebugFrame = useCallback(
     async (mode: DebugFrameMode = debugMode) => {
@@ -90,6 +91,13 @@ export default function App() {
       setCalibrating(false);
     }
   }, [debugMode, refreshDebugFrame]);
+
+  const prepareActionClickPreview = useCallback(async () => {
+    if (previewLive) {
+      setPreviewLive(false);
+    }
+    await refreshDebugFrame('raw_client');
+  }, [previewLive, refreshDebugFrame]);
 
   const handleMenuAction = useCallback(
     async (actionId: MenuActionId, _item: MenuItemDef) => {
@@ -193,6 +201,9 @@ export default function App() {
         previewLive={previewLive}
         onTogglePreviewLive={setPreviewLive}
         botRunning={botRunning}
+        actionClickPreview={actionClickPreview}
+        onActionClickPreview={setActionClickPreview}
+        onPrepareClickPreview={prepareActionClickPreview}
       />
       <SettingsPage
         open={settingsOpen}

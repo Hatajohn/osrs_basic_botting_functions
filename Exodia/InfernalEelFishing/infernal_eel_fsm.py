@@ -63,7 +63,7 @@ HAMMER_INV_TEMPLATE = os.environ.get("EXODIA_INFERNAL_HAMMER_TEMPLATE", "imcando
 SPOT_TEMPLATES: list[str] = [
     t.strip()
     for t in os.environ.get(
-        "EXODIA_INFERNAL_SPOT_TEMPLATES", "infernal_eel_spot.png"
+        "EXODIA_INFERNAL_SPOT_TEMPLATES", "osrs_infernalEel.png,infernal_eel_spot.png"
     ).split(",")
     if t.strip()
 ]

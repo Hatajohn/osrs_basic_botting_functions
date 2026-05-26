@@ -14,9 +14,12 @@ import {
   type LogLinePayload,
   type SmokeTestResult,
 } from '../shared/ipc';
+import { listActionBlocks, runSingleAction } from './actionRunner';
 import { refreshDebugFrame, saveDebugFrameSnapshot } from './debugFrame';
 import { runCalibrateClientRect } from './calibrateClientRect';
 import { listDirectory, readTextFile } from './files';
+import { listItemCatalog, resolveTemplateItem } from './itemCatalog';
+import { selectTemplateFile } from './templateFile';
 import { loadBotsManifest } from './manifestLoader';
 import { fetchGamePreview } from './previewClient';
 import { ProcessManager } from './processManager';
@@ -40,6 +43,13 @@ if (process.platform === 'linux') {
 
 let mainWindow: BrowserWindow | null = null;
 let processManager: ProcessManager | null = null;
+let actionRunning = false;
+
+function botRunBlocksAction(): boolean {
+  const run = processManager?.getActiveRun();
+  if (!run) return false;
+  return run.state !== 'idle';
+}
 
 function emitLog(line: string, stream: LogLinePayload['stream'] = 'system'): void {
   const payload: LogLinePayload = { line, stream, ts: Date.now() };
@@ -184,6 +194,16 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.READ_TEXT_FILE, (_event, filePath: string) => readTextFile(filePath));
 
+  ipcMain.handle(IPC.SELECT_TEMPLATE_FILE, async () =>
+    selectTemplateFile(mainWindow),
+  );
+
+  ipcMain.handle(IPC.LIST_ITEM_CATALOG, () => listItemCatalog());
+
+  ipcMain.handle(IPC.RESOLVE_TEMPLATE_ITEM, (_event, imagePath: string) =>
+    resolveTemplateItem(imagePath),
+  );
+
   ipcMain.handle(IPC.REFRESH_DEBUG_FRAME, async (_event, mode?: DebugFrameMode) => {
     const frameMode = mode ?? 'inventory_identify';
     emitLog(`Debug frame refresh (${frameMode})…`, 'system');
@@ -241,8 +261,41 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.START_BOT, async (_event, request: { botId?: string; specPaths?: string[]; argValues?: Record<string, number | string | boolean> }) => {
     if (!processManager) return { ok: false, error: 'Process manager not ready' };
+    if (actionRunning) {
+      const error = 'Cannot start bot: an action is still running';
+      emitLog(error, 'stderr');
+      return { ok: false, error };
+    }
     return processManager.startBot(request.botId, request.argValues, request.specPaths);
   });
+
+  ipcMain.handle(IPC.LIST_ACTION_BLOCKS, () => listActionBlocks());
+
+  ipcMain.handle(
+    IPC.RUN_SINGLE_ACTION,
+    async (_event, request: { blockId: string; args?: Record<string, string>; dryRun?: boolean }) => {
+      if (actionRunning) {
+        const error = 'Another action is already running';
+        emitLog(error, 'stderr');
+        return { ok: false, blockId: request?.blockId ?? '', error };
+      }
+      if (botRunBlocksAction()) {
+        const error = 'Cannot run action while a bot is active';
+        emitLog(error, 'stderr');
+        return { ok: false, blockId: request?.blockId ?? '', error };
+      }
+      actionRunning = true;
+      try {
+        return await runSingleAction(
+          request,
+          (line, stream) => emitLog(line, stream),
+          () => processManager?.getActiveRun() ?? null,
+        );
+      } finally {
+        actionRunning = false;
+      }
+    },
+  );
 
   ipcMain.handle(IPC.STOP_BOT, async () => {
     if (!processManager) return { ok: false, error: 'Process manager not ready' };

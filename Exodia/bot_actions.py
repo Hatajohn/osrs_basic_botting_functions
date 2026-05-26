@@ -105,13 +105,39 @@ def use_x_on_y(
     return UseItemOnResult(True)
 
 
-def click_on_image(client, bot_arms, bot_eyes, target, refresh=True):
-    """Question: How do I find and click a world template on screen?"""
+def click_on_image(client, bot_arms, bot_eyes, target, refresh=True, inv=False, template_path=None):
+    """Question: How do I find and click a template on screen (world or inventory)?"""
     if refresh:
         bot_update(client, bot_eyes)
-    target = bot_eyes.locate_image(filename=target, inv=False)
-    target = random.choice(target)
-    bot_arms.click_at(target)
+    from bot_inventory_detect import bind_inventory_to_eyes
+
+    search_roi = None
+    if inv:
+        bind_inventory_to_eyes(bot_eyes, refresh_client=False, force=True)
+    else:
+        bind_inventory_to_eyes(bot_eyes, refresh_client=False, force=False)
+        from bot_template_targets import filter_matches_outside_inventory, playspace_search_roi
+
+        search_roi = playspace_search_roi(bot_eyes)
+    detailed = bot_eyes.locate_image_detailed(
+        filename=target,
+        inv=inv,
+        template_path=template_path,
+        search_roi=search_roi,
+    )
+    matches = list(detailed.matches) if detailed.found else []
+    if not inv:
+        from bot_template_targets import filter_matches_outside_inventory
+
+        matches, _ = filter_matches_outside_inventory(bot_eyes, matches)
+    if not matches:
+        raise ValueError("template_not_found:%s" % target)
+    best = max(matches, key=lambda m: m.score)
+    from bot_inventory_actions import focus_runelite
+
+    focus_runelite()
+    time.sleep(0.2)
+    bot_arms.click_at(best.screen_xy)
 
 
 def click_on_color(client, bot_arms, bot_eyes, color, shade=20, range=20, use_target=False, c_target=(0, 0), refresh=True):

@@ -358,6 +358,22 @@ def inventory_slot_screen_xy(
     return int(client_rect[0]) + x + w // 2, int(client_rect[1]) + y + h // 2
 
 
+def inventory_slot_client_center(
+    inventory_xywh: Sequence[int],
+    row: int,
+    col: int,
+    *,
+    inset_px: Optional[int] = None,
+) -> Optional[Tuple[int, int]]:
+    """Center of slot ``(row, col)`` in client-local pixels (same frame as ``curr_client``)."""
+    inset = inventory_cell_inset_px(inventory_xywh) if inset_px is None else max(0, int(inset_px))
+    cell = inventory_grid_cell_xywh(tuple(inventory_xywh), row, col, inset)
+    if cell is None:
+        return None
+    x, y, w, h = cell
+    return x + w // 2, y + h // 2
+
+
 def inventory_cell_inset_px(inventory_xywh: Sequence[int]) -> int:
     """Sample inset inside each tile — auto from tile size unless ``EXODIA_INV_CELL_INSET`` set."""
     raw = os.environ.get("EXODIA_INV_CELL_INSET", "").strip()
@@ -484,6 +500,8 @@ def _load_template_gray_and_mask(path):
 
     Uses PNG alpha when present; otherwise no mask (legacy grayscale load).
     """
+    if not path or not os.path.isfile(path):
+        return None, None
     raw = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     if raw is None or raw.size == 0:
         return None, None
@@ -1170,10 +1188,23 @@ class BotEyes():
             return LocateImageResult(result_name, False, "exception", [])
 
     # search_roi: optional [x, y, w, h] within client or inventory image to limit matchTemplate cost
-    def locate_image(self, inv=False, filename="", threshold=0.8, name="Screenshot", search_roi=None):
+    def locate_image(
+        self,
+        inv=False,
+        filename="",
+        threshold=0.8,
+        name="Screenshot",
+        search_roi=None,
+        template_path=None,
+    ):
         """Return list of ``[gx, gy]`` match centers in screen coordinates (may be empty)."""
         detailed = self.locate_image_detailed(
-            inv=inv, filename=filename, threshold=threshold, name=name, search_roi=search_roi
+            inv=inv,
+            filename=filename,
+            threshold=threshold,
+            name=name,
+            search_roi=search_roi,
+            template_path=template_path,
         )
         return [m.screen_xy[:] for m in detailed.matches]
 

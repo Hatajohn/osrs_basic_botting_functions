@@ -122,6 +122,10 @@
   min-height: 0;
 }
 
+.panel__image-wrap--with-overlay {
+  position: relative;
+}
+
 .panel__debug-image {
   max-width: 100%;
   max-height: 100%;
@@ -143,6 +147,10 @@
 
 .panel__footer--stats span {
   white-space: nowrap;
+}
+
+.panel__footer--click-preview {
+  color: #86efac;
 }
 
 .panel__error {

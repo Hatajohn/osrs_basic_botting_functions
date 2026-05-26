@@ -1,4 +1,6 @@
-import type { DebugFrameMode, DebugFrameResult } from '../../shared/ipc';
+import { useRef } from 'react';
+import { ActionClickOverlay } from '../components/ActionClickOverlay';
+import type { ActionClickPreview, DebugFrameMode, DebugFrameResult } from '../../shared/ipc';
 import './Panel.css';
 
 type RuneLiteViewPanelProps = {
@@ -12,6 +14,7 @@ type RuneLiteViewPanelProps = {
   previewLive?: boolean;
   onTogglePreviewLive?: (live: boolean) => void;
   botRunning?: boolean;
+  actionClickPreview?: ActionClickPreview | null;
 };
 
 function formatMode(mode: DebugFrameMode): string {
@@ -43,7 +46,9 @@ export function RuneLiteViewPanel({
   previewLive = false,
   onTogglePreviewLive,
   botRunning = false,
+  actionClickPreview = null,
 }: RuneLiteViewPanelProps) {
+  const imageRef = useRef<HTMLImageElement>(null);
   const hasImage = Boolean(imageDataUrl);
   const error = result && !result.ok ? result.error : undefined;
   const hint = result && !result.ok ? result.hint : undefined;
@@ -117,13 +122,21 @@ export function RuneLiteViewPanel({
           </div>
         )}
         {hasImage && (
-          <div className="panel__image-wrap">
+          <div className="panel__image-wrap panel__image-wrap--with-overlay">
             <img
+              ref={imageRef}
               className="panel__debug-image"
               src={imageDataUrl}
               alt={previewLive && botRunning ? 'RuneLite live preview' : 'RuneLite debug frame'}
               draggable={false}
             />
+            {!previewLive && (
+              <ActionClickOverlay
+                key={imageDataUrl ?? 'frame'}
+                preview={actionClickPreview}
+                imageRef={imageRef}
+              />
+            )}
           </div>
         )}
       </div>
@@ -133,6 +146,26 @@ export function RuneLiteViewPanel({
         {!previewLive && result?.ok && result.unknown != null && <span>?: {result.unknown}</span>}
         {!previewLive && result?.ok && result.tmpCount != null && <span>tmp: {result.tmpCount}</span>}
         <span>Last refresh: {formatTime(result?.refreshedAt)}</span>
+        {actionClickPreview && !previewLive && (
+          <span className="panel__footer--click-preview">
+            {actionClickPreview.previewMode === 'use_on' &&
+            actionClickPreview.fromClientXY &&
+            actionClickPreview.toClientXY ? (
+              <>
+                Use-on: {actionClickPreview.fromClientXY.join(',')} →{' '}
+                {actionClickPreview.toClientXY.join(',')}
+                {actionClickPreview.slot ? ` · ${actionClickPreview.slot}` : ''}
+              </>
+            ) : actionClickPreview.clickClientXY ? (
+              <>
+                Click preview: {actionClickPreview.clickClientXY.join(',')}
+                {actionClickPreview.score != null
+                  ? ` · ${actionClickPreview.score.toFixed(2)}`
+                  : ''}
+              </>
+            ) : null}
+          </span>
+        )}
       </footer>
     </section>
   );

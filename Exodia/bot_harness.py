@@ -293,6 +293,7 @@ class ExodiaHarness:
                 Actions.click_on_image(
                     self.client, self.arms, self.eyes, cmd.template,
                     refresh=cmd.refresh,
+                    inv=cmd.inv,
                 )
             elif isinstance(cmd, CmdClickColor):
                 Actions.click_on_color(

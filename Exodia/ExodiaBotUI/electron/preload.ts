@@ -47,6 +47,11 @@ const api: ExodiaApi = {
     return () => ipcRenderer.removeListener(IPC.BOT_STATUS_UPDATE, listener);
   },
   fetchGamePreview: () => ipcRenderer.invoke(IPC.FETCH_GAME_PREVIEW),
+  listActionBlocks: () => ipcRenderer.invoke(IPC.LIST_ACTION_BLOCKS),
+  runSingleAction: (request) => ipcRenderer.invoke(IPC.RUN_SINGLE_ACTION, request),
+  selectTemplateFile: () => ipcRenderer.invoke(IPC.SELECT_TEMPLATE_FILE),
+  listItemCatalog: () => ipcRenderer.invoke(IPC.LIST_ITEM_CATALOG),
+  resolveTemplateItem: (imagePath) => ipcRenderer.invoke(IPC.RESOLVE_TEMPLATE_ITEM, imagePath),
 };
 
 contextBridge.exposeInMainWorld('exodia', api);

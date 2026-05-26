@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "click_template_inv",
+      "category": "Input",
+      "label": "Click template in inventory",
+      "sideEffects": "input",
+      "params": [
+        { "name": "template", "type": "string", "required": true, "label": "Template" }
+      ]
+    },
+    {
+      "id": "click_template_world",
+      "category": "Input",
+      "label": "Click template outside inventory",
+      "sideEffects": "input",
+      "params": [
+        { "name": "template", "type": "string", "required": true, "label": "Template" }
+      ]
+    },
+    {
+      "id": "use_item_id_on_item_id",
+      "category": "Input",
+      "label": "Use item ID on item ID",
+      "sideEffects": "input",
+      "params": [
+        { "name": "sourceId", "type": "string", "required": true, "label": "Source item ID" },
+        { "name": "destId", "type": "string", "required": true, "label": "Dest item ID" }
+      ]
+    }
+  ]
+}
