@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import cv2
 import numpy as np
 
+from bot_env import inventory_identify_threshold
 from bot_inventory_count import (
     _read_stack_quantity,
     _normalized_icon_match_score,
@@ -28,6 +29,8 @@ from bot_inventory_count import (
     _stack_band_rect,
     _stack_digit_roi,
     _strip_runelite_tags_bgr,
+    bgra_to_match_bgr,
+    strip_inventory_plate_background,
 )
 
 _EXODIA_DIR = Path(__file__).resolve().parent
@@ -496,26 +499,35 @@ class TemplateEntry:
     template_bgr: Optional[np.ndarray]
     signals: MatchSignals
     aspect: float
+    template_mask: Optional[np.ndarray] = None
+
+
+def _finite_match_score(value: float) -> float:
+    v = float(value)
+    return v if np.isfinite(v) else 0.0
 
 
 def _cross_template_score(
     query_bgr: np.ndarray,
     template_gray: np.ndarray,
     template_bgr: Optional[np.ndarray] = None,
+    template_mask: Optional[np.ndarray] = None,
 ) -> float:
     """
     Bidirectional slot template score — tolerates icon slide within the tile.
 
     Uses the better of sliding full-tile match and icon-centered compare.
     """
-    slide_fwd = _slot_gray_slide_score(query_bgr, template_gray)
+    slide_fwd = _finite_match_score(
+        _slot_gray_slide_score(query_bgr, template_gray, template_mask)
+    )
     if template_bgr is None or template_bgr.size == 0:
         return slide_fwd
-    slide_rev = _slot_gray_slide_score(
-        template_bgr, _slot_gray_for_match(query_bgr)
+    slide_rev = _finite_match_score(
+        _slot_gray_slide_score(template_bgr, _slot_gray_for_match(query_bgr))
     )
     slide = min(slide_fwd, slide_rev)
-    norm = _normalized_icon_match_score(query_bgr, template_bgr)
+    norm = _finite_match_score(_normalized_icon_match_score(query_bgr, template_bgr))
     return max(slide, norm)
 
 
@@ -561,9 +573,7 @@ class TemplateCatalog:
         strict_gates: bool = False,
     ) -> MatchVerdict:
         """Question: Which named template best matches this slot crop?"""
-        thr = threshold if threshold is not None else _env_float(
-            "EXODIA_INV_ITEM_MATCH_THRESHOLD", 0.40
-        )
+        thr = threshold if threshold is not None else inventory_identify_threshold()
         sig_q = extract_signals(query_bgr)
         candidates: List[CandidateResult] = []
         skipped = 0
@@ -579,7 +589,10 @@ class TemplateCatalog:
             if not gate_passed:
                 skipped += 1
             score = _cross_template_score(
-                query_bgr, entry.template_gray, entry.template_bgr
+                query_bgr,
+                entry.template_gray,
+                entry.template_bgr,
+                entry.template_mask,
             )
             candidates.append(
                 CandidateResult(
@@ -618,16 +631,45 @@ class TemplateCatalog:
         )
 
 
-def _load_png_entry(path: Path) -> Optional[Tuple[str, np.ndarray, np.ndarray, MatchSignals]]:
-    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-    if bgr is None or bgr.size == 0:
+def _load_png_entry(
+    path: Path,
+) -> Optional[Tuple[str, np.ndarray, np.ndarray, Optional[np.ndarray], MatchSignals]]:
+    raw = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if raw is None or raw.size == 0:
         return None
     stem = path.stem.lower()
-    signal_bgr = bgr if is_temp_item_id(stem) else _embed_icon_in_slot_canvas(bgr)
+    mask: Optional[np.ndarray] = None
+    if raw.ndim == 2:
+        bgr = cv2.cvtColor(raw, cv2.COLOR_GRAY2BGR)
+        match_bgr = _strip_runelite_tags_bgr(bgr)
+    elif raw.shape[2] == 4:
+        alpha = raw[:, :, 3]
+        bgr = raw[:, :, :3]
+        mask = np.where(alpha > 0, 255, 0).astype(np.uint8)
+        if cv2.countNonZero(mask) < 16:
+            mask = None
+        match_bgr = bgra_to_match_bgr(raw)
+    else:
+        bgr = raw
+        match_bgr = _strip_runelite_tags_bgr(bgr)
+
+    signal_bgr = (
+        match_bgr if is_temp_item_id(stem) else _embed_icon_in_slot_canvas(match_bgr)
+    )
     sig = extract_signals(signal_bgr)
-    clean_bgr = _strip_runelite_tags_bgr(bgr)
-    gray = _slot_gray_for_match(clean_bgr)
-    return stem, bgr, gray, sig
+    gray = _slot_gray_for_match(signal_bgr)
+    tpl_mask: Optional[np.ndarray] = None
+    if mask is not None:
+        if is_temp_item_id(stem):
+            if mask.shape[:2] == gray.shape[:2]:
+                tpl_mask = mask
+        else:
+            mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+            embedded_mask = _embed_icon_in_slot_canvas(mask_bgr)
+            tpl_mask = embedded_mask[:, :, 0]
+            if cv2.countNonZero(tpl_mask) < 16:
+                tpl_mask = None
+    return stem, signal_bgr, gray, tpl_mask, sig
 
 
 def load_named_catalog(items_dir: Optional[Path] = None) -> TemplateCatalog:
@@ -643,14 +685,15 @@ def load_named_catalog(items_dir: Optional[Path] = None) -> TemplateCatalog:
         loaded = _load_png_entry(path)
         if loaded is None:
             continue
-        _, bgr, gray, sig = loaded
+        _, match_bgr, gray, mask, sig = loaded
         entries.append(
             TemplateEntry(
                 name=stem,
                 template_gray=gray,
-                template_bgr=bgr,
+                template_bgr=match_bgr,
                 signals=sig,
                 aspect=sig.aspect,
+                template_mask=mask,
             )
         )
     return TemplateCatalog(entries)
@@ -669,6 +712,7 @@ class SeenItemEntry:
     first_seen_ts: float
     sightings: int = 1
     name: Optional[str] = None
+    template_mask: Optional[np.ndarray] = None
 
     def display_label(self) -> str:
         return seen_item_display_label(self.temp_id, self.name)
@@ -826,7 +870,10 @@ class SeenItemRegistry:
                 entry.signals, sig_q, entry_aspect=entry.aspect
             )
             score = _cross_template_score(
-                query_bgr, entry.template_gray, entry.template_bgr
+                query_bgr,
+                entry.template_gray,
+                entry.template_bgr,
+                entry.template_mask,
             )
             if not rejections and score >= thr:
                 return MatchVerdict(
@@ -846,6 +893,7 @@ class SeenItemRegistry:
                 template_bgr=e.template_bgr,
                 signals=e.signals,
                 aspect=e.aspect,
+                template_mask=e.template_mask,
             )
             for e in self._entries.values()
         ]
@@ -896,18 +944,27 @@ class SeenItemRegistry:
         self.images_dir.mkdir(parents=True, exist_ok=True)
         self.fingerprints_dir.mkdir(parents=True, exist_ok=True)
         temp_id = allocate_temp_id(self._existing_stems())
-        gray = _slot_gray_for_match(query_bgr)
+        cleaned = _strip_runelite_tags_bgr(query_bgr)
+        bgra = strip_inventory_plate_background(cleaned)
+        match_bgr = bgra_to_match_bgr(bgra)
+        mask: Optional[np.ndarray] = None
+        if bgra.ndim == 3 and bgra.shape[2] == 4:
+            mask = np.where(bgra[:, :, 3] > 0, 255, 0).astype(np.uint8)
+            if cv2.countNonZero(mask) < 16:
+                mask = None
+        gray = _slot_gray_for_match(bgra[:, :, :3])
         png_path = self._png_path(temp_id)
-        cv2.imwrite(str(png_path), query_bgr)
+        cv2.imwrite(str(png_path), bgra)
         now = time.time()
         entry = SeenItemEntry(
             temp_id=temp_id,
             template_gray=gray,
-            template_bgr=query_bgr.copy(),
+            template_bgr=match_bgr,
             signals=sig,
             aspect=sig.aspect,
             first_seen_ts=now,
             sightings=1,
+            template_mask=mask,
         )
         self._entries[temp_id] = entry
         extra: Dict[str, Any] = {}
@@ -927,9 +984,10 @@ class SeenItemRegistry:
             stem = path.stem.lower()
             if not is_temp_item_id(stem) or stem in reg._entries:
                 return
-            bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-            if bgr is None or bgr.size == 0:
+            loaded = _load_png_entry(path)
+            if loaded is None:
                 return
+            _, match_bgr, gray, mask, sig = loaded
             meta_path = reg._resolve_json_path(stem)
             first_ts = path.stat().st_mtime
             sightings = 1
@@ -944,16 +1002,16 @@ class SeenItemRegistry:
                         display_name = str(raw_name).strip()
                 except (json.JSONDecodeError, TypeError, ValueError):
                     pass
-            sig = extract_signals(bgr)
             reg._entries[stem] = SeenItemEntry(
                 temp_id=stem,
-                template_gray=_slot_gray_for_match(bgr),
-                template_bgr=bgr,
+                template_gray=gray,
+                template_bgr=match_bgr,
                 signals=sig,
                 aspect=sig.aspect,
                 first_seen_ts=first_ts,
                 sightings=sightings,
                 name=display_name,
+                template_mask=mask,
             )
             reg._relocate_legacy_temp_files(stem)
 
@@ -1079,10 +1137,10 @@ def audit_seen_duplicates(
             loaded = _load_png_entry(path)
             if loaded is None:
                 continue
-            stem, bgr, gray, sig = loaded
+            stem, match_bgr, gray, _mask, sig = loaded
             if is_temp_item_id(stem):
                 continue
-            named[stem] = (bgr, gray, sig)
+            named[stem] = (match_bgr, gray, sig)
 
     temp_sources: List[Path] = []
     if images_dir.is_dir():
@@ -1095,11 +1153,11 @@ def audit_seen_duplicates(
         loaded = _load_png_entry(path)
         if loaded is None:
             continue
-        stem, bgr, gray, sig = loaded
+        stem, match_bgr, gray, _mask, sig = loaded
         if not is_temp_item_id(stem) or stem in seen_stems:
             continue
         seen_stems.add(stem)
-        temp[stem] = (bgr, gray, sig)
+        temp[stem] = (match_bgr, gray, sig)
         json_path = fingerprints_dir / (stem + ".json")
         legacy_json = root / (stem + ".json")
         if not json_path.is_file() and not legacy_json.is_file():

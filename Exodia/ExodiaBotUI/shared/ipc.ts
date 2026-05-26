@@ -36,6 +36,7 @@ export const IPC = {
   SELECT_TEMPLATE_FILE: 'files:selectTemplateFile',
   LIST_ITEM_CATALOG: 'items:listCatalog',
   RESOLVE_TEMPLATE_ITEM: 'items:resolveTemplate',
+  SAVE_TEMPLATE: 'templates:save',
 } as const;
 
 export type ItemCatalogEntry = {
@@ -53,6 +54,30 @@ export type ItemCatalogListResult = {
   itemsDir?: string;
   named: ItemCatalogEntry[];
   fingerprints: ItemCatalogEntry[];
+};
+
+export type SaveTemplateRequest = {
+  mode: 'inventory' | 'world' | 'import';
+  name: string;
+  dest?: 'items' | 'images';
+  slot?: [number, number];
+  rect?: [number, number, number, number];
+  sourcePath?: string;
+  overwrite?: boolean;
+};
+
+export type SaveTemplateResult = {
+  ok: boolean;
+  error?: string;
+  hint?: string;
+  kind?: 'inventory' | 'world';
+  dest?: 'items' | 'images';
+  itemId?: string;
+  displayName?: string;
+  templateFile?: string;
+  templatePath?: string;
+  slot?: [number, number];
+  rect?: [number, number, number, number];
 };
 
 export type ResolveTemplateItemResult = {
@@ -91,11 +116,18 @@ export type RunSingleActionRequest = {
   dryRun?: boolean;
 };
 
+export type MatchCandidatePreview = {
+  clickClientXY: [number, number];
+  score?: number;
+  selected?: boolean;
+  searchMode?: 'inventory' | 'playspace';
+};
+
 /** Click / use-on target for RuneLite view overlay (client-local coords on captured frame). */
 export type ActionClickPreview = {
   blockId: string;
   label?: string;
-  previewMode?: 'click' | 'use_on';
+  previewMode?: 'click' | 'use_on' | 'find';
   searchMode?: 'inventory' | 'playspace';
   /** Single-click template actions. */
   screenXY?: [number, number];
@@ -111,6 +143,9 @@ export type ActionClickPreview = {
   frameHeight: number;
   score?: number;
   slot?: string;
+  /** Other template peaks (non-selected show as dim markers on overlay). */
+  matchCandidates?: MatchCandidatePreview[];
+  matchCount?: number;
 };
 
 export type RunSingleActionResult = {
@@ -262,6 +297,7 @@ export type ExodiaApi = {
   selectTemplateFile: () => Promise<SelectTemplateFileResult>;
   listItemCatalog: () => Promise<ItemCatalogListResult>;
   resolveTemplateItem: (imagePath: string) => Promise<ResolveTemplateItemResult>;
+  saveTemplate: (request: SaveTemplateRequest) => Promise<SaveTemplateResult>;
 };
 
 export type {

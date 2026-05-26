@@ -77,7 +77,10 @@ MAX_CRACK_ACTIONS = int(os.environ.get("EXODIA_MAX_CRACK_ACTIONS", "32"))
 POST_CLICK_FISH_WAIT_S = float(os.environ.get("EXODIA_POST_CLICK_FISH_WAIT_S", "7"))
 POST_CLICK_FISH_POLL_S = float(os.environ.get("EXODIA_POST_CLICK_FISH_POLL_S", "0.75"))
 SPOT_TEMPLATE_THRESHOLD = float(os.environ.get("EXODIA_SPOT_THRESHOLD", "0.45"))
-INV_TEMPLATE_THRESHOLD = float(os.environ.get("EXODIA_INV_TEMPLATE_THRESHOLD", "0.35"))
+def _inv_template_threshold() -> float:
+    from bot_shape_match import inventory_template_threshold
+
+    return inventory_template_threshold()
 
 
 def _noop_event(_event: str, **_fields: object) -> None:
@@ -517,7 +520,7 @@ class InfernalEelMachine:
                 ctx.bot_a,
                 HAMMER_INV_TEMPLATE,
                 EEL_INV_TEMPLATE,
-                threshold=INV_TEMPLATE_THRESHOLD,
+                threshold=_inv_template_threshold(),
             )
         if not result.ok:
             print(

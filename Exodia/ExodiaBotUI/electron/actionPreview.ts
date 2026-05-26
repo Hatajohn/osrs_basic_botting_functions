@@ -1,4 +1,4 @@
-import type { ActionClickPreview, RunSingleActionResult } from '../shared/ipc';
+import type { ActionClickPreview, MatchCandidatePreview, RunSingleActionResult } from '../shared/ipc';
 
 function numPair(value: unknown): [number, number] | undefined {
   if (!Array.isArray(value) || value.length < 2) return undefined;
@@ -16,6 +16,24 @@ function frameSize(inner: Record<string, unknown>): { w: number; h: number } | u
   if (!Number.isFinite(frameWidth) || !Number.isFinite(frameHeight)) return undefined;
   if (frameWidth <= 0 || frameHeight <= 0) return undefined;
   return { w: Math.round(frameWidth), h: Math.round(frameHeight) };
+}
+
+function parseMatchCandidates(inner: Record<string, unknown>): MatchCandidatePreview[] | undefined {
+  const raw = inner.match_candidates;
+  if (!Array.isArray(raw) || raw.length < 2) return undefined;
+  const out: MatchCandidatePreview[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rec = entry as Record<string, unknown>;
+    const clickClientXY = numPair(rec.click_client_xy);
+    if (!clickClientXY) continue;
+    out.push({
+      clickClientXY,
+      score: typeof rec.score === 'number' ? rec.score : undefined,
+      selected: rec.selected === true,
+    });
+  }
+  return out.length >= 2 ? out : undefined;
 }
 
 function slotLabel(inner: Record<string, unknown>): string | undefined {
@@ -78,6 +96,13 @@ export function clickPreviewFromActionResult(
     frameHeight: dims.h,
     score: typeof inner.score === 'number' ? inner.score : undefined,
     slot: typeof inner.slot === 'string' ? inner.slot : undefined,
+    matchCandidates: parseMatchCandidates(inner),
+    matchCount:
+      typeof inner.match_count === 'number'
+        ? inner.match_count
+        : typeof inner.matches === 'number'
+          ? inner.matches
+          : undefined,
   };
 }
 

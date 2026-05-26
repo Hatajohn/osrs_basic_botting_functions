@@ -21,15 +21,23 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
-from bot_eyes import INV_COLS, INV_ROWS, inventory_grid_cell_xywh
-from bot_inventory_count import _slot_gray_for_match, _slot_template_score, _strip_runelite_tags_bgr
+from bot_env import env_int_any, inventory_identify_threshold
+from bot_eyes import INV_COLS, INV_ROWS, TemplateMatch, inventory_grid_cell_xywh
+from bot_inventory_count import (
+    _slot_gray_for_match,
+    _slot_template_score,
+    _strip_runelite_tags_bgr,
+    strip_inventory_plate_background,
+)
 from bot_inventory_detect import draw_inventory_occupancy_overlay
 from bot_match_index import (
     MatchSignals,
     MatchVerdict,
     TemplateCatalog,
     SeenItemRegistry,
+    _cross_template_score,
     _hist_l1,
+    _load_png_entry,
     allocate_temp_id,
     extract_signals,
     is_unknown_label,
@@ -463,7 +471,7 @@ def match_cell_to_item(
     label, score, _, _ = resolve_cell_item(
         cell_bgr, cat, seen_registry, threshold=threshold
     )
-    thr = threshold if threshold is not None else _env_float("EXODIA_INV_ITEM_MATCH_THRESHOLD", 0.40)
+    thr = threshold if threshold is not None else inventory_identify_threshold()
     if label and not is_unknown_label(label) and not label.startswith("unknown:"):
         if score >= thr:
             return label, score
@@ -662,13 +670,7 @@ def inventory_slots_same_item(
 
 def _item_match_inset_px(inventory_rect: Sequence[int]) -> int:
     """Inset for slot crops used in template match (0 = full tile; allows sub-pixel slide)."""
-    raw = os.environ.get("EXODIA_INV_ITEM_MATCH_INSET", "0").strip()
-    if raw:
-        try:
-            return max(0, int(raw))
-        except ValueError:
-            pass
-    return 0
+    return env_int_any(0, "EXO_INV_INSET", "EXODIA_INV_ITEM_MATCH_INSET")
 
 
 def identify_inventory_slot_items(
@@ -880,8 +882,9 @@ def save_named_item_template(
     path = root / ("%s.png" % stem)
     if path.is_file() and not overwrite:
         raise FileExistsError(str(path))
-    out_bgr = _strip_runelite_tags_bgr(crop_bgr)
-    if not cv2.imwrite(str(path), out_bgr):
+    cleaned = _strip_runelite_tags_bgr(crop_bgr)
+    out_bgra = strip_inventory_plate_background(cleaned)
+    if not cv2.imwrite(str(path), out_bgra):
         raise RuntimeError("failed to write %s" % path)
     return path
 
@@ -902,6 +905,109 @@ def bucket_slots_for_label(
             if slot_items[row][col] == label:
                 out.append((row, col))
     return out
+
+
+def resolve_inventory_template_path(
+    template: str,
+    template_path: Optional[str] = None,
+    *,
+    items_dir: Optional[Path] = None,
+) -> Optional[str]:
+    """Resolve ``items/<stem>.png`` (then ``images/``) for inventory template actions."""
+    if template_path:
+        p = Path(template_path).expanduser()
+        if p.is_file():
+            return str(p.resolve())
+    name = (template or "").strip()
+    if not name:
+        return None
+    stem = name[:-4] if name.lower().endswith(".png") else name
+    root = items_dir if items_dir is not None else items_directory()
+    exodia = Path(__file__).resolve().parent
+    for candidate in (
+        root / name,
+        root / ("%s.png" % stem),
+        exodia / "items" / name,
+        exodia / "items" / ("%s.png" % stem),
+        exodia / "images" / name,
+        exodia / "images" / ("%s.png" % stem),
+    ):
+        if candidate.is_file():
+            return str(candidate.resolve())
+    return None
+
+
+def locate_named_template_in_inventory(
+    client_bgr: np.ndarray,
+    inventory_rect: Sequence[int],
+    client_rect: Sequence[int],
+    template: str,
+    *,
+    template_path: Optional[str] = None,
+    threshold: Optional[float] = None,
+) -> Tuple[List[TemplateMatch], Optional[str]]:
+    """
+    Find inventory slots matching a named ``items/*.png`` template.
+
+    Uses the same per-slot cross-template scoring as ``identify_inventory_slot_items``,
+    not whole-panel ``matchTemplate`` (icon-only PNGs do not match raw panel crops).
+    """
+    if client_bgr is None or client_bgr.size == 0 or len(inventory_rect) != 4:
+        return [], "empty_image"
+    if len(client_rect) != 4:
+        return [], "missing_client_rect"
+
+    path = resolve_inventory_template_path(template, template_path)
+    if not path:
+        return [], "missing_template"
+
+    stem = Path(path).stem.lower()
+    from bot_shape_match import inventory_template_threshold
+
+    cat = load_named_catalog()
+    entry = cat._by_name.get(stem)
+    if entry is None:
+        loaded = _load_png_entry(Path(path))
+        if loaded is None:
+            return [], "missing_template"
+        _, match_bgr, gray, mask, _sig = loaded
+    else:
+        match_bgr = entry.template_bgr
+        gray = entry.template_gray
+        mask = entry.template_mask
+
+    thr = threshold if threshold is not None else inventory_template_threshold()
+
+    rect = tuple(int(v) for v in inventory_rect[:4])
+    cr = tuple(int(v) for v in client_rect[:4])
+    match_inset = _item_match_inset_px(rect)
+    matches: List[TemplateMatch] = []
+
+    for row in range(INV_ROWS):
+        for col in range(INV_COLS):
+            cell = inventory_grid_cell_xywh(rect, row, col, match_inset)
+            if cell is None:
+                continue
+            x, y, w, h = cell
+            crop = client_bgr[y : y + h, x : x + w]
+            if crop is None or crop.size == 0:
+                continue
+            score = _cross_template_score(crop, gray, match_bgr, mask)
+            if not np.isfinite(score) or score < thr:
+                continue
+            cx = x + w // 2
+            cy = y + h // 2
+            matches.append(
+                TemplateMatch(
+                    screen_xy=[cx + cr[0], cy + cr[1]],
+                    client_xy=[cx, cy],
+                    score=float(score),
+                )
+            )
+
+    if not matches:
+        return [], "template_not_found"
+    return matches, None
 
 
 def slot_at_client_point(

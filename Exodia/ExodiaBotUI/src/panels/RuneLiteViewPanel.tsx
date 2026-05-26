@@ -148,9 +148,16 @@ export function RuneLiteViewPanel({
         <span>Last refresh: {formatTime(result?.refreshedAt)}</span>
         {actionClickPreview && !previewLive && (
           <span className="panel__footer--click-preview">
-            {actionClickPreview.previewMode === 'use_on' &&
-            actionClickPreview.fromClientXY &&
-            actionClickPreview.toClientXY ? (
+            {actionClickPreview.previewMode === 'find' ? (
+              <>
+                Find: {actionClickPreview.matchCount ?? 0} hit
+                {actionClickPreview.matchCandidates
+                  ? ` (${actionClickPreview.matchCandidates.filter((c) => c.searchMode === 'playspace').length} world · ${actionClickPreview.matchCandidates.filter((c) => c.searchMode === 'inventory').length} inv)`
+                  : ''}
+              </>
+            ) : actionClickPreview.previewMode === 'use_on' &&
+              actionClickPreview.fromClientXY &&
+              actionClickPreview.toClientXY ? (
               <>
                 Use-on: {actionClickPreview.fromClientXY.join(',')} →{' '}
                 {actionClickPreview.toClientXY.join(',')}
@@ -158,9 +165,12 @@ export function RuneLiteViewPanel({
               </>
             ) : actionClickPreview.clickClientXY ? (
               <>
-                Click preview: {actionClickPreview.clickClientXY.join(',')}
+                Click: {actionClickPreview.clickClientXY.join(',')}
                 {actionClickPreview.score != null
                   ? ` · ${actionClickPreview.score.toFixed(2)}`
+                  : ''}
+                {actionClickPreview.matchCount != null && actionClickPreview.matchCount > 1
+                  ? ` · ${actionClickPreview.matchCount} matches (amber = other)`
                   : ''}
               </>
             ) : null}

@@ -107,7 +107,10 @@ EEL_INV = "osrs_sacredEel.png"
 KNIFE_INV = "osrs_knife.png"
 FULL_EEL_COUNT = 22
 INV_SLOT_COUNT = Eyes.INV_SLOTS  # 4 x 7 = 28
-INV_TEMPLATE_THRESHOLD = float(os.environ.get("EXODIA_INV_TEMPLATE_THRESHOLD", "0.35"))
+def _inv_template_threshold() -> float:
+    from bot_shape_match import inventory_template_threshold
+
+    return inventory_template_threshold()
 SPOT_TEMPLATE_THRESHOLD = float(os.environ.get("EXODIA_SPOT_THRESHOLD", "0.45"))
 MAX_SPOT_PAN_ATTEMPTS = int(os.environ.get("EXODIA_SPOT_PAN_ATTEMPTS", "8"))
 MAX_SPOT_WALK_ATTEMPTS = int(os.environ.get("EXODIA_SPOT_WALK_ATTEMPTS", "4"))
@@ -501,7 +504,12 @@ def _print_startup_health(bot_e) -> None:
     code = bot_e.get_action_text(refresh=False)
     hint = " — will seek spot" if code != 0 else ""
     print("Health: action line →", action_code_label(code) + hint)
-    print("Health: spot threshold", SPOT_TEMPLATE_THRESHOLD, "| inv template", INV_TEMPLATE_THRESHOLD)
+    print(
+        "Health: spot threshold",
+        SPOT_TEMPLATE_THRESHOLD,
+        "| inv template",
+        _inv_template_threshold(),
+    )
     print("Health: eel item", EEL_ITEM_NAME, "| knife item", KNIFE_ITEM_NAME)
     for stem in (EEL_ITEM_NAME, KNIFE_ITEM_NAME):
         p = Path("items") / ("%s.png" % stem)

@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence, TYPE_CHECKING, Tuple
+from typing import Dict, List, Optional, Sequence, TYPE_CHECKING, Tuple
 
 import cv2
 import numpy as np
@@ -48,6 +48,7 @@ __all__ = [
     "world_cyan_first_enabled",
     "world_match_threshold",
     "world_template_names",
+    "resolve_world_template_file",
 ]
 
 
@@ -66,6 +67,41 @@ def capture_template_path(name: str) -> Path:
     if stem.lower().endswith(".png"):
         stem = stem[:-4]
     return captures_dir() / ("%s.png" % stem)
+
+
+def resolve_world_template_file(
+    template: str,
+    template_path: Optional[str] = None,
+) -> Tuple[str, Optional[str]]:
+    """Resolve template stem and readable PNG path (``images/`` then ``captures/``)."""
+    stem = template.strip()
+    if stem.lower().endswith(".png"):
+        stem = stem[:-4]
+    if template_path:
+        p = Path(template_path).expanduser()
+        if p.is_file():
+            return stem, str(p.resolve())
+    for candidate in (
+        _EXODIA_DIR / "images" / template,
+        _EXODIA_DIR / "images" / ("%s.png" % stem),
+        capture_template_path(stem),
+        captures_dir() / template,
+    ):
+        if candidate.is_file():
+            return stem, str(candidate.resolve())
+    return stem, None
+
+
+def _template_file_for_name(
+    name: str,
+    template_paths: Optional[Dict[str, str]] = None,
+) -> Optional[Path]:
+    if template_paths and name in template_paths:
+        p = Path(template_paths[name]).expanduser()
+        if p.is_file():
+            return p
+    _, path = resolve_world_template_file("%s.png" % name)
+    return Path(path) if path else None
 
 
 def _env_float(key: str, default: float) -> float:
@@ -252,6 +288,7 @@ def _locate_via_cyan_markers(
     inventory_rect: Optional[Sequence[int]],
     match_threshold: float,
     bot_e: "Eyes.BotEyes",
+    template_paths: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[WorldObjectHit], List[CyanMarkerRegion], int]:
     """Match each template inside the icon window above every cyan tile marker."""
     regions = locate_cyan_marker_regions(client_bgr, search_roi)
@@ -269,8 +306,8 @@ def _locate_via_cyan_markers(
 
         matched_region = False
         for name in template_names:
-            tpl_path = capture_template_path(name)
-            if not tpl_path.is_file():
+            tpl_path = _template_file_for_name(name, template_paths)
+            if tpl_path is None:
                 continue
             tw, th = _template_size(tpl_path)
             if tw <= 0 or th <= 0:
@@ -322,16 +359,17 @@ def _locate_via_playspace_scan(
     inventory_rect: Optional[Sequence[int]],
     match_threshold: float,
     bot_e: "Eyes.BotEyes",
+    template_paths: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[WorldObjectHit], int]:
     raw_hits: List[WorldObjectHit] = []
     inventory_filtered = 0
     for name in template_names:
-        tpl_path = capture_template_path(name)
-        if not tpl_path.is_file():
+        tpl_path = _template_file_for_name(name, template_paths)
+        if tpl_path is None:
             continue
         detailed = bot_e.locate_image_detailed(
             inv=False,
-            filename="%s.png" % name,
+            filename=tpl_path.name,
             threshold=match_threshold,
             name="World object",
             search_roi=search_roi,
@@ -361,6 +399,7 @@ def locate_world_objects(
     threshold: Optional[float] = None,
     dedupe_radius_px: Optional[int] = None,
     eyes: Optional["Eyes.BotEyes"] = None,
+    template_paths: Optional[Dict[str, str]] = None,
 ) -> WorldObjectLocateResult:
     """
     Find world objects on a client BGR frame.
@@ -402,6 +441,7 @@ def locate_world_objects(
             inventory_rect=inventory_rect,
             match_threshold=match_threshold,
             bot_e=bot_e,
+            template_paths=template_paths,
         )
 
     if not raw_hits and (
@@ -415,6 +455,7 @@ def locate_world_objects(
             inventory_rect=inventory_rect,
             match_threshold=match_threshold,
             bot_e=bot_e,
+            template_paths=template_paths,
         )
 
     deduped = _spot_candidates_as_hits(

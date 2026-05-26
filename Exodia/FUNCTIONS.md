@@ -572,7 +572,7 @@ Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/functio
 | `EXODIA_INV_PANEL_WIDTH` / `EXODIA_INV_PANEL_RECT` | Manual panel geometry |
 | `EXODIA_INV_GRID_*` | Offsets, tile size, gaps, ref size |
 | `EXODIA_INV_CELL_INSET` | Occupancy crop inset |
-| `EXODIA_INV_ITEM_MATCH_INSET` | Template match inset (default `0`) |
+| `EXO_INV_INSET` | Template match inset (default `0`; legacy `EXODIA_INV_ITEM_MATCH_INSET`) |
 | `EXODIA_INV_CELL_STD_THRESHOLD` / `EXODIA_INV_LAPLACE_MIN_VAR` | Occupancy heuristics |
 | `EXODIA_INV_FRAME_BUCKETS` | Ephemeral `tmp:<id>` groups |
 | `EXODIA_INV_USE_ON_GAP_S` / `EXODIA_INV_CLICK_RAD` / `EXODIA_INV_HOVER_CLEAR_S` | Use-on timing |
@@ -585,8 +585,9 @@ Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/functio
 | `EXODIA_SEEN_ITEMS` | `0` — set `1` for persistent unknown ids |
 | `EXODIA_SEEN_ITEMS_DIR` / `EXODIA_SEEN_FINGERPRINTS_DIR` | Seen subdirs |
 | `EXODIA_MATCH_COLOR_MAX_L1` / `EDGE` / `SIZE` / `DHASH` | Fingerprint gates |
-| `EXODIA_INV_ITEM_MATCH_THRESHOLD` | Named template accept score |
-| `EXODIA_INV_TEMPLATE_THRESHOLD` | Legacy count / diagnose threshold |
+| `EXO_INV_ID_THR` | Named template accept score for identify (legacy `EXODIA_INV_ITEM_MATCH_THRESHOLD`) |
+| `EXO_INV_THR` | Template click/Find threshold (legacy `EXODIA_INV_TEMPLATE_THRESHOLD`) |
+| `EXO_INV_CNT_THR` | Item count / diagnose threshold (legacy `EXODIA_INV_TEMPLATE_THRESHOLD`, default `0.28`) |
 | `EXODIA_BUCKET_*` / `EXODIA_SLOT_SAME_*` | Frame buckets + same-slot compare |
 
 ### Action strip / fishing UI

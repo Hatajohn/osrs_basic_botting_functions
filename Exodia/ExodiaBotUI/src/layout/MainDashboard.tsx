@@ -111,6 +111,7 @@ export function MainDashboard({
         <div className="dashboard__pane" style={{ flex: paneFlex(layout.actionsFlex) }}>
           <ActionsPanel
             botRunning={botRunning}
+            actionClickPreview={actionClickPreview}
             onActionClickPreview={onActionClickPreview}
             onPrepareClickPreview={onPrepareClickPreview}
           />

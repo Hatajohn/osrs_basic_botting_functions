@@ -52,6 +52,7 @@ const api: ExodiaApi = {
   selectTemplateFile: () => ipcRenderer.invoke(IPC.SELECT_TEMPLATE_FILE),
   listItemCatalog: () => ipcRenderer.invoke(IPC.LIST_ITEM_CATALOG),
   resolveTemplateItem: (imagePath) => ipcRenderer.invoke(IPC.RESOLVE_TEMPLATE_ITEM, imagePath),
+  saveTemplate: (request) => ipcRenderer.invoke(IPC.SAVE_TEMPLATE, request),
 };
 
 contextBridge.exposeInMainWorld('exodia', api);

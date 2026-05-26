@@ -96,7 +96,10 @@ _count_eels: Callable = lambda _e: 0
 _inv_slots: Callable = lambda _e: None
 _inv_full: Callable = lambda _e: False
 _locate_spots: Callable = lambda _e: []
-INV_TEMPLATE_THRESHOLD = float(os.environ.get("EXODIA_INV_TEMPLATE_THRESHOLD", "0.35"))
+def _inv_template_threshold() -> float:
+    from bot_shape_match import inventory_template_threshold
+
+    return inventory_template_threshold()
 
 
 class SacredEelState(Enum):
@@ -573,7 +576,7 @@ class SacredEelMachine:
             ctx.bot_a,
             KNIFE_INV,
             EEL_INV,
-            threshold=INV_TEMPLATE_THRESHOLD,
+            threshold=_inv_template_threshold(),
         )
         if not result.ok:
             print(

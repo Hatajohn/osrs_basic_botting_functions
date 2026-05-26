@@ -22,6 +22,7 @@ from bot_eyes import (
     INV_COLS,
     INV_ROWS,
     _load_template_gray,
+    _parse_csv_bgr_tag,
     analyze_inventory_panel_occupancy,
     inventory_grid_cell_xywh,
     run_ocr,
@@ -32,7 +33,9 @@ if TYPE_CHECKING:
 
 
 def _default_threshold() -> float:
-    return float(os.environ.get("EXODIA_INV_TEMPLATE_THRESHOLD", "0.28"))
+    from bot_env import env_float_any
+
+    return env_float_any(0.28, "EXO_INV_CNT_THR", "EXODIA_INV_TEMPLATE_THRESHOLD")
 
 
 def _cell_inset_px() -> int:
@@ -75,6 +78,114 @@ def _strip_runelite_tags_bgr(cell_bgr: np.ndarray) -> np.ndarray:
     )
     out[tag_mask > 0] = fill
     return out
+
+
+def _inventory_plate_bgr() -> np.ndarray:
+    """Typical OSRS inventory slot plate color (BGR)."""
+    fb = _parse_csv_bgr_tag("EXODIA_INV_FALLBACK_EMPTY_BGR")
+    if fb is not None:
+        return np.array(fb, dtype=np.float32)
+    return np.array([41.0, 53.0, 62.0], dtype=np.float32)
+
+
+def _inventory_plate_max_delta() -> float:
+    return float(os.environ.get("EXODIA_INV_EMPTY_BGR_MAX_DELTA", "12"))
+
+
+def inventory_plate_background_mask(
+    cell_bgr: np.ndarray,
+    *,
+    plate_bgr: Optional[np.ndarray] = None,
+    max_delta: Optional[float] = None,
+) -> np.ndarray:
+    """
+    True where ``cell_bgr`` pixel matches the inventory slot plate background.
+
+    Uses the same BGR delta test as empty-slot detection in ``analyze_inventory_panel_occupancy``.
+    """
+    if cell_bgr is None or cell_bgr.size == 0:
+        return np.zeros((0, 0), dtype=bool)
+    plate = plate_bgr if plate_bgr is not None else _inventory_plate_bgr()
+    delta_cap = max_delta if max_delta is not None else _inventory_plate_max_delta()
+    lb = _parse_csv_bgr_tag("EXODIA_INV_EMPTY_BGR_LOWER")
+    ub = _parse_csv_bgr_tag("EXODIA_INV_EMPTY_BGR_UPPER")
+
+    mu = cell_bgr.astype(np.float32)
+    color_delta = np.max(np.abs(mu - plate.reshape(1, 1, 3)), axis=2)
+    bg = color_delta <= delta_cap
+    if lb is not None and ub is not None:
+        lo = np.array(lb, dtype=np.float32)
+        hi = np.array(ub, dtype=np.float32)
+        bg &= np.all((mu >= lo) & (mu <= hi), axis=2)
+    return bg
+
+
+def strip_inventory_plate_background(
+    cell_bgr: np.ndarray,
+    *,
+    crop: Optional[bool] = None,
+) -> np.ndarray:
+    """
+    Remove inventory plate pixels; return BGRA with transparent background.
+
+    When ``crop`` is true (default), tight-crop to the icon bounding box with 1px pad.
+    Set ``EXODIA_ITEM_STRIP_CROP=0`` to keep the original slot dimensions instead.
+    """
+    if cell_bgr is None or cell_bgr.size == 0:
+        return cell_bgr
+    if cell_bgr.ndim == 3 and cell_bgr.shape[2] == 4:
+        cell_bgr = cell_bgr[:, :, :3]
+
+    clean = _strip_runelite_tags_bgr(cell_bgr)
+    bg = inventory_plate_background_mask(clean)
+    fg = ~bg
+    fg_u8 = fg.astype(np.uint8) * 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    fg_u8 = cv2.morphologyEx(fg_u8, cv2.MORPH_CLOSE, kernel)
+    fg_u8 = cv2.morphologyEx(fg_u8, cv2.MORPH_OPEN, kernel)
+    fg = fg_u8 > 0
+
+    if not np.any(fg):
+        bgra = cv2.cvtColor(clean, cv2.COLOR_BGR2BGRA)
+        bgra[:, :, 3] = 255
+        return bgra
+
+    alpha = np.where(fg, 255, 0).astype(np.uint8)
+    bgra = cv2.cvtColor(clean, cv2.COLOR_BGR2BGRA)
+    bgra[:, :, 3] = alpha
+
+    if crop is None:
+        crop = os.environ.get("EXODIA_ITEM_STRIP_CROP", "1").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+    if not crop:
+        return bgra
+
+    ys, xs = np.where(fg)
+    pad = 1
+    y0 = max(0, int(ys.min()) - pad)
+    y1 = min(bgra.shape[0], int(ys.max()) + pad + 1)
+    x0 = max(0, int(xs.min()) - pad)
+    x1 = min(bgra.shape[1], int(xs.max()) + pad + 1)
+    return bgra[y0:y1, x0:x1].copy()
+
+
+def bgra_to_match_bgr(bgra: np.ndarray) -> np.ndarray:
+    """Composite transparent template/icon pixels onto the inventory plate for matching."""
+    if bgra is None or bgra.size == 0:
+        return bgra
+    if bgra.ndim != 3 or bgra.shape[2] != 4:
+        return bgra[:, :, :3] if bgra.ndim == 3 else bgra
+    plate = _inventory_plate_bgr().astype(np.uint8)
+    bgr = bgra[:, :, :3].astype(np.float32)
+    alpha = bgra[:, :, 3].astype(np.float32) / 255.0
+    out = np.empty_like(bgr)
+    for c in range(3):
+        out[:, :, c] = bgr[:, :, c] * alpha + float(plate[c]) * (1.0 - alpha)
+    return out.astype(np.uint8)
 
 
 def _normalize_slot_icon_gray(cell_bgr: np.ndarray) -> np.ndarray:
@@ -157,7 +268,11 @@ def _slot_gray_for_match(cell_bgr: np.ndarray) -> np.ndarray:
     return gray
 
 
-def _slot_gray_slide_score(cell_bgr: np.ndarray, template_gray: np.ndarray) -> float:
+def _slot_gray_slide_score(
+    cell_bgr: np.ndarray,
+    template_gray: np.ndarray,
+    template_mask: Optional[np.ndarray] = None,
+) -> float:
     """Sliding ``matchTemplate`` on tag-masked full-tile gray."""
     if cell_bgr is None or cell_bgr.size == 0 or template_gray is None:
         return 0.0
@@ -165,7 +280,16 @@ def _slot_gray_slide_score(cell_bgr: np.ndarray, template_gray: np.ndarray) -> f
     th, tw = template_gray.shape[:2]
     if gray.shape[0] < th or gray.shape[1] < tw:
         return 0.0
-    res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
+    if (
+        template_mask is not None
+        and template_mask.shape[:2] == template_gray.shape[:2]
+        and cv2.countNonZero(template_mask) >= 16
+    ):
+        res = cv2.matchTemplate(
+            gray, template_gray, cv2.TM_CCOEFF_NORMED, mask=template_mask
+        )
+    else:
+        res = cv2.matchTemplate(gray, template_gray, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, _ = cv2.minMaxLoc(res)
     return float(max_val)
 

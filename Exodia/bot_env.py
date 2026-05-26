@@ -631,3 +631,41 @@ def pick_point_in_circle(point, rad=15):
     y = int(r * math.sin(alpha) + point[1])
 
     return (x, y)
+
+
+def env_is_set(*keys: str) -> bool:
+    """True if any of the given environment variables is non-empty."""
+    return any(os.environ.get(key, "").strip() for key in keys)
+
+
+def env_float_any(default: float, *keys: str) -> float:
+    """First non-empty env key wins (short ``EXO_*`` names before legacy ``EXODIA_*``)."""
+    for key in keys:
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            continue
+        try:
+            return float(raw)
+        except ValueError:
+            continue
+    return default
+
+
+def env_int_any(default: int, *keys: str) -> int:
+    """Like ``env_float_any`` but for integer env vars."""
+    for key in keys:
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            continue
+        try:
+            return int(raw)
+        except ValueError:
+            continue
+    return default
+
+
+def inventory_identify_threshold(explicit: Optional[float] = None) -> float:
+    """Slot label / catalog match (default 0.40). Short: ``EXO_INV_ID_THR``."""
+    if explicit is not None:
+        return float(explicit)
+    return env_float_any(0.40, "EXO_INV_ID_THR", "EXODIA_INV_ITEM_MATCH_THRESHOLD")

@@ -280,8 +280,9 @@ Useful env overrides:
 | Variable | Purpose |
 |----------|---------|
 | `EXODIA_ITEMS_DIR` | Item template directory (default `items/`) |
-| `EXODIA_INV_ITEM_MATCH_THRESHOLD` | Min normalized score to accept a template (default `0.40`) |
-| `EXODIA_INV_ITEM_MATCH_INSET` | Slot crop inset for item match (default `0` = full tile) |
+| `EXO_INV_THR` | Inventory template click/Find min score (default `0.35`; legacy `EXODIA_INV_TEMPLATE_THRESHOLD`) |
+| `EXO_INV_ID_THR` | Slot identify / catalog min score (default `0.40`; legacy `EXODIA_INV_ITEM_MATCH_THRESHOLD`) |
+| `EXO_INV_INSET` | Slot crop inset for item match (default `0`; legacy `EXODIA_INV_ITEM_MATCH_INSET`) |
 | `EXODIA_INV_FRAME_BUCKETS` | Group unknown slots into ephemeral `tmp:<id>` buckets (default `0`; on in inventory tests + labeler) |
 | `EXODIA_BUCKET_TEMPLATE_MIN` | Cross-slot template threshold for tolerant bucketing (default `0.38`) |
 | `EXODIA_BUCKET_USE_SEEN_LOOSE` | Enable loose dHash+hue tier for bucketing (default `1` in labeler) |

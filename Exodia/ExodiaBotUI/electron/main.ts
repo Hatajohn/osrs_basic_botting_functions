@@ -19,6 +19,7 @@ import { refreshDebugFrame, saveDebugFrameSnapshot } from './debugFrame';
 import { runCalibrateClientRect } from './calibrateClientRect';
 import { listDirectory, readTextFile } from './files';
 import { listItemCatalog, resolveTemplateItem } from './itemCatalog';
+import { saveTemplate } from './saveTemplate';
 import { selectTemplateFile } from './templateFile';
 import { loadBotsManifest } from './manifestLoader';
 import { fetchGamePreview } from './previewClient';
@@ -203,6 +204,20 @@ function registerIpc(): void {
   ipcMain.handle(IPC.RESOLVE_TEMPLATE_ITEM, (_event, imagePath: string) =>
     resolveTemplateItem(imagePath),
   );
+
+  ipcMain.handle(IPC.SAVE_TEMPLATE, async (_event, request) => {
+    emitLog(`Save template (${request.mode})…`, 'system');
+    const result = await saveTemplate(request);
+    if (result.ok) {
+      emitLog(
+        `Saved ${result.templateFile ?? 'template'} → ${result.dest ?? '?'}/ (${result.itemId ?? ''})`,
+        'system',
+      );
+    } else {
+      emitLog(`Save template failed: ${result.error ?? 'unknown'}`, 'stderr');
+    }
+    return result;
+  });
 
   ipcMain.handle(IPC.REFRESH_DEBUG_FRAME, async (_event, mode?: DebugFrameMode) => {
     const frameMode = mode ?? 'inventory_identify';

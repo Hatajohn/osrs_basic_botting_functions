@@ -1111,11 +1111,14 @@ class BotEyes():
         max_peaks: int = 32,
         template_path: Optional[str] = None,
         frame_bgr: Optional[np.ndarray] = None,
+        shape_preprocess: bool = False,
+        shape_playspace: Optional[bool] = None,
     ) -> LocateImageResult:
         """
         Template match via ``TM_CCOEFF_NORMED`` with peak NMS. Returns structured result including scores.
 
         * ``client_xy`` — center in **client image** coordinates when ``inv=False``, else in **inventory crop** coordinates.
+        * ``shape_preprocess`` — template mask + optional scene prep (playspace only unless overridden).
         """
         if inv:
             if self.curr_inventory is None or getattr(self.curr_inventory, "size", 0) == 0:
@@ -1142,6 +1145,16 @@ class BotEyes():
                 img_gray = img_gray[sy : sy + sh, sx : sx + sw]
                 img_rgb = img_rgb[sy : sy + sh, sx : sx + sw]
                 off_x, off_y = sx, sy
+            use_shape = shape_preprocess
+            prep_playspace = shape_playspace if shape_playspace is not None else not inv
+            if use_shape:
+                from bot_shape_match import (
+                    effective_template_mask,
+                    filter_peaks_by_score_margin,
+                    prepare_gray_for_shape_match,
+                )
+
+                img_gray = prepare_gray_for_shape_match(img_rgb, img_gray, playspace=prep_playspace)
             tpl_path = template_path or os.path.join(os.getcwd(), "images", filename)
             template, tpl_mask = _load_template_gray_and_mask(tpl_path)
             if template is None:
@@ -1149,11 +1162,19 @@ class BotEyes():
                     print("locate_image: missing template", tpl_path, sep="")
                 return LocateImageResult(result_name, False, "missing_template", [])
             tw, th = template.shape[::-1]
+            if use_shape:
+                tpl_mask = effective_template_mask(
+                    template,
+                    tpl_mask,
+                    allow_derived_body=prep_playspace,
+                )
             if tpl_mask is not None:
                 res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED, mask=tpl_mask)
             else:
                 res = cv2.matchTemplate(img_gray, template, cv2.TM_CCOEFF_NORMED)
             peaks = _match_template_peaks(res, tw, th, threshold, max_peaks=max_peaks)
+            if use_shape and prep_playspace:
+                peaks = filter_peaks_by_score_margin(peaks)
             if not peaks:
                 if self._DEBUG:
                     Env.debug_view(img_rgb, "View image")

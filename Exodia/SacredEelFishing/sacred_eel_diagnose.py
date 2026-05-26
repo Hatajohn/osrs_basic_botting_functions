@@ -151,7 +151,9 @@ def main() -> int:
 
     from bot_inventory_count import count_inventory_quantity, count_inventory_stacks
 
-    eel_thr = float(os.environ.get("EXODIA_INV_TEMPLATE_THRESHOLD", "0.28"))
+    from bot_inventory_count import _default_threshold
+
+    eel_thr = _default_threshold()
     qty = count_inventory_quantity(bot_e, "osrs_sacredEel.png", threshold=eel_thr)
     stacks = count_inventory_stacks(bot_e, "osrs_sacredEel.png", threshold=eel_thr)
     panel = bot_e._inventory_panel_bgr_for_slots()

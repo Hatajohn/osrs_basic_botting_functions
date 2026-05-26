@@ -21,6 +21,7 @@ if str(_EXODIA) not in sys.path:
 import cv2
 import numpy as np
 
+from bot_inventory_count import bgra_to_match_bgr, strip_inventory_plate_background
 from bot_match_index import (  # noqa: E402
     SeenItemRegistry,
     _cross_template_score,
@@ -52,9 +53,15 @@ def _env_float(key: str, default: float) -> float:
 
 
 def _load_query_bgr(path: Path) -> Optional[np.ndarray]:
-    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-    if bgr is None or bgr.size == 0:
+    raw = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if raw is None or raw.size == 0:
         return None
+    if raw.ndim == 3 and raw.shape[2] == 4:
+        return _embed_icon_in_slot_canvas(bgra_to_match_bgr(raw))
+    bgr = raw if raw.ndim == 3 else cv2.cvtColor(raw, cv2.COLOR_GRAY2BGR)
+    stripped = strip_inventory_plate_background(bgr)
+    if stripped.ndim == 3 and stripped.shape[2] == 4:
+        return _embed_icon_in_slot_canvas(bgra_to_match_bgr(stripped))
     return _embed_icon_in_slot_canvas(bgr)
 
 
@@ -113,9 +120,9 @@ def resolve_image_path(
     *,
     threshold: Optional[float] = None,
 ) -> Dict[str, Any]:
-    thr = threshold if threshold is not None else _env_float(
-        "EXODIA_INV_ITEM_MATCH_THRESHOLD", 0.40
-    )
+    from bot_env import inventory_identify_threshold
+
+    thr = threshold if threshold is not None else inventory_identify_threshold()
     if not image_path.is_file():
         return {"ok": False, "error": "file_not_found", "path": str(image_path)}
 

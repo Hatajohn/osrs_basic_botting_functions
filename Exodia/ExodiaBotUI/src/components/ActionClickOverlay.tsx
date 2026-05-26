@@ -5,11 +5,22 @@ import './ActionClickOverlay.css';
 type PointLayout = {
   left: number;
   top: number;
+  score?: number;
+  searchMode?: 'inventory' | 'playspace';
 };
 
 type UseOnLayout = {
   from: PointLayout;
   to: PointLayout;
+};
+
+type ClickLayout = {
+  selected: PointLayout;
+  alternates: PointLayout[];
+};
+
+type FindLayout = {
+  markers: PointLayout[];
 };
 
 type ActionClickOverlayProps = {
@@ -21,6 +32,7 @@ function clientXYToLayout(
   img: HTMLImageElement,
   preview: ActionClickPreview,
   clientXY: [number, number],
+  extra?: Pick<PointLayout, 'score' | 'searchMode'>,
 ): PointLayout | null {
   const { frameWidth, frameHeight } = preview;
   if (frameWidth <= 0 || frameHeight <= 0) return null;
@@ -43,15 +55,39 @@ function clientXYToLayout(
   return {
     left: rect.left - wrapRect.left + px * scaleX,
     top: rect.top - wrapRect.top + py * scaleY,
+    score: extra?.score,
+    searchMode: extra?.searchMode,
   };
 }
 
-function computeClickMarker(
-  img: HTMLImageElement,
-  preview: ActionClickPreview,
-): PointLayout | null {
+function computeClickLayout(img: HTMLImageElement, preview: ActionClickPreview): ClickLayout | null {
   if (!preview.clickClientXY) return null;
-  return clientXYToLayout(img, preview, preview.clickClientXY);
+  const selected = clientXYToLayout(img, preview, preview.clickClientXY, { score: preview.score });
+  if (!selected) return null;
+
+  const alternates: PointLayout[] = [];
+  for (const cand of preview.matchCandidates ?? []) {
+    if (cand.selected) continue;
+    const layout = clientXYToLayout(img, preview, cand.clickClientXY, {
+      score: cand.score,
+      searchMode: cand.searchMode,
+    });
+    if (layout) alternates.push(layout);
+  }
+
+  return { selected, alternates };
+}
+
+function computeFindLayout(img: HTMLImageElement, preview: ActionClickPreview): FindLayout | null {
+  const markers: PointLayout[] = [];
+  for (const cand of preview.matchCandidates ?? []) {
+    const layout = clientXYToLayout(img, preview, cand.clickClientXY, {
+      score: cand.score,
+      searchMode: cand.searchMode,
+    });
+    if (layout) markers.push(layout);
+  }
+  return markers.length > 0 ? { markers } : null;
 }
 
 function computeUseOnLayout(
@@ -68,8 +104,8 @@ function computeUseOnLayout(
 function useOverlayLayout(
   imageRef: React.RefObject<HTMLImageElement | null>,
   preview: ActionClickPreview | null,
-): PointLayout | UseOnLayout | null {
-  const [layout, setLayout] = useState<PointLayout | UseOnLayout | null>(null);
+): ClickLayout | UseOnLayout | FindLayout | null {
+  const [layout, setLayout] = useState<ClickLayout | UseOnLayout | FindLayout | null>(null);
 
   const update = useCallback(() => {
     const img = imageRef.current;
@@ -77,11 +113,15 @@ function useOverlayLayout(
       setLayout(null);
       return;
     }
+    if (preview.previewMode === 'find') {
+      setLayout(computeFindLayout(img, preview));
+      return;
+    }
     if (preview.previewMode === 'use_on' || (preview.fromClientXY && preview.toClientXY)) {
       setLayout(computeUseOnLayout(img, preview));
       return;
     }
-    setLayout(computeClickMarker(img, preview));
+    setLayout(computeClickLayout(img, preview));
   }, [imageRef, preview]);
 
   useEffect(() => {
@@ -99,8 +139,16 @@ function useOverlayLayout(
   return layout;
 }
 
-function isUseOnLayout(layout: PointLayout | UseOnLayout | null): layout is UseOnLayout {
+function isUseOnLayout(layout: ClickLayout | UseOnLayout | FindLayout | null): layout is UseOnLayout {
   return layout != null && 'from' in layout && 'to' in layout;
+}
+
+function isClickLayout(layout: ClickLayout | UseOnLayout | FindLayout | null): layout is ClickLayout {
+  return layout != null && 'selected' in layout;
+}
+
+function isFindLayout(layout: ClickLayout | UseOnLayout | FindLayout | null): layout is FindLayout {
+  return layout != null && 'markers' in layout;
 }
 
 function UseOnOverlay({
@@ -143,30 +191,101 @@ function UseOnOverlay({
   );
 }
 
-function SingleClickOverlay({
-  marker,
+function FindOverlay({
+  layout,
   preview,
 }: {
-  marker: PointLayout;
+  layout: FindLayout;
   preview: ActionClickPreview;
 }) {
+  const worldCount = layout.markers.filter((m) => m.searchMode === 'playspace').length;
+  const invCount = layout.markers.filter((m) => m.searchMode === 'inventory').length;
+
+  return (
+    <div
+      className="action-click-overlay"
+      aria-hidden
+      title={`Find · ${worldCount} world · ${invCount} inventory`}
+    >
+      {layout.markers.map((marker, index) => {
+        const isWorld = marker.searchMode === 'playspace';
+        const region = isWorld ? 'World' : 'Inventory';
+        const scoreNote =
+          marker.score != null ? ` · score ${marker.score.toFixed(2)}` : '';
+        return (
+          <div
+            key={`find-${index}-${marker.left}-${marker.top}-${marker.searchMode}`}
+            className={`action-click-overlay__marker action-click-overlay__marker--find ${
+              isWorld
+                ? 'action-click-overlay__marker--find-world'
+                : 'action-click-overlay__marker--find-inv'
+            }`}
+            style={{ left: marker.left, top: marker.top }}
+            title={`${region}${scoreNote}`}
+          >
+            <span
+              className={
+                isWorld
+                  ? 'action-click-overlay__find-ring action-click-overlay__find-ring--world'
+                  : 'action-click-overlay__find-ring action-click-overlay__find-ring--inv'
+              }
+            />
+          </div>
+        );
+      })}
+      <div className="action-click-overlay__find-legend">
+        Find: {preview.matchCount ?? layout.markers.length}
+        {worldCount > 0 ? ` · ${worldCount} world` : ''}
+        {invCount > 0 ? ` · ${invCount} inv` : ''}
+      </div>
+    </div>
+  );
+}
+
+function SingleClickOverlay({
+  layout,
+  preview,
+}: {
+  layout: ClickLayout;
+  preview: ActionClickPreview;
+}) {
+  const { selected, alternates } = layout;
+  const matchNote =
+    preview.matchCount != null && preview.matchCount > 1
+      ? `${preview.matchCount} matches`
+      : null;
   const title = [
     preview.label ?? preview.blockId,
     preview.clickClientXY
-      ? `client ${preview.clickClientXY[0]},${preview.clickClientXY[1]}`
+      ? `click ${preview.clickClientXY[0]},${preview.clickClientXY[1]}`
       : null,
     preview.screenXY ? `screen ${preview.screenXY[0]},${preview.screenXY[1]}` : null,
     preview.score != null ? `score ${preview.score.toFixed(2)}` : null,
     preview.slot ?? null,
+    matchNote,
   ]
     .filter(Boolean)
     .join(' · ');
 
   return (
     <div className="action-click-overlay" aria-hidden>
+      {alternates.map((alt, index) => (
+        <div
+          key={`alt-${index}-${alt.left}-${alt.top}`}
+          className="action-click-overlay__marker action-click-overlay__marker--candidate"
+          style={{ left: alt.left, top: alt.top }}
+          title={
+            alt.score != null
+              ? `Alternate match · score ${alt.score.toFixed(2)}`
+              : 'Alternate match'
+          }
+        >
+          <span className="action-click-overlay__candidate-ring" />
+        </div>
+      ))}
       <div
-        className="action-click-overlay__marker"
-        style={{ left: marker.left, top: marker.top }}
+        className="action-click-overlay__marker action-click-overlay__marker--selected"
+        style={{ left: selected.left, top: selected.top }}
         title={title}
       >
         <span className="action-click-overlay__crosshair" />
@@ -184,9 +303,17 @@ export function ActionClickOverlay({ preview, imageRef }: ActionClickOverlayProp
 
   if (!preview || !layout) return null;
 
+  if (isFindLayout(layout)) {
+    return <FindOverlay layout={layout} preview={preview} />;
+  }
+
   if (isUseOnLayout(layout)) {
     return <UseOnOverlay layout={layout} preview={preview} />;
   }
 
-  return <SingleClickOverlay marker={layout} preview={preview} />;
+  if (isClickLayout(layout)) {
+    return <SingleClickOverlay layout={layout} preview={preview} />;
+  }
+
+  return null;
 }
