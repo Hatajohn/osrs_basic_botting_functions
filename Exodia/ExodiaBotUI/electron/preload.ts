@@ -47,6 +47,21 @@ const api: ExodiaApi = {
     return () => ipcRenderer.removeListener(IPC.BOT_STATUS_UPDATE, listener);
   },
   fetchGamePreview: () => ipcRenderer.invoke(IPC.FETCH_GAME_PREVIEW),
+  fetchInventoryOverlay: () => ipcRenderer.invoke(IPC.FETCH_INVENTORY_OVERLAY),
+  fetchPristineClient: () => ipcRenderer.invoke(IPC.FETCH_PRISTINE_CLIENT),
+  getStreamStatus: () => ipcRenderer.invoke(IPC.GET_STREAM_STATUS),
+  startStream: () => ipcRenderer.invoke(IPC.START_STREAM),
+  stopStream: () => ipcRenderer.invoke(IPC.STOP_STREAM),
+  invalidateStreamCache: () => ipcRenderer.invoke(IPC.INVALIDATE_STREAM_CACHE),
+  restartStream: () => ipcRenderer.invoke(IPC.RESTART_STREAM),
+  onStreamStatusUpdate: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: import('../shared/ipc').StreamStatus) => {
+      callback(status);
+    };
+    ipcRenderer.on(IPC.STREAM_STATUS_UPDATE, listener);
+    return () => ipcRenderer.removeListener(IPC.STREAM_STATUS_UPDATE, listener);
+  },
+  fetchStreamMeta: () => ipcRenderer.invoke(IPC.FETCH_STREAM_META),
   listActionBlocks: () => ipcRenderer.invoke(IPC.LIST_ACTION_BLOCKS),
   runSingleAction: (request) => ipcRenderer.invoke(IPC.RUN_SINGLE_ACTION, request),
   selectTemplateFile: () => ipcRenderer.invoke(IPC.SELECT_TEMPLATE_FILE),

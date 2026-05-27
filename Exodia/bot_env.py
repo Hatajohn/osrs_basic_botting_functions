@@ -560,15 +560,32 @@ def screen_image(
 
     image = None
     try:
-        from bot_capture import capture_stream_enabled, capture_stream_latest
+        from bot_capture import capture_client_pristine, capture_stream_enabled, stream_service_port
 
-        if capture_stream_enabled():
-            image = capture_stream_latest(rect if rect is not None else [left, top, w, h])
+        if capture_stream_enabled() or stream_service_port() > 0:
+            r = [int(left), int(top), int(w), int(h)]
+            image = capture_client_pristine(r)
     except ImportError:
         pass
 
     if image is None:
-        image = _grab_bgr(int(left), int(top), int(w), int(h))
+        try:
+            from bot_capture import capture_stream_enabled, capture_stream_latest
+
+            if capture_stream_enabled():
+                image = capture_stream_latest(rect if rect is not None else [left, top, w, h])
+        except ImportError:
+            pass
+
+    if image is None:
+        try:
+            from bot_capture import capture_stream_enabled, capture_stream_latest, stream_service_port
+
+            stream_expected = capture_stream_enabled() or stream_service_port() > 0
+            if not stream_expected:
+                image = _grab_bgr(int(left), int(top), int(w), int(h))
+        except ImportError:
+            image = _grab_bgr(int(left), int(top), int(w), int(h))
 
     if DEBUG:
         debug_view(image, title=name)

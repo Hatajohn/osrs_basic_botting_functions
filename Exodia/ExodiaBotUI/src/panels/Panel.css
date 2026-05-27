@@ -45,6 +45,11 @@
   color: #bbf7d0;
 }
 
+.panel__badge--warn {
+  background: #854d0e;
+  color: #fef08a;
+}
+
 .panel__chips {
   font-family: var(--font-mono);
   font-size: 11px;

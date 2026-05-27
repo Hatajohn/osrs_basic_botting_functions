@@ -303,7 +303,7 @@ See [`ExodiaBotUI/README.md`](ExodiaBotUI/README.md). Spawns `run_agent.py` with
 | `SacredEelFishing/run_sacred_eel.sh` | `runs` | sacred entry |
 | `InfernalEelFishing/run_infernal_eel.sh` | `runs` | infernal entry |
 
-Not inventoried: `PlansTODO/` (planning only), `.venv/` / `exodia/` venv trees, `items/fingerprints/` per-file JSON listing.
+Not inventoried: `PlansTODO/` (planning only; e.g. [`llm-agent-console-plan.md`](PlansTODO/llm-agent-console-plan.md)), `.venv/` / `exodia/` venv trees, `items/fingerprints/` per-file JSON listing.
 
 ---
 

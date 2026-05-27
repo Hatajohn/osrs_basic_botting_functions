@@ -6,10 +6,10 @@ export type PreviewFrame = {
   fetchedAt: number;
 };
 
-export async function fetchGamePreview(port?: number): Promise<PreviewFrame | null> {
+async function fetchJpegSnapshot(path: string, port?: number): Promise<PreviewFrame | null> {
   const settings = loadSettings();
   const streamPort = port ?? settings.streamPort ?? 8765;
-  const url = `http://127.0.0.1:${streamPort}/snapshot/game_preview`;
+  const url = `http://127.0.0.1:${streamPort}${path}`;
 
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
@@ -39,6 +39,18 @@ export async function fetchGamePreview(port?: number): Promise<PreviewFrame | nu
       resolve(null);
     });
   });
+}
+
+export async function fetchGamePreview(port?: number): Promise<PreviewFrame | null> {
+  return fetchJpegSnapshot('/snapshot/game_preview', port);
+}
+
+export async function fetchPristineClient(port?: number): Promise<PreviewFrame | null> {
+  return fetchJpegSnapshot('/snapshot/pristine_client', port);
+}
+
+export async function fetchInventoryOverlay(port?: number): Promise<PreviewFrame | null> {
+  return fetchJpegSnapshot('/snapshot/inventory_overlay', port);
 }
 
 export function resolveStreamPort(override?: number): number {

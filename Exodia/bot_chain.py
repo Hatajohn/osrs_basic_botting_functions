@@ -133,6 +133,7 @@ def _ensure_capture_env() -> None:
         if not os.environ.get("EXODIA_INPUT_BACKEND"):
             os.environ["EXODIA_INPUT_BACKEND"] = "wsl_ps"
     os.environ.setdefault("EXODIA_INV_FRAME_BUCKETS", "1")
+    os.environ.setdefault("EXODIA_STREAM_PORT", "8765")
 
 
 def _frame_display_scale(frame_w: int, frame_h: int) -> Tuple[float, int, int]:

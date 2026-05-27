@@ -4,6 +4,10 @@ Decoupled streaming capture for Exodia.
 **CaptureProducer** — timer-driven screen grabs only (no vision).
 **VisionProcessor** — separate thread; ``bot_track`` on new frames → ``PerceptionCache``.
 **FrameBuffer** — depth-1 drop-old latest frame for harness / MJPEG consumers.
+
+The buffer holds **pristine** client BGR only. Annotated overlays for the UI are
+composed on copies elsewhere (``bot_stream.publish_inventory_overlay_live``) and
+must never be written back into the buffer.
 """
 from __future__ import annotations
 
@@ -39,6 +43,9 @@ __all__ = [
     "start_capture_pipeline",
     "stop_capture_pipeline",
     "capture_stream_latest",
+    "capture_client_pristine",
+    "fetch_pristine_client_http",
+    "stream_service_port",
     "get_capture_pipeline",
     "capture_stream_enabled",
     "default_capture_fps",
@@ -463,6 +470,7 @@ class CapturePipeline:
         self._vision_fps = vision_fps
         self._static_exclude: List[Rect] = []
         self._pan_flag = False
+        self._track_vision = True
         self._producer: Optional[CaptureProducer] = None
         self._vision: Optional[VisionProcessor] = None
 
@@ -508,11 +516,15 @@ class CapturePipeline:
 
         return grab
 
-    def start(self) -> None:
+    def set_track_vision(self, enabled: bool) -> None:
+        self._track_vision = bool(enabled)
+
+    def start(self, *, track_vision: Optional[bool] = None) -> None:
         if self._producer is not None:
             return
         grab_fn = self._make_grab_fn()
         self._producer = CaptureProducer(self.buffer, self._client_rect, self._fps, grab_fn)
+        use_track = self._track_vision if track_vision is None else bool(track_vision)
         vfps = self._vision_fps
         if vfps <= 0:
             raw = os.environ.get("EXODIA_VISION_FPS", "0").strip()
@@ -520,15 +532,17 @@ class CapturePipeline:
                 vfps = float(raw)
             except ValueError:
                 vfps = 0.0
-        self._vision = VisionProcessor(
-            self.buffer,
-            self.cache,
-            fps=vfps,
-            static_exclude=self._static_exclude,
-            pan_in_progress=self._pan_cb,
-        )
+        if use_track:
+            self._vision = VisionProcessor(
+                self.buffer,
+                self.cache,
+                fps=vfps,
+                static_exclude=self._static_exclude,
+                pan_in_progress=self._pan_cb,
+            )
         self._producer.start()
-        self._vision.start()
+        if self._vision is not None:
+            self._vision.start()
 
     def stop(self) -> None:
         if self._vision is not None:
@@ -582,12 +596,14 @@ def start_capture_pipeline(
     *,
     fps: Optional[float] = None,
     vision_fps: float = 0.0,
+    track_vision: bool = True,
 ) -> CapturePipeline:
     global _pipeline
     with _pipeline_lock:
         _stop_pipeline_locked()
         pipe = CapturePipeline(client_rect, fps=fps, vision_fps=vision_fps)
-        pipe.start()
+        pipe.set_track_vision(track_vision)
+        pipe.start(track_vision=track_vision)
         _pipeline = pipe
         return pipe
 
@@ -598,8 +614,76 @@ def stop_capture_pipeline() -> None:
     _close_wsl_session()
 
 
+def stream_service_port() -> int:
+    raw = os.environ.get("EXODIA_STREAM_PORT", "8765").strip()
+    try:
+        return max(0, int(raw or "0"))
+    except ValueError:
+        return 8765
+
+
+def fetch_pristine_client_http(
+    port: Optional[int] = None,
+    *,
+    path: str = "/snapshot/pristine_client",
+) -> Optional[np.ndarray]:
+    """Decode full-resolution pristine client JPEG from the local stream service."""
+    import urllib.error
+    import urllib.request
+
+    p = stream_service_port() if port is None else int(port)
+    if p <= 0:
+        return None
+    url = "http://127.0.0.1:%d%s" % (p, path)
+    try:
+        raw = urllib.request.urlopen(url, timeout=2.5).read()
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    if not raw:
+        return None
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None or img.size == 0:
+        return None
+    return img.copy()
+
+
+def capture_client_pristine(client_rect: Optional[Rect] = None) -> Optional[np.ndarray]:
+    """Latest **unannotated** client BGR for template match / actions.
+
+    Resolution order:
+    1. In-process ``FrameBuffer`` (same process as capture pipeline)
+    2. HTTP ``/snapshot/pristine_client`` (separate stream service process)
+    3. Synchronous screen grab
+    """
+    if client_rect is None:
+        from bot_client_config import load_client_rect
+
+        client_rect = load_client_rect()
+
+    port = stream_service_port()
+    stream_on = capture_stream_enabled() or port > 0
+
+    if stream_on:
+        img = capture_stream_latest(client_rect)
+        if img is not None:
+            return img
+        img = fetch_pristine_client_http(port if port > 0 else None)
+        if img is not None:
+            return img
+        # Stream is configured but unavailable — do not open a competing wsl_ps grab.
+        return None
+
+    if client_rect and len(client_rect) == 4:
+        import bot_env as Env
+
+        l, t, w, h = [int(v) for v in client_rect]
+        return Env._grab_bgr_sync(l, t, w, h)
+    return None
+
+
 def capture_stream_latest(rect: Optional[Rect] = None) -> Optional[np.ndarray]:
-    """Copy of latest buffered BGR frame, or ``None`` if pipeline off/stale."""
+    """Copy of latest **pristine** buffered BGR frame (never annotated)."""
     pipe = _pipeline
     if pipe is None or not capture_stream_enabled():
         return None

@@ -118,6 +118,7 @@ export async function runSingleAction(
       env: {
         ...process.env,
         EXODIA_ROOT: resolvedExodiaRoot,
+        EXODIA_STREAM_PORT: String(loadSettings().streamPort ?? 8765),
         ...(useWslPs
           ? {
               EXODIA_CAPTURE_BACKEND: process.env.EXODIA_CAPTURE_BACKEND ?? 'wsl_ps',

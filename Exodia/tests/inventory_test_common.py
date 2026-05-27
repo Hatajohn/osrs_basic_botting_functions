@@ -106,15 +106,14 @@ def draw_drag_arrow_on_image(
 
 def capture_client_bgr() -> Tuple[Optional[np.ndarray], Optional[str]]:
     from bot_client_config import load_client_rect
-    import bot_env as Env
+    from bot_capture import capture_client_pristine
 
     os.environ.setdefault("EXODIA_CAPTURE_BACKEND", "wsl_ps")
     rect = load_client_rect()
     if not rect or len(rect) != 4:
         return None, "missing or invalid client_rect.json"
-    left, top, w, h = (int(v) for v in rect)
     try:
-        bgr = Env._grab_bgr_sync(left, top, w, h)
+        bgr = capture_client_pristine(rect)
     except Exception as exc:
         return None, "capture failed: %s" % exc
     if bgr is None or bgr.size == 0:

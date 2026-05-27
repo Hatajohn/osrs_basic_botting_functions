@@ -537,7 +537,7 @@ Primary recipe only — see §2 for full stacks.
 - [ ] **Compound modifier actions** — shift+click drop wrapper; `drop_all` exists on arms but no script glue.
 - [ ] **World detect → infernal FSM** — `locate_world_objects` validated via overlay only.
 - [ ] **`bot_track` blobs** — v1 motion pipeline; not wired into spot seek.
-- [ ] **Agent brain reads spec markdown** — `run_agent.py --spec` loads paths; `ExodiaBotUI` Bots tab passes specs at start; brain integration TBD.
+- [ ] **LLM agent + console injection** — MVP: no spec required; task via `inject_message` / Agent console. Plan: [`PlansTODO/llm-agent-console-plan.md`](PlansTODO/llm-agent-console-plan.md).
 
 Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/function-architecture-plan.md).
 

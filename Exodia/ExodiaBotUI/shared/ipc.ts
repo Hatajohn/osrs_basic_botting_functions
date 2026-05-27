@@ -31,6 +31,15 @@ export const IPC = {
   BOT_RUN_UPDATE: 'bots:runUpdate',
   BOT_STATUS_UPDATE: 'bots:statusUpdate',
   FETCH_GAME_PREVIEW: 'preview:fetchGamePreview',
+  FETCH_INVENTORY_OVERLAY: 'preview:fetchInventoryOverlay',
+  FETCH_PRISTINE_CLIENT: 'preview:fetchPristineClient',
+  GET_STREAM_STATUS: 'stream:getStatus',
+  START_STREAM: 'stream:start',
+  STOP_STREAM: 'stream:stop',
+  INVALIDATE_STREAM_CACHE: 'stream:invalidateCache',
+  RESTART_STREAM: 'stream:restart',
+  STREAM_STATUS_UPDATE: 'stream:statusUpdate',
+  FETCH_STREAM_META: 'stream:fetchMeta',
   LIST_ACTION_BLOCKS: 'actions:listBlocks',
   RUN_SINGLE_ACTION: 'actions:runSingle',
   SELECT_TEMPLATE_FILE: 'files:selectTemplateFile',
@@ -271,6 +280,40 @@ export type GamePreviewResult = {
   fetchedAt?: number;
 };
 
+export type PerceptionMeta = {
+  occupied?: number;
+  unknown?: number;
+  tmp_count?: number;
+  inventory_calibrated?: boolean;
+  vision_fps?: number;
+  dirty_slots?: number[][];
+};
+
+export type StreamMeta = {
+  capture_seq?: number;
+  processed_seq?: number;
+  capture_fps?: number;
+  vision_fps?: number;
+  perception?: PerceptionMeta;
+};
+
+export type StreamStatus = {
+  running: boolean;
+  attached: boolean;
+  port: number;
+  url: string;
+  inventoryOverlayUrl: string;
+  gamePreviewUrl: string;
+  metaUrl: string;
+  error?: string;
+  meta?: StreamMeta;
+};
+
+export type StreamMetaResult = {
+  ok: boolean;
+  meta?: StreamMeta;
+};
+
 export type ExodiaApi = {
   getSettings: () => Promise<SettingsResult>;
   setSettings: (partial: Partial<ExodiaSettings>) => Promise<SettingsResult>;
@@ -292,6 +335,15 @@ export type ExodiaApi = {
   onBotRunUpdate: (callback: (run: BotRunInfo | null) => void) => () => void;
   onBotStatusUpdate: (callback: (status: RuntimeStatusPayload | null) => void) => () => void;
   fetchGamePreview: () => Promise<GamePreviewResult>;
+  fetchInventoryOverlay: () => Promise<GamePreviewResult>;
+  fetchPristineClient: () => Promise<GamePreviewResult>;
+  getStreamStatus: () => Promise<StreamStatus>;
+  startStream: () => Promise<StreamStatus>;
+  stopStream: () => Promise<StreamStatus>;
+  invalidateStreamCache: () => Promise<void>;
+  restartStream: () => Promise<StreamStatus>;
+  onStreamStatusUpdate: (callback: (status: StreamStatus) => void) => () => void;
+  fetchStreamMeta: () => Promise<StreamMetaResult>;
   listActionBlocks: () => Promise<ActionBlockDef[]>;
   runSingleAction: (request: RunSingleActionRequest) => Promise<RunSingleActionResult>;
   selectTemplateFile: () => Promise<SelectTemplateFileResult>;

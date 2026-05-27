@@ -22,7 +22,8 @@ import { listItemCatalog, resolveTemplateItem } from './itemCatalog';
 import { saveTemplate } from './saveTemplate';
 import { selectTemplateFile } from './templateFile';
 import { loadBotsManifest } from './manifestLoader';
-import { fetchGamePreview } from './previewClient';
+import { fetchGamePreview, fetchInventoryOverlay, fetchPristineClient } from './previewClient';
+import { StreamProcessManager } from './streamManager';
 import { ProcessManager } from './processManager';
 import { pythonExists } from './paths';
 import {
@@ -44,6 +45,7 @@ if (process.platform === 'linux') {
 
 let mainWindow: BrowserWindow | null = null;
 let processManager: ProcessManager | null = null;
+let streamManager: StreamProcessManager | null = null;
 let actionRunning = false;
 
 function botRunBlocksAction(): boolean {
@@ -308,6 +310,22 @@ function registerIpc(): void {
         );
       } finally {
         actionRunning = false;
+        if (streamManager && loadSettings().autoStartStream) {
+          const blockId = request?.blockId ?? '';
+          const templateAction =
+            blockId === 'click_template_world' || blockId === 'click_template_inv';
+          const st = await streamManager.getStatus();
+          if (templateAction || !st.running) {
+            emitLog(
+              templateAction
+                ? 'Hard-resetting perception stream after template action…'
+                : 'Perception stream offline after action — restarting…',
+              'system',
+            );
+            const restarted = await streamManager.restart();
+            mainWindow?.webContents.send(IPC.STREAM_STATUS_UPDATE, restarted);
+          }
+        }
       }
     },
   );
@@ -327,6 +345,58 @@ function registerIpc(): void {
     if (!frame) return { ok: false };
     return { ok: true, imageDataUrl: frame.imageDataUrl, fetchedAt: frame.fetchedAt };
   });
+
+  ipcMain.handle(IPC.FETCH_INVENTORY_OVERLAY, async () => {
+    const frame = await fetchInventoryOverlay();
+    if (!frame) return { ok: false };
+    return { ok: true, imageDataUrl: frame.imageDataUrl, fetchedAt: frame.fetchedAt };
+  });
+
+  ipcMain.handle(IPC.FETCH_PRISTINE_CLIENT, async () => {
+    const frame = await fetchPristineClient();
+    if (!frame) return { ok: false };
+    return { ok: true, imageDataUrl: frame.imageDataUrl, fetchedAt: frame.fetchedAt };
+  });
+
+  ipcMain.handle(IPC.GET_STREAM_STATUS, async () => {
+    if (!streamManager) return { running: false, attached: false, port: 8765, url: '', inventoryOverlayUrl: '', gamePreviewUrl: '', metaUrl: '' };
+    return streamManager.getStatus();
+  });
+
+  ipcMain.handle(IPC.START_STREAM, async () => {
+    if (!streamManager) {
+      return { running: false, attached: false, port: 8765, url: '', inventoryOverlayUrl: '', gamePreviewUrl: '', metaUrl: '', error: 'Stream manager not ready' };
+    }
+    return streamManager.start();
+  });
+
+  ipcMain.handle(IPC.STOP_STREAM, async () => {
+    if (!streamManager) {
+      return { running: false, attached: false, port: 8765, url: '', inventoryOverlayUrl: '', gamePreviewUrl: '', metaUrl: '' };
+    }
+    await streamManager.stop();
+    return streamManager.getStatus();
+  });
+
+  ipcMain.handle(IPC.INVALIDATE_STREAM_CACHE, async () => {
+    streamManager?.invalidateCache();
+  });
+
+  ipcMain.handle(IPC.RESTART_STREAM, async () => {
+    if (!streamManager) {
+      return { running: false, attached: false, port: 8765, url: '', inventoryOverlayUrl: '', gamePreviewUrl: '', metaUrl: '', error: 'Stream manager not ready' };
+    }
+    const status = await streamManager.restart();
+    mainWindow?.webContents.send(IPC.STREAM_STATUS_UPDATE, status);
+    return status;
+  });
+
+  ipcMain.handle(IPC.FETCH_STREAM_META, async () => {
+    if (!streamManager) return { ok: false };
+    const status = await streamManager.getStatus();
+    if (!status.running || !status.meta) return { ok: false };
+    return { ok: true, meta: status.meta };
+  });
 }
 
 app.whenReady().then(() => {
@@ -345,6 +415,24 @@ app.whenReady().then(() => {
     },
   );
 
+  streamManager = new StreamProcessManager((line, stream) => emitLog(line, stream));
+
+  const settings = loadSettings();
+  if (settings.autoStartStream) {
+    void streamManager.start().then((status) => {
+      if (status.running) {
+        emitLog(
+          status.attached
+            ? `Attached to existing stream on port ${status.port}`
+            : `Perception stream live on port ${status.port}`,
+          'system',
+        );
+      } else if (status.error) {
+        emitLog(`Perception stream not started: ${status.error}`, 'system');
+      }
+    });
+  }
+
   emitLog('Exodia desktop ready.', 'system');
 
   app.on('activate', () => {
@@ -355,6 +443,8 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   processManager?.dispose();
   processManager = null;
+  streamManager?.dispose();
+  streamManager = null;
   if (process.platform !== 'darwin') app.quit();
 });
 

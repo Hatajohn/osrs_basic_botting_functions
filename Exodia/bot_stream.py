@@ -18,10 +18,12 @@ from urllib.parse import urlparse
 if TYPE_CHECKING:
     import bot_eyes as Eyes
     from bot_capture import CapturePipeline, PerceptionCache
+    from bot_inventory_vision import InventoryPerceptionCache
 
 __all__ = [
     "FramePublisher",
     "CaptureStreamPublisher",
+    "PerceptionStreamPublisher",
     "MJPEGStreamServer",
     "publish_game_preview",
     "GAME_PREVIEW_MAX_WIDTH",
@@ -55,11 +57,58 @@ def _resize_for_preview(img, max_width: int = GAME_PREVIEW_MAX_WIDTH):
 
 
 def publish_game_preview(publisher: "FramePublisher", bgr, *, quality: int = 80) -> None:
-    """Downscaled full-client JPEG for Electron live preview."""
+    """Downscaled pristine client JPEG for UI preview (no inventory overlay)."""
     preview = _resize_for_preview(bgr)
     data = _encode_jpeg(preview, quality=quality)
     if data:
         publisher.publish("game_preview", data)
+
+
+def publish_pristine_client_snapshot(
+    publisher: "FramePublisher",
+    bgr,
+    *,
+    quality: int = 92,
+) -> None:
+    """Full-resolution pristine client JPEG for template matching / actions."""
+    data = _encode_jpeg(bgr, quality=quality)
+    if data:
+        publisher.publish("pristine_client", data)
+
+
+def publish_inventory_overlay_live(
+    publisher: "FramePublisher",
+    bgr,
+    inv_cache: "InventoryPerceptionCache",
+    *,
+    max_width: int = GAME_PREVIEW_MAX_WIDTH,
+    quality: int = 80,
+) -> None:
+    """Composite inventory labels on a **copy** of the live frame (display only)."""
+    import numpy as np
+    from bot_inventory_items import draw_inventory_item_identify_overlay
+
+    snap = inv_cache.snapshot()
+    inv_rect = snap.inventory_rect
+    if bgr is None or not getattr(bgr, "size", 0):
+        return
+
+    pristine = np.asarray(bgr, dtype=np.uint8).copy()
+
+    if inv_rect is None or len(inv_rect) != 4:
+        preview = _resize_for_preview(pristine, max_width=max_width)
+        data = _encode_jpeg(preview, quality=quality)
+        if data:
+            publisher.publish("inventory_overlay", data)
+        return
+
+    occ = [list(row) for row in snap.occupancy]
+    items = [list(row) for row in snap.slot_items]
+    overlay_bgr = draw_inventory_item_identify_overlay(pristine, inv_rect, items, occ)
+    preview = _resize_for_preview(overlay_bgr, max_width=max_width)
+    data = _encode_jpeg(preview, quality=quality)
+    if data:
+        publisher.publish("inventory_overlay", data)
 
 
 class FramePublisher:
@@ -68,6 +117,8 @@ class FramePublisher:
     STREAM_KEYS = (
         "world_masked",
         "inventory",
+        "inventory_overlay",
+        "pristine_client",
         "action_strip",
         "chat_strip",
         "playspace",
@@ -225,6 +276,98 @@ class CaptureStreamPublisher:
                 self._stop.wait(sleep_for)
 
 
+class PerceptionStreamPublisher:
+    """
+    Publishes raw client preview + inventory overlay from ``InventoryPerceptionCache``.
+
+    When ``inventory_cache`` is set, ``/stream/inventory_overlay`` is the primary UI feed.
+    """
+
+    def __init__(
+        self,
+        publisher: FramePublisher,
+        pipeline: "CapturePipeline",
+        inventory_cache: Optional["InventoryPerceptionCache"] = None,
+        *,
+        fps: float = 0.0,
+    ) -> None:
+        self._publisher = publisher
+        self._pipeline = pipeline
+        self._inventory_cache = inventory_cache
+        raw = fps if fps > 0 else os.environ.get("EXODIA_STREAM_PUBLISH_FPS", "15")
+        try:
+            self._fps = max(1.0, float(raw))
+        except (TypeError, ValueError):
+            self._fps = 15.0
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="PerceptionStreamPublisher", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+        self._thread = None
+
+    def _run(self) -> None:
+        interval = 1.0 / self._fps
+        while not self._stop.is_set():
+            t0 = time.monotonic()
+            snap = self._pipeline.buffer.latest_copy()
+            meta: Dict[str, Any] = {}
+
+            if snap is not None:
+                publish_pristine_client_snapshot(self._publisher, snap.bgr)
+                publish_game_preview(self._publisher, snap.bgr)
+                meta = {
+                    "capture_seq": snap.seq,
+                    "client_rect": list(snap.client_rect),
+                    "capture_fps": self._pipeline.capture_fps,
+                    "ts": snap.ts,
+                }
+
+            inv_cache = self._inventory_cache
+            if inv_cache is not None:
+                if snap is not None:
+                    publish_inventory_overlay_live(self._publisher, snap.bgr, inv_cache)
+                else:
+                    overlay = inv_cache.overlay_jpeg()
+                    if overlay:
+                        self._publisher.publish("inventory_overlay", overlay)
+                inv_snap = inv_cache.snapshot()
+                meta["perception"] = inv_cache.perception_meta()
+                meta["processed_seq"] = inv_snap.processed_seq
+                meta["vision_fps"] = inv_snap.vision_fps
+                if snap is not None:
+                    meta["seq_lag"] = snap.seq - inv_snap.processed_seq
+            else:
+                pcache = self._pipeline.cache.snapshot()
+                meta.update(
+                    {
+                        "processed_seq": pcache.processed_seq,
+                        "seq_lag": (snap.seq - pcache.processed_seq) if snap else 0,
+                        "track_count": pcache.track_count,
+                        "motion_magnitude": pcache.motion_magnitude,
+                        "vision_fps": self._pipeline.vision_fps,
+                    }
+                )
+
+            if meta:
+                self._publisher.set_meta(meta)
+
+            sleep_for = interval - (time.monotonic() - t0)
+            if sleep_for > 0:
+                self._stop.wait(sleep_for)
+
+
 def _make_handler(publisher: FramePublisher):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:
@@ -317,11 +460,13 @@ class MJPEGStreamServer:
         host: str = "127.0.0.1",
         publisher: Optional[FramePublisher] = None,
         stream_publisher: Optional[CaptureStreamPublisher] = None,
+        perception_publisher: Optional[PerceptionStreamPublisher] = None,
     ) -> None:
         self.port = port
         self.host = host
         self.publisher = publisher if publisher is not None else FramePublisher()
         self.stream_publisher = stream_publisher
+        self.perception_publisher = perception_publisher
         self._httpd: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -338,6 +483,8 @@ class MJPEGStreamServer:
             return
         if self.stream_publisher is not None:
             self.stream_publisher.start()
+        if self.perception_publisher is not None:
+            self.perception_publisher.start()
         handler = _make_handler(self.publisher)
         self._httpd = HTTPServer((self.host, self.port), handler)
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -346,6 +493,8 @@ class MJPEGStreamServer:
     def stop(self) -> None:
         if self.stream_publisher is not None:
             self.stream_publisher.stop()
+        if self.perception_publisher is not None:
+            self.perception_publisher.stop()
         if self._httpd is not None:
             self._httpd.shutdown()
             self._httpd = None

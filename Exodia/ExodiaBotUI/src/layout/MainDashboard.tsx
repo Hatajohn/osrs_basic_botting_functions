@@ -15,6 +15,11 @@ type MainDashboardProps = {
   onClearLog: () => void;
   debugResult?: DebugFrameResult | null;
   debugImage?: string;
+  streamRunning?: boolean;
+  streamStale?: boolean;
+  streamRestarting?: boolean;
+  onRestartStream?: () => Promise<unknown>;
+  perception?: import('../../shared/ipc').PerceptionMeta | null;
   debugLoading: boolean;
   calibrating: boolean;
   debugMode: DebugFrameMode;
@@ -35,6 +40,11 @@ export function MainDashboard({
   onClearLog,
   debugResult,
   debugImage,
+  streamRunning,
+  streamStale,
+  streamRestarting,
+  onRestartStream,
+  perception,
   debugLoading,
   calibrating,
   debugMode,
@@ -83,6 +93,11 @@ export function MainDashboard({
             previewLive={previewLive}
             onTogglePreviewLive={onTogglePreviewLive}
             botRunning={botRunning}
+            streamRunning={streamRunning}
+            streamStale={streamStale}
+            streamRestarting={streamRestarting}
+            onRestartStream={onRestartStream}
+            perception={perception}
             actionClickPreview={actionClickPreview}
           />
         </div>

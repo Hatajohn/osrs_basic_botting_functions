@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { MenuBar } from './components/MenuBar';
 import { useLogStream } from './components/LogConsole';
 import { useBotSession } from './hooks/useBotSession';
+import { usePerceptionStream } from './hooks/usePerceptionStream';
 import { MainDashboard } from './layout/MainDashboard';
 import type { MenuActionId, MenuItemDef } from './menu/menuConfig';
 import { debugModeForAction } from './menu/menuConfig';
@@ -47,6 +48,15 @@ export default function App() {
     pauseBot,
     resumeBot,
   } = useBotSession();
+  const {
+    streamRunning,
+    streamStale,
+    streamImage,
+    perception,
+    invalidateCache,
+    restartStream,
+    restarting,
+  } = usePerceptionStream();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [aboutDetail, setAboutDetail] = useState('');
@@ -59,6 +69,10 @@ export default function App() {
 
   const refreshDebugFrame = useCallback(
     async (mode: DebugFrameMode = debugMode) => {
+      if (streamRunning && !(previewLive && botRunning)) {
+        await invalidateCache();
+        return;
+      }
       setDebugLoading(true);
       try {
         const result = await window.exodia.refreshDebugFrame(mode);
@@ -77,7 +91,7 @@ export default function App() {
         setDebugLoading(false);
       }
     },
-    [appendLog, debugMode],
+    [appendLog, debugMode, invalidateCache, previewLive, botRunning, streamRunning],
   );
 
   const runCalibrateClientRect = useCallback(async () => {
@@ -85,16 +99,31 @@ export default function App() {
     try {
       const result = await window.exodia.runCalibrateClientRect();
       if (result.ok) {
-        await refreshDebugFrame(debugMode);
+        await window.exodia.startStream();
+        if (!streamRunning) {
+          await refreshDebugFrame(debugMode);
+        }
       }
     } finally {
       setCalibrating(false);
     }
-  }, [debugMode, refreshDebugFrame]);
+  }, [debugMode, refreshDebugFrame, streamRunning]);
 
   const prepareActionClickPreview = useCallback(async () => {
     if (previewLive) {
       setPreviewLive(false);
+    }
+    // Pristine downscaled frame from stream (no inventory overlay) — matches action dry-run coords.
+    const frame = await window.exodia.fetchGamePreview();
+    if (frame.ok && frame.imageDataUrl) {
+      setDebugImage(frame.imageDataUrl);
+      setDebugResult({
+        ok: true,
+        mode: 'raw_client',
+        imageDataUrl: frame.imageDataUrl,
+        refreshedAt: frame.fetchedAt ?? Date.now(),
+      });
+      return;
     }
     await refreshDebugFrame('raw_client');
   }, [previewLive, refreshDebugFrame]);
@@ -172,7 +201,14 @@ export default function App() {
     [clearLog, appendLog, debugMode, debugImage, refreshDebugFrame, stopBot, pauseBot, resumeBot],
   );
 
-  const displayImage = previewLive && botRunning && liveImage ? liveImage : debugImage;
+  const displayImage =
+    previewLive && botRunning && liveImage
+      ? liveImage
+      : actionClickPreview && debugImage
+        ? debugImage
+      : streamRunning && streamImage && !(previewLive && botRunning)
+        ? streamImage
+        : debugImage;
 
   return (
     <div className="app">
@@ -191,6 +227,11 @@ export default function App() {
         onClearLog={clearLog}
         debugResult={debugResult}
         debugImage={displayImage}
+        streamRunning={streamRunning}
+        streamStale={streamStale}
+        streamRestarting={restarting}
+        onRestartStream={restartStream}
+        perception={perception}
         debugLoading={debugLoading}
         calibrating={calibrating}
         debugMode={debugMode}

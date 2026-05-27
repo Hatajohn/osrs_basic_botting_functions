@@ -34,6 +34,11 @@ function defaultSettings(): ExodiaSettings {
     chainsDir: '',
     scriptsFolder: '',
     streamPort: 8765,
+    autoStartStream: true,
+    streamMaxWidth: 640,
+    streamCaptureFps: 15,
+    streamVisionFps: 15,
+    streamPublishFps: 15,
   };
 }
 
@@ -46,6 +51,11 @@ export function loadSettings(): ExodiaSettings {
       ...defaults,
       ...parsed,
       streamPort: parsed.streamPort ?? defaults.streamPort,
+      autoStartStream: parsed.autoStartStream ?? defaults.autoStartStream,
+      streamMaxWidth: parsed.streamMaxWidth ?? defaults.streamMaxWidth,
+      streamCaptureFps: parsed.streamCaptureFps ?? defaults.streamCaptureFps,
+      streamVisionFps: parsed.streamVisionFps ?? defaults.streamVisionFps,
+      streamPublishFps: parsed.streamPublishFps ?? defaults.streamPublishFps,
     };
   } catch {
     return defaults;
@@ -58,6 +68,11 @@ export function saveSettings(partial: Partial<ExodiaSettings>): ExodiaSettings {
     ...current,
     ...partial,
     streamPort: partial.streamPort ?? current.streamPort,
+    autoStartStream: partial.autoStartStream ?? current.autoStartStream,
+    streamMaxWidth: partial.streamMaxWidth ?? current.streamMaxWidth,
+    streamCaptureFps: partial.streamCaptureFps ?? current.streamCaptureFps,
+    streamVisionFps: partial.streamVisionFps ?? current.streamVisionFps,
+    streamPublishFps: partial.streamPublishFps ?? current.streamPublishFps,
   };
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify(next, null, 2), 'utf8');

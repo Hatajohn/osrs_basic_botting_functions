@@ -780,6 +780,100 @@ def identify_inventory_slot_items(
     return grid, scores, diag_out
 
 
+def identify_inventory_slots_dirty(
+    client_bgr: np.ndarray,
+    inventory_rect: Sequence[int],
+    occupancy: Sequence[Sequence[bool]],
+    slot_items: Optional[List[List[Optional[str]]]],
+    dirty_slots: Sequence[Tuple[int, int]],
+    *,
+    threshold: Optional[float] = None,
+    catalog: Optional[TemplateCatalog] = None,
+    seen_registry: Optional[SeenItemRegistry] = None,
+    frame_buckets: Optional[bool] = None,
+) -> Tuple[List[List[Optional[str]]], Dict[Tuple[int, int], float]]:
+    """Re-identify only ``dirty_slots``; reuse cached labels elsewhere.
+
+    Empty slots in ``dirty_slots`` are cleared to ``None``. Occupied dirty slots run
+    ``resolve_cell_item``; unchanged slots keep prior labels from ``slot_items``.
+    """
+    if client_bgr is None or client_bgr.size == 0 or len(inventory_rect) != 4:
+        return _empty_slot_grid(), {}
+
+    grid = (
+        [list(row) for row in slot_items]
+        if slot_items is not None
+        else [[None] * INV_COLS for _ in range(INV_ROWS)]
+    )
+    while len(grid) < INV_ROWS:
+        grid.append([None] * INV_COLS)
+    for row in range(INV_ROWS):
+        while len(grid[row]) < INV_COLS:
+            grid[row].append(None)
+
+    cat = catalog if catalog is not None else load_item_catalog()
+    seen = seen_registry
+    if seen is None and _env_bool("EXODIA_SEEN_ITEMS", False):
+        seen = load_seen_registry()
+
+    rect = tuple(int(v) for v in inventory_rect[:4])
+    match_inset = _item_match_inset_px(rect)
+    scores: Dict[Tuple[int, int], float] = {}
+    frame_seen: Dict[str, MatchSignals] = {}
+    frame_bumped: set = set()
+    dirty_set = set(dirty_slots)
+
+    for row, col in dirty_set:
+        if row < 0 or row >= INV_ROWS or col < 0 or col >= INV_COLS:
+            continue
+        occupied = (
+            row < len(occupancy)
+            and col < len(occupancy[row])
+            and bool(occupancy[row][col])
+        )
+        if not occupied:
+            grid[row][col] = None
+            continue
+
+        cell = inventory_grid_cell_xywh(rect, row, col, match_inset)
+        if cell is None:
+            grid[row][col] = _UNKNOWN_LABEL
+            continue
+        x, y, w, h = cell
+        crop = client_bgr[y : y + h, x : x + w]
+        label, score, _verdict, created = resolve_cell_item(
+            crop,
+            cat,
+            seen,
+            threshold=threshold,
+            frame_seen_ids=frame_seen if _env_bool("EXODIA_SEEN_FRAME_DEDUPE", True) else None,
+            frame_bumped=frame_bumped if _env_bool("EXODIA_SEEN_FRAME_DEDUPE", True) else None,
+        )
+        scores[(row, col)] = float(score)
+        if label is None:
+            grid[row][col] = _UNKNOWN_LABEL
+        elif label.startswith("unknown:"):
+            grid[row][col] = label
+        else:
+            grid[row][col] = label
+
+    use_buckets = (
+        frame_buckets
+        if frame_buckets is not None
+        else _env_bool("EXODIA_INV_FRAME_BUCKETS", False)
+    )
+    if use_buckets and dirty_set:
+        grid, _buckets = apply_frame_fingerprint_buckets(
+            client_bgr, inventory_rect, occupancy, grid
+        )
+
+    return grid, scores
+
+
+def _empty_slot_grid() -> List[List[Optional[str]]]:
+    return [[None] * INV_COLS for _ in range(INV_ROWS)]
+
+
 def _overlay_label_text(label: str) -> str:
     if label.startswith("unknown:"):
         tid = seen_id_from_label(label) or label
@@ -803,8 +897,8 @@ def draw_inventory_item_identify_overlay(
 ) -> np.ndarray:
     """Question: How do I visualize occupancy plus item labels on a client frame?
 
-    Same base as ``inventory_test_overlay``: occupancy tint + grid, plus item labels
-    on occupied slots (name, ``unknown:<id>``, or ``?``).
+    **Display only** — copies ``client_bgr`` internally; never mutates the source frame.
+    Do not feed the returned image into template matching or action dispatch.
     """
     vis = draw_inventory_occupancy_overlay(
         client_bgr, inventory_rect, occupancy, draw_panel_outline=True
