@@ -7,6 +7,7 @@ type BotTasksPanelProps = {
   loading: boolean;
   botRun?: BotRunInfo | null;
   runtimeStatus?: RuntimeStatusPayload | null;
+  streamRunning?: boolean;
 };
 
 function formatUptime(startedAt: number | null, sessionUptimeS?: number): string {
@@ -33,6 +34,7 @@ export function BotTasksPanel({
   loading,
   botRun,
   runtimeStatus,
+  streamRunning = false,
 }: BotTasksPanelProps) {
   const hasActiveBot =
     botRun &&
@@ -84,9 +86,14 @@ export function BotTasksPanel({
           </div>
         )}
 
-        {!hasActiveBot && loading && <p>Refreshing debug frame…</p>}
+        {!hasActiveBot && loading && (
+          <p>{streamRunning ? 'Re-analyzing stream…' : 'Capturing debug frame…'}</p>
+        )}
         {!hasActiveBot && !loading && !debugResult && (
-          <p>No bot running. Start one from Scripts → Bots, or refresh the debug frame (F5).</p>
+          <p>
+            No bot running. Start one from Scripts → Bots
+            {streamRunning ? '.' : ', or calibrate to start the perception stream.'}
+          </p>
         )}
         {!hasActiveBot && !loading && debugResult && !debugResult.ok && (
           <p className="panel__error-inline">Last refresh failed: {debugResult.error ?? 'unknown error'}</p>

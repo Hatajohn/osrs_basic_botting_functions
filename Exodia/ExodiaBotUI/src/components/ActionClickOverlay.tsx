@@ -1,155 +1,22 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import type { ActionClickPreview } from '../../shared/ipc';
+import { useImageAnchoredLayout } from '../hooks/useImageAnchoredLayout';
+import {
+  computeOverlayLayout,
+  isClickLayout,
+  isFindLayout,
+  isUseOnLayout,
+  type ClickLayout,
+  type FindLayout,
+  type OverlayLayout,
+  type UseOnLayout,
+} from './overlayCoords';
 import './ActionClickOverlay.css';
-
-type PointLayout = {
-  left: number;
-  top: number;
-  score?: number;
-  searchMode?: 'inventory' | 'playspace';
-};
-
-type UseOnLayout = {
-  from: PointLayout;
-  to: PointLayout;
-};
-
-type ClickLayout = {
-  selected: PointLayout;
-  alternates: PointLayout[];
-};
-
-type FindLayout = {
-  markers: PointLayout[];
-};
 
 type ActionClickOverlayProps = {
   preview: ActionClickPreview | null;
   imageRef: React.RefObject<HTMLImageElement | null>;
 };
-
-function clientXYToLayout(
-  img: HTMLImageElement,
-  preview: ActionClickPreview,
-  clientXY: [number, number],
-  extra?: Pick<PointLayout, 'score' | 'searchMode'>,
-): PointLayout | null {
-  const { frameWidth, frameHeight } = preview;
-  if (frameWidth <= 0 || frameHeight <= 0) return null;
-
-  const nw = img.naturalWidth;
-  const nh = img.naturalHeight;
-  if (nw <= 0 || nh <= 0) return null;
-
-  const px = (clientXY[0] / frameWidth) * nw;
-  const py = (clientXY[1] / frameHeight) * nh;
-
-  const rect = img.getBoundingClientRect();
-  const scaleX = rect.width / nw;
-  const scaleY = rect.height / nh;
-
-  const wrap = img.parentElement;
-  if (!wrap) return null;
-  const wrapRect = wrap.getBoundingClientRect();
-
-  return {
-    left: rect.left - wrapRect.left + px * scaleX,
-    top: rect.top - wrapRect.top + py * scaleY,
-    score: extra?.score,
-    searchMode: extra?.searchMode,
-  };
-}
-
-function computeClickLayout(img: HTMLImageElement, preview: ActionClickPreview): ClickLayout | null {
-  if (!preview.clickClientXY) return null;
-  const selected = clientXYToLayout(img, preview, preview.clickClientXY, { score: preview.score });
-  if (!selected) return null;
-
-  const alternates: PointLayout[] = [];
-  for (const cand of preview.matchCandidates ?? []) {
-    if (cand.selected) continue;
-    const layout = clientXYToLayout(img, preview, cand.clickClientXY, {
-      score: cand.score,
-      searchMode: cand.searchMode,
-    });
-    if (layout) alternates.push(layout);
-  }
-
-  return { selected, alternates };
-}
-
-function computeFindLayout(img: HTMLImageElement, preview: ActionClickPreview): FindLayout | null {
-  const markers: PointLayout[] = [];
-  for (const cand of preview.matchCandidates ?? []) {
-    const layout = clientXYToLayout(img, preview, cand.clickClientXY, {
-      score: cand.score,
-      searchMode: cand.searchMode,
-    });
-    if (layout) markers.push(layout);
-  }
-  return markers.length > 0 ? { markers } : null;
-}
-
-function computeUseOnLayout(
-  img: HTMLImageElement,
-  preview: ActionClickPreview,
-): UseOnLayout | null {
-  if (!preview.fromClientXY || !preview.toClientXY) return null;
-  const from = clientXYToLayout(img, preview, preview.fromClientXY);
-  const to = clientXYToLayout(img, preview, preview.toClientXY);
-  if (!from || !to) return null;
-  return { from, to };
-}
-
-function useOverlayLayout(
-  imageRef: React.RefObject<HTMLImageElement | null>,
-  preview: ActionClickPreview | null,
-): ClickLayout | UseOnLayout | FindLayout | null {
-  const [layout, setLayout] = useState<ClickLayout | UseOnLayout | FindLayout | null>(null);
-
-  const update = useCallback(() => {
-    const img = imageRef.current;
-    if (!img || !preview) {
-      setLayout(null);
-      return;
-    }
-    if (preview.previewMode === 'find') {
-      setLayout(computeFindLayout(img, preview));
-      return;
-    }
-    if (preview.previewMode === 'use_on' || (preview.fromClientXY && preview.toClientXY)) {
-      setLayout(computeUseOnLayout(img, preview));
-      return;
-    }
-    setLayout(computeClickLayout(img, preview));
-  }, [imageRef, preview]);
-
-  useEffect(() => {
-    update();
-    const img = imageRef.current;
-    if (!img) return undefined;
-
-    const ro = new ResizeObserver(() => update());
-    ro.observe(img);
-    if (img.parentElement) ro.observe(img.parentElement);
-
-    return () => ro.disconnect();
-  }, [imageRef, preview, update]);
-
-  return layout;
-}
-
-function isUseOnLayout(layout: ClickLayout | UseOnLayout | FindLayout | null): layout is UseOnLayout {
-  return layout != null && 'from' in layout && 'to' in layout;
-}
-
-function isClickLayout(layout: ClickLayout | UseOnLayout | FindLayout | null): layout is ClickLayout {
-  return layout != null && 'selected' in layout;
-}
-
-function isFindLayout(layout: ClickLayout | UseOnLayout | FindLayout | null): layout is FindLayout {
-  return layout != null && 'markers' in layout;
-}
 
 function UseOnOverlay({
   layout,
@@ -299,7 +166,11 @@ function SingleClickOverlay({
 }
 
 export function ActionClickOverlay({ preview, imageRef }: ActionClickOverlayProps) {
-  const layout = useOverlayLayout(imageRef, preview);
+  const computeLayout = useCallback(
+    (img: HTMLImageElement) => (preview ? computeOverlayLayout(img, preview) : null),
+    [preview],
+  );
+  const layout = useImageAnchoredLayout<OverlayLayout>(imageRef, computeLayout, [preview]);
 
   if (!preview || !layout) return null;
 

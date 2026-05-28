@@ -45,10 +45,10 @@ def shape_match_threshold(explicit: Optional[float] = None) -> float:
     if explicit is not None:
         return float(explicit)
     if env_is_set("EXO_SHAPE_THR", "EXODIA_SHAPE_MATCH_THRESHOLD"):
-        return env_float_any(0.58, "EXO_SHAPE_THR", "EXODIA_SHAPE_MATCH_THRESHOLD")
+        return env_float_any(0.52, "EXO_SHAPE_THR", "EXODIA_SHAPE_MATCH_THRESHOLD")
     if env_is_set("EXO_SPOT_THR", "EXODIA_SPOT_THRESHOLD"):
         return env_float_any(0.45, "EXO_SPOT_THR", "EXODIA_SPOT_THRESHOLD")
-    return 0.58
+    return 0.52
 
 
 def inventory_template_threshold(explicit: Optional[float] = None) -> float:

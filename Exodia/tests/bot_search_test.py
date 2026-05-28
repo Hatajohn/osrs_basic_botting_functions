@@ -23,6 +23,10 @@ class TestBotSearch(unittest.TestCase):
         roi = playspace_search_roi(800, 600)
         self.assertEqual(roi, [0, 0, 560, 420])
 
+    def test_playspace_roi_uses_inventory_left_edge(self):
+        roi = playspace_search_roi(800, 600, inventory_rect=[580, 260, 220, 340])
+        self.assertEqual(roi, [0, 0, 580, 420])
+
     def test_search_with_pan_finds_on_second_attempt(self):
         pans = []
         calls = [0]

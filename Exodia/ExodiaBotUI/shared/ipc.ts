@@ -46,6 +46,8 @@ export const IPC = {
   LIST_ITEM_CATALOG: 'items:listCatalog',
   RESOLVE_TEMPLATE_ITEM: 'items:resolveTemplate',
   SAVE_TEMPLATE: 'templates:save',
+  GET_TEMPLATE_WATCHLIST: 'watchlist:get',
+  SET_TEMPLATE_WATCHLIST: 'watchlist:set',
 } as const;
 
 export type ItemCatalogEntry = {
@@ -155,6 +157,7 @@ export type ActionClickPreview = {
   /** Other template peaks (non-selected show as dim markers on overlay). */
   matchCandidates?: MatchCandidatePreview[];
   matchCount?: number;
+  captureSeq?: number;
 };
 
 export type RunSingleActionResult = {
@@ -280,13 +283,52 @@ export type GamePreviewResult = {
   fetchedAt?: number;
 };
 
-export type PerceptionMeta = {
+export type InventoryPerceptionMeta = {
   occupied?: number;
   unknown?: number;
   tmp_count?: number;
   inventory_calibrated?: boolean;
   vision_fps?: number;
   dirty_slots?: number[][];
+  occupancy?: boolean[][];
+  slot_items?: (string | null)[][];
+  inventory_rect?: number[] | null;
+  outline_score?: number;
+  reidentify_pending?: number;
+  capture_seq?: number;
+  processed_seq?: number;
+  inventory_watch?: Array<{
+    template: string;
+    slots: number[][];
+    points?: Array<{ slot: number[]; client_xy: number[]; score?: number }>;
+    best_score?: number | null;
+    source?: 'template' | 'labels' | 'missing_template' | 'none' | string;
+  }>;
+  inventory_template_stats?: Array<{
+    template: string;
+    slots: number;
+    best_score?: number | null;
+    source?: string;
+  }>;
+};
+
+export type WorldTemplateStat = {
+  template: string;
+  hits: number;
+  best_score?: number | null;
+};
+
+export type WorldPerceptionMeta = {
+  hits?: Array<{ template: string; client_xy: number[]; screen_xy?: number[]; score: number }>;
+  hit_count?: number;
+  templates_scanned?: string[];
+  template_stats?: WorldTemplateStat[];
+  vision_fps?: number;
+};
+
+export type PerceptionMeta = {
+  inventory?: InventoryPerceptionMeta;
+  world?: WorldPerceptionMeta;
 };
 
 export type StreamMeta = {
@@ -294,6 +336,12 @@ export type StreamMeta = {
   processed_seq?: number;
   capture_fps?: number;
   vision_fps?: number;
+  frame_age_ms?: number;
+  frame_width?: number;
+  frame_height?: number;
+  preview_width?: number;
+  preview_height?: number;
+  overlay_max_width?: number;
   perception?: PerceptionMeta;
 };
 
@@ -312,6 +360,20 @@ export type StreamStatus = {
 export type StreamMetaResult = {
   ok: boolean;
   meta?: StreamMeta;
+};
+
+export type TemplateWatchRegion = 'world' | 'inventory';
+
+export type TemplateWatchEntry = {
+  id: string;
+  template: string;
+  region: TemplateWatchRegion;
+  enabled: boolean;
+};
+
+export type TemplateWatchlist = {
+  version: 1;
+  entries: TemplateWatchEntry[];
 };
 
 export type ExodiaApi = {
@@ -350,6 +412,8 @@ export type ExodiaApi = {
   listItemCatalog: () => Promise<ItemCatalogListResult>;
   resolveTemplateItem: (imagePath: string) => Promise<ResolveTemplateItemResult>;
   saveTemplate: (request: SaveTemplateRequest) => Promise<SaveTemplateResult>;
+  getTemplateWatchlist: () => Promise<TemplateWatchlist>;
+  setTemplateWatchlist: (watchlist: TemplateWatchlist) => Promise<TemplateWatchlist>;
 };
 
 export type {

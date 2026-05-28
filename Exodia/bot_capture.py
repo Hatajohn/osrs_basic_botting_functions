@@ -33,6 +33,7 @@ Rect = List[int]
 __all__ = [
     "FrameBuffer",
     "FrameSnapshot",
+    "StreamFrameMeta",
     "PerceptionCache",
     "PerceptionSnapshot",
     "WslPsCaptureSession",
@@ -44,7 +45,10 @@ __all__ = [
     "stop_capture_pipeline",
     "capture_stream_latest",
     "capture_client_pristine",
+    "capture_client_pristine_with_meta",
     "fetch_pristine_client_http",
+    "fetch_pristine_client_http_meta",
+    "fetch_stream_meta_http",
     "stream_service_port",
     "get_capture_pipeline",
     "capture_stream_enabled",
@@ -60,6 +64,17 @@ class FrameSnapshot:
     seq: int
     ts: float
     client_rect: Rect
+    age_ms: float = 0.0
+
+
+@dataclass(frozen=True)
+class StreamFrameMeta:
+    capture_seq: int
+    width: int
+    height: int
+    frame_age_ms: float
+    source: str
+    ts: float
 
 
 @dataclass
@@ -84,11 +99,13 @@ class FrameBuffer:
         with self._lock:
             if self._bgr is None:
                 return None
+            age_ms = (time.monotonic() - self._ts) * 1000.0
             return FrameSnapshot(
                 bgr=self._bgr.copy(),
                 seq=self._seq,
                 ts=self._ts,
                 client_rect=list(self._client_rect),
+                age_ms=age_ms,
             )
 
     @property
@@ -622,6 +639,59 @@ def stream_service_port() -> int:
         return 8765
 
 
+def _http_get_json(url: str) -> Optional[Dict[str, Any]]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    try:
+        raw = urllib.request.urlopen(url, timeout=2.5).read()
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _stream_frame_meta_from_dict(data: Dict[str, Any]) -> Optional[StreamFrameMeta]:
+    try:
+        return StreamFrameMeta(
+            capture_seq=int(data["capture_seq"]),
+            width=int(data["width"]),
+            height=int(data["height"]),
+            frame_age_ms=float(data["frame_age_ms"]),
+            source=str(data["source"]),
+            ts=float(data["ts"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _stream_frame_meta_from_snapshot(snap: FrameSnapshot, *, source: str) -> StreamFrameMeta:
+    h, w = snap.bgr.shape[:2]
+    return StreamFrameMeta(
+        capture_seq=snap.seq,
+        width=w,
+        height=h,
+        frame_age_ms=round(snap.age_ms, 1),
+        source=source,
+        ts=snap.ts,
+    )
+
+
+def fetch_stream_meta_http(port: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Fetch top-level stream meta JSON from the local MJPEG service."""
+    p = stream_service_port() if port is None else int(port)
+    if p <= 0:
+        return None
+    url = "http://127.0.0.1:%d/snapshot/meta.json" % p
+    return _http_get_json(url)
+
+
 def fetch_pristine_client_http(
     port: Optional[int] = None,
     *,
@@ -648,14 +718,26 @@ def fetch_pristine_client_http(
     return img.copy()
 
 
-def capture_client_pristine(client_rect: Optional[Rect] = None) -> Optional[np.ndarray]:
-    """Latest **unannotated** client BGR for template match / actions.
+def fetch_pristine_client_http_meta(
+    port: Optional[int] = None,
+) -> Tuple[Optional[np.ndarray], Optional[StreamFrameMeta]]:
+    """Fetch pristine client JPEG + ``/snapshot/pristine_meta.json`` sidecar."""
+    p = stream_service_port() if port is None else int(port)
+    if p <= 0:
+        return None, None
+    img = fetch_pristine_client_http(p)
+    if img is None:
+        return None, None
+    meta_dict = _http_get_json("http://127.0.0.1:%d/snapshot/pristine_meta.json" % p)
+    if meta_dict is None:
+        return img, None
+    return img, _stream_frame_meta_from_dict(meta_dict)
 
-    Resolution order:
-    1. In-process ``FrameBuffer`` (same process as capture pipeline)
-    2. HTTP ``/snapshot/pristine_client`` (separate stream service process)
-    3. Synchronous screen grab
-    """
+
+def capture_client_pristine_with_meta(
+    client_rect: Optional[Rect] = None,
+) -> Tuple[Optional[np.ndarray], Optional[StreamFrameMeta]]:
+    """Latest **unannotated** client BGR plus frame metadata when available."""
     if client_rect is None:
         from bot_client_config import load_client_rect
 
@@ -665,21 +747,47 @@ def capture_client_pristine(client_rect: Optional[Rect] = None) -> Optional[np.n
     stream_on = capture_stream_enabled() or port > 0
 
     if stream_on:
-        img = capture_stream_latest(client_rect)
+        pipe = _pipeline
+        if pipe is not None and capture_stream_enabled():
+            if pipe.buffer.age_ms <= _capture_stale_ms():
+                snap = pipe.buffer.latest_copy()
+                if snap is not None:
+                    return snap.bgr.copy(), _stream_frame_meta_from_snapshot(snap, source="buffer")
+
+        img, meta = fetch_pristine_client_http_meta(port if port > 0 else None)
         if img is not None:
-            return img
-        img = fetch_pristine_client_http(port if port > 0 else None)
-        if img is not None:
-            return img
-        # Stream is configured but unavailable — do not open a competing wsl_ps grab.
-        return None
+            return img, meta
+        return None, None
 
     if client_rect and len(client_rect) == 4:
         import bot_env as Env
 
         l, t, w, h = [int(v) for v in client_rect]
-        return Env._grab_bgr_sync(l, t, w, h)
-    return None
+        img = Env._grab_bgr_sync(l, t, w, h)
+        if img is None or img.size == 0:
+            return None, None
+        ih, iw = img.shape[:2]
+        return img, StreamFrameMeta(
+            capture_seq=0,
+            width=iw,
+            height=ih,
+            frame_age_ms=0.0,
+            source="grab",
+            ts=time.monotonic(),
+        )
+    return None, None
+
+
+def capture_client_pristine(client_rect: Optional[Rect] = None) -> Optional[np.ndarray]:
+    """Latest **unannotated** client BGR for template match / actions.
+
+    Resolution order:
+    1. In-process ``FrameBuffer`` (same process as capture pipeline)
+    2. HTTP ``/snapshot/pristine_client`` (separate stream service process)
+    3. Synchronous screen grab
+    """
+    img, _meta = capture_client_pristine_with_meta(client_rect)
+    return img
 
 
 def capture_stream_latest(rect: Optional[Rect] = None) -> Optional[np.ndarray]:

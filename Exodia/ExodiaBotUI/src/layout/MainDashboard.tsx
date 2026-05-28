@@ -6,7 +6,8 @@ import { RuneLiteViewPanel } from '../panels/RuneLiteViewPanel';
 import { ScriptsPanel } from '../panels/ScriptsPanel';
 import type { BotRunInfo, RuntimeStatusPayload } from '../../shared/bots';
 import type { LogEntry } from '../components/LogConsole';
-import type { ActionClickPreview, DebugFrameMode, DebugFrameResult } from '../../shared/ipc';
+import type { ActionClickPreview, DebugFrameMode, DebugFrameResult, StreamMeta } from '../../shared/ipc';
+import type { OverlayAnnotationEntry, PushAnnotationOpts, RefreshGroupOpts } from '../hooks/useOverlayAnnotations';
 import { Splitter, useDashboardLayout } from './Splitter';
 import './MainDashboard.css';
 
@@ -14,12 +15,20 @@ type MainDashboardProps = {
   logEntries: LogEntry[];
   onClearLog: () => void;
   debugResult?: DebugFrameResult | null;
-  debugImage?: string;
+  viewportImage?: string;
+  streamPortUp?: boolean;
   streamRunning?: boolean;
   streamStale?: boolean;
   streamRestarting?: boolean;
+  streamError?: string;
   onRestartStream?: () => Promise<unknown>;
-  perception?: import('../../shared/ipc').PerceptionMeta | null;
+  perception?: import('../../shared/ipc').InventoryPerceptionMeta | null;
+  streamMeta?: StreamMeta | null;
+  showStreamDebugOverlay?: boolean;
+  onToggleStreamDebugOverlay?: (show: boolean) => void;
+  showTemplateTracks?: boolean;
+  showInventoryTracks?: boolean;
+  worldHitCount?: number;
   debugLoading: boolean;
   calibrating: boolean;
   debugMode: DebugFrameMode;
@@ -30,8 +39,11 @@ type MainDashboardProps = {
   previewLive?: boolean;
   onTogglePreviewLive?: (live: boolean) => void;
   botRunning?: boolean;
-  actionClickPreview?: ActionClickPreview | null;
-  onActionClickPreview?: (preview: ActionClickPreview | null) => void;
+  overlayAnnotations?: OverlayAnnotationEntry[];
+  latestActionPreview?: ActionClickPreview | null;
+  onPushOverlayAnnotation?: (preview: ActionClickPreview, opts?: PushAnnotationOpts) => string;
+  onClearOverlayGroup?: (blockId: string) => void;
+  onRefreshOverlayGroup?: (blockId: string, opts?: RefreshGroupOpts) => void;
   onPrepareClickPreview?: () => Promise<void>;
 };
 
@@ -39,12 +51,20 @@ export function MainDashboard({
   logEntries,
   onClearLog,
   debugResult,
-  debugImage,
+  viewportImage,
+  streamPortUp,
   streamRunning,
   streamStale,
   streamRestarting,
+  streamError,
   onRestartStream,
   perception,
+  streamMeta,
+  showStreamDebugOverlay,
+  onToggleStreamDebugOverlay,
+  showTemplateTracks,
+  showInventoryTracks,
+  worldHitCount,
   debugLoading,
   calibrating,
   debugMode,
@@ -55,8 +75,11 @@ export function MainDashboard({
   previewLive,
   onTogglePreviewLive,
   botRunning,
-  actionClickPreview,
-  onActionClickPreview,
+  overlayAnnotations = [],
+  latestActionPreview = null,
+  onPushOverlayAnnotation,
+  onClearOverlayGroup,
+  onRefreshOverlayGroup,
   onPrepareClickPreview,
 }: MainDashboardProps) {
   const containerRef = useRef<HTMLElement>(null);
@@ -83,7 +106,7 @@ export function MainDashboard({
       <section className="dashboard__center" style={{ flex: paneFlex(centerPct) }}>
         <div className="dashboard__pane" style={{ flex: paneFlex(runeliteFlex) }}>
           <RuneLiteViewPanel
-            imageDataUrl={debugImage}
+            viewportImage={viewportImage}
             result={debugResult}
             loading={debugLoading}
             calibrating={calibrating}
@@ -93,12 +116,21 @@ export function MainDashboard({
             previewLive={previewLive}
             onTogglePreviewLive={onTogglePreviewLive}
             botRunning={botRunning}
+            streamPortUp={streamPortUp}
             streamRunning={streamRunning}
             streamStale={streamStale}
             streamRestarting={streamRestarting}
+            streamError={streamError}
             onRestartStream={onRestartStream}
             perception={perception}
-            actionClickPreview={actionClickPreview}
+            streamMeta={streamMeta}
+            showStreamDebugOverlay={showStreamDebugOverlay}
+            onToggleStreamDebugOverlay={onToggleStreamDebugOverlay}
+            showTemplateTracks={showTemplateTracks}
+            showInventoryTracks={showInventoryTracks}
+            worldHitCount={worldHitCount}
+            overlayAnnotations={overlayAnnotations}
+            latestActionPreview={latestActionPreview}
           />
         </div>
 
@@ -110,6 +142,7 @@ export function MainDashboard({
             loading={debugLoading}
             botRun={botRun}
             runtimeStatus={runtimeStatus}
+            streamRunning={streamRunning}
           />
         </div>
       </section>
@@ -126,8 +159,9 @@ export function MainDashboard({
         <div className="dashboard__pane" style={{ flex: paneFlex(layout.actionsFlex) }}>
           <ActionsPanel
             botRunning={botRunning}
-            actionClickPreview={actionClickPreview}
-            onActionClickPreview={onActionClickPreview}
+            latestActionPreview={latestActionPreview}
+            onPushOverlayAnnotation={onPushOverlayAnnotation}
+            onClearOverlayGroup={onClearOverlayGroup}
             onPrepareClickPreview={onPrepareClickPreview}
           />
         </div>

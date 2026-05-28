@@ -22,6 +22,7 @@ import numpy as np
 
 from bot_capture import FrameBuffer, FrameSnapshot
 from bot_eyes import INV_COLS, INV_ROWS
+from bot_template_watchlist import WatchlistResolver, locate_inventory_watch_templates
 
 Rect = List[int]
 SlotCoord = Tuple[int, int]
@@ -157,6 +158,7 @@ class InventoryPerceptionCache:
     _dirty_slots: Tuple[SlotCoord, ...] = ()
     _reidentify_pending: int = 0
     _force_invalidate: bool = False
+    _inventory_watch: List[Dict[str, Any]] = field(default_factory=list)
 
     def request_invalidate(self) -> None:
         with self._lock:
@@ -208,6 +210,10 @@ class InventoryPerceptionCache:
             self._reidentify_pending = int(reidentify_pending)
             self._ts = time.monotonic()
 
+    def set_inventory_watch(self, matches: List[Dict[str, Any]]) -> None:
+        with self._lock:
+            self._inventory_watch = [dict(m) for m in matches]
+
     def overlay_jpeg(self) -> Optional[bytes]:
         with self._lock:
             return self._overlay_jpeg
@@ -235,8 +241,19 @@ class InventoryPerceptionCache:
                 reidentify_pending=self._reidentify_pending,
             )
 
-    def perception_meta(self) -> Dict[str, Any]:
+    def inventory_meta(self) -> Dict[str, Any]:
         snap = self.snapshot()
+        with self._lock:
+            inventory_watch = [dict(m) for m in self._inventory_watch]
+        template_stats = [
+            {
+                "template": str(entry.get("template", "")),
+                "slots": len(entry.get("slots") or []),
+                "best_score": entry.get("best_score"),
+                "source": entry.get("source"),
+            }
+            for entry in inventory_watch
+        ]
         return {
             "occupied": snap.occupied,
             "unknown": snap.unknown,
@@ -249,7 +266,15 @@ class InventoryPerceptionCache:
             "dirty_slots": [list(s) for s in snap.dirty_slots],
             "reidentify_pending": snap.reidentify_pending,
             "inventory_rect": list(snap.inventory_rect) if snap.inventory_rect else None,
+            "occupancy": [list(row) for row in snap.occupancy],
+            "slot_items": [list(row) for row in snap.slot_items],
+            "inventory_watch": inventory_watch,
+            "inventory_template_stats": template_stats,
         }
+
+    def perception_meta(self) -> Dict[str, Any]:
+        """Inventory perception meta (alias for ``inventory_meta``)."""
+        return self.inventory_meta()
 
 
 class InventoryVisionProcessor:
@@ -275,6 +300,7 @@ class InventoryVisionProcessor:
             else _env_float("EXODIA_INV_OUTLINE_REMATCH_S", 30.0)
         )
         self._control_file = control_file
+        self._watchlist = WatchlistResolver(control_file=control_file)
         self._stop = threading.Event()
         self._vision_thread: Optional[threading.Thread] = None
         self._identify_thread: Optional[threading.Thread] = None
@@ -441,6 +467,20 @@ class InventoryVisionProcessor:
             dirty_slots=dirty,
             reidentify_pending=self._pending_identify_count(),
         )
+
+        self._watchlist.refresh()
+        inv_templates = self._watchlist.inventory_template_names()
+        if inv_templates:
+            watch_matches = locate_inventory_watch_templates(
+                snap.bgr,
+                inv_rect,
+                snap.client_rect,
+                inv_templates,
+                slot_items=items_snapshot,
+            )
+            self._cache.set_inventory_watch(watch_matches)
+        else:
+            self._cache.set_inventory_watch([])
 
     def _run_frame_buckets_if_idle(self) -> None:
         if self._pending_identify_count() > 0:

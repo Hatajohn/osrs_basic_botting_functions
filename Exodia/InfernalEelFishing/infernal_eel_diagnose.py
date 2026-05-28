@@ -32,8 +32,8 @@ from .infernal_eel_fsm import (
     EEL_ITEM_NAME,
     HAMMER_ITEM_NAME,
     SPOT_TEMPLATES,
-    SPOT_TEMPLATE_THRESHOLD,
-    _locate_spots,
+    _locate_spots_cyan,
+    _locate_spots_shape,
 )
 from .infernal_eel_log import LOGS_DIR, ensure_logs_dir
 
@@ -117,8 +117,16 @@ def main() -> int:
     for label, count in buckets[:12]:
         print("  bucket %s x%d" % (label, count))
 
-    spots = _locate_spots(bot_e)
-    print("infernal spot hits:", len(spots), "(thr=%.2f)" % SPOT_TEMPLATE_THRESHOLD)
+    from bot_shape_match import shape_match_threshold
+    from bot_world_objects import world_match_threshold
+
+    shape_hits = _locate_spots_shape(bot_e)
+    spots = shape_hits if shape_hits else _locate_spots_cyan(bot_e)
+    locate_mode = "shape" if shape_hits else ("cyan" if spots else "none")
+    print(
+        "infernal spot hits: %d (mode=%s shape_thr=%.2f cyan_thr=%.2f)"
+        % (len(spots), locate_mode, shape_match_threshold(), world_match_threshold())
+    )
     for i, pt in enumerate(spots[:5]):
         print("  [%d] click=%s" % (i, pt))
 

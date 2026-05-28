@@ -6,14 +6,19 @@ export type EnabledWhen =
   | 'botRunning'
   | 'chainDirty'
   | 'previewLive'
-  | 'hasDebugFrame';
+  | 'hasDebugFrame'
+  | 'streamDown'
+  | 'streamRunning';
 
 export type MenuContext = {
   botRunning: boolean;
   chainDirty: boolean;
   previewLive: boolean;
   hasDebugFrame: boolean;
+  streamRunning: boolean;
   debugMode: DebugFrameMode;
+  showTemplateTracks: boolean;
+  showInventoryTracks: boolean;
 };
 
 export type MenuActionId =
@@ -36,6 +41,8 @@ export type MenuActionId =
   | 'previewFps'
   | 'overlayLayers'
   | 'togglePlayByPlay'
+  | 'toggleShowTemplateTracks'
+  | 'toggleShowInventoryTracks'
   | 'tools'
   | 'about'
   | 'openLogsFolder';
@@ -131,7 +138,7 @@ export const MENUS: MenuDef[] = [
     items: [
       {
         id: 'refreshDebugFrame',
-        label: 'Refresh debug frame',
+        label: 'Re-analyze stream',
         shortcut: 'F5',
         enabledWhen: 'always',
         phase: 1,
@@ -141,28 +148,45 @@ export const MENUS: MenuDef[] = [
         label: 'Save RuneLite snapshot',
         enabledWhen: 'hasDebugFrame',
         phase: 1,
-        stubMessage: 'Refresh a debug frame first',
+        stubMessage: 'No frame available to save',
       },
       {
         id: 'debugModeInventoryIdentify',
-        label: 'Inventory identify',
-        enabledWhen: 'always',
+        label: 'Inventory identify (debug recovery)',
+        enabledWhen: 'streamDown',
         phase: 1,
         radioGroup: 'debugMode',
+        stubMessage: 'Debug capture modes apply only when the perception stream is offline',
       },
       {
         id: 'debugModeRawClient',
-        label: 'Raw client',
-        enabledWhen: 'always',
+        label: 'Raw client (debug recovery)',
+        enabledWhen: 'streamDown',
         phase: 1,
         radioGroup: 'debugMode',
+        stubMessage: 'Debug capture modes apply only when the perception stream is offline',
       },
       {
         id: 'debugModeGrid',
-        label: 'Grid only',
-        enabledWhen: 'always',
+        label: 'Grid only (debug recovery)',
+        enabledWhen: 'streamDown',
         phase: 1,
         radioGroup: 'debugMode',
+        stubMessage: 'Debug capture modes apply only when the perception stream is offline',
+      },
+      {
+        id: 'toggleShowTemplateTracks',
+        label: 'Show template tracks',
+        enabledWhen: 'streamRunning',
+        phase: 1,
+        radioGroup: 'templateTracks',
+      },
+      {
+        id: 'toggleShowInventoryTracks',
+        label: 'Show inventory tracks',
+        enabledWhen: 'streamRunning',
+        phase: 1,
+        radioGroup: 'inventoryTracks',
       },
       {
         id: 'previewFps',
@@ -233,6 +257,10 @@ export function isMenuItemEnabled(
       return ctx.previewLive;
     case 'hasDebugFrame':
       return ctx.hasDebugFrame;
+    case 'streamDown':
+      return !ctx.streamRunning;
+    case 'streamRunning':
+      return ctx.streamRunning;
     default:
       return false;
   }
@@ -254,6 +282,8 @@ export const PHASE1_ENABLED = new Set<MenuActionId>([
   'debugModeRawClient',
   'debugModeGrid',
   'openLogsFolder',
+  'toggleShowTemplateTracks',
+  'toggleShowInventoryTracks',
 ]);
 
 /** Phase 2 enabled items. */
@@ -285,6 +315,10 @@ export function debugModeForAction(actionId: MenuActionId): DebugFrameMode | nul
 
 export function isDebugModeSelected(mode: DebugFrameMode, actionId: MenuActionId): boolean {
   return debugModeForAction(actionId) === mode;
+}
+
+export function refreshMenuLabel(ctx: MenuContext): string {
+  return ctx.streamRunning ? 'Re-analyze stream' : 'Capture debug frame (recovery)';
 }
 
 export function menuLabelForDebugMode(mode: DebugFrameMode): string {

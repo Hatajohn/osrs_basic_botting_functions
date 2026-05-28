@@ -1,0 +1,10 @@
+---
+description: Exodia testing policy — user judges pass/fail; no new tests
+alwaysApply: true
+---
+
+# Exodia testing policy
+
+- **The user is the judge** of whether a test actually passes. Do not declare success based only on exit codes, assertions, or automated output.
+- **Do not create tests** — no new test files, test cases, or test harnesses unless the user explicitly asks for them.
+- Running existing tests or scripts for debugging is fine; interpreting results is the user's call.

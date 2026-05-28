@@ -1,0 +1,114 @@
+.perception-debug-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.perception-debug-overlay__id-list {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  max-width: min(220px, 38%);
+  max-height: min(280px, 55%);
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.perception-debug-overlay__id-list-title {
+  flex-shrink: 0;
+  padding: 3px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(187, 247, 208, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.perception-debug-overlay__id-list-items {
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.perception-debug-overlay__id-list-items li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+}
+
+.perception-debug-overlay__id-swatch {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.perception-debug-overlay__id-list-num {
+  flex-shrink: 0;
+  min-width: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.perception-debug-overlay__id-list-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.perception-debug-overlay__inv-rect {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* Inventory ID index — small pin above slot center, not covering the icon */
+.perception-debug-overlay__slot-dot {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 3px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 11px;
+  height: 11px;
+  padding: 0 2px;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.65);
+}
+
+/* Template track pin — sits above match point, does not cover the sprite */
+.perception-debug-overlay__track-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  transform: translate(-50%, calc(-100% - 4px));
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  opacity: 0.92;
+}

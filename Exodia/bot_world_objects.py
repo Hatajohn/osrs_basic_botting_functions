@@ -291,6 +291,9 @@ def _locate_via_cyan_markers(
     template_paths: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[WorldObjectHit], List[CyanMarkerRegion], int]:
     """Match each template inside the icon window above every cyan tile marker."""
+    from bot_shape_match import shape_preprocess_playspace
+
+    use_shape = shape_preprocess_playspace()
     regions = locate_cyan_marker_regions(client_bgr, search_roi)
     h0, w0 = client_bgr.shape[:2]
     raw_hits: List[WorldObjectHit] = []
@@ -330,6 +333,8 @@ def _locate_via_cyan_markers(
                 template_path=str(tpl_path),
                 frame_bgr=client_bgr,
                 max_peaks=1,
+                shape_preprocess=use_shape,
+                shape_playspace=True,
             )
             if not detailed.matches:
                 continue
@@ -361,6 +366,9 @@ def _locate_via_playspace_scan(
     bot_e: "Eyes.BotEyes",
     template_paths: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[WorldObjectHit], int]:
+    from bot_shape_match import shape_preprocess_playspace
+
+    use_shape = shape_preprocess_playspace()
     raw_hits: List[WorldObjectHit] = []
     inventory_filtered = 0
     for name in template_names:
@@ -375,6 +383,8 @@ def _locate_via_playspace_scan(
             search_roi=search_roi,
             template_path=str(tpl_path),
             frame_bgr=client_bgr,
+            shape_preprocess=use_shape,
+            shape_playspace=True,
         )
         filtered, dropped = filter_matches_outside_rect(detailed.matches, inventory_rect)
         inventory_filtered += dropped

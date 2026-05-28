@@ -38,19 +38,68 @@ from bot_inventory_items import (  # noqa: E402
     is_frame_bucket_label,
 )
 from tests.inventory_test_common import capture_client_bgr, locate_inventory_rect  # noqa: E402
+from bot_stream_client import (  # noqa: E402
+    configure_action_stream_env,
+    fetch_stream_snapshot,
+    stream_expected,
+    stream_snapshot_usable,
+)
+
+from bot_stream import preview_max_width  # noqa: E402
 
 _OUTPUT_PATH = _EXODIA / "captures" / "ui_debug_latest.png"
-_MAX_WIDTH = 640
 
 _MODES = ("inventory_identify", "raw_client", "inventory_grid")
 
 
 def _ensure_capture_env() -> None:
     os.chdir(_EXODIA)
+    configure_action_stream_env()
     ps = Path("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
     if ps.is_file() and not os.environ.get("EXODIA_CAPTURE_BACKEND"):
         os.environ["EXODIA_CAPTURE_BACKEND"] = "wsl_ps"
     os.environ.setdefault("EXODIA_INV_FRAME_BUCKETS", "1")
+
+
+def _sync_grab_client_bgr() -> Tuple[Optional[np.ndarray], Optional[str]]:
+    """Recovery-only synchronous screen grab (never used when stream snapshot is fresh)."""
+    from bot_client_config import load_client_rect
+    import bot_env as Env
+
+    rect = load_client_rect()
+    if not rect or len(rect) != 4:
+        return None, "missing or invalid client_rect.json"
+    try:
+        l, t, w, h = [int(v) for v in rect]
+        bgr = Env._grab_bgr_sync(l, t, w, h)
+    except Exception as exc:
+        return None, "capture failed: %s" % exc
+    if bgr is None or bgr.size == 0:
+        return None, "capture returned empty frame"
+    if float(bgr.mean()) < 8.0:
+        return None, "capture looks blank (mean pixel %.1f)" % float(bgr.mean())
+    return bgr, None
+
+
+def _capture_client_bgr(*, force_sync: bool = False) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    """Latest client BGR for debug overlay — stream snapshot when expected, sync grab for recovery."""
+    if stream_expected():
+        snap = fetch_stream_snapshot()
+        ok, _reason = stream_snapshot_usable(snap, require_calibrated=False)
+        if ok and not force_sync:
+            return None, (
+                "perception stream is live — use the game preview "
+                "(Refresh invalidates cache when stream is healthy)"
+            )
+        if snap is not None and snap.bgr is not None and getattr(snap.bgr, "size", 0):
+            return np.asarray(snap.bgr, dtype=np.uint8).copy(), None
+        if force_sync:
+            return _sync_grab_client_bgr()
+        return None, (
+            "stream frame unavailable — start or hard-reset the perception stream, "
+            "or pass --force-sync for recovery capture"
+        )
+    return capture_client_bgr()
 
 
 def _scale_to_max_width(image: np.ndarray, max_width: int) -> np.ndarray:
@@ -89,11 +138,11 @@ def _emit(result: Dict[str, Any]) -> None:
     print(json.dumps(result, separators=(",", ":")))
 
 
-def render_debug_frame(mode: str) -> Dict[str, Any]:
+def render_debug_frame(mode: str, *, force_sync: bool = False) -> Dict[str, Any]:
     if mode not in _MODES:
         return {"ok": False, "mode": mode, "error": "invalid mode: %s" % mode}
 
-    client, err = capture_client_bgr()
+    client, err = _capture_client_bgr(force_sync=force_sync)
     if client is None:
         return {
             "ok": False,
@@ -103,7 +152,7 @@ def render_debug_frame(mode: str) -> Dict[str, Any]:
         }
 
     if mode == "raw_client":
-        overlay = _scale_to_max_width(client, _MAX_WIDTH)
+        overlay = _scale_to_max_width(client, preview_max_width())
         _OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
         if not cv2.imwrite(str(_OUTPUT_PATH), overlay):
             return {"ok": False, "mode": mode, "error": "failed to write %s" % _OUTPUT_PATH}
@@ -143,7 +192,7 @@ def render_debug_frame(mode: str) -> Dict[str, Any]:
             client, inv_rect, occ, draw_panel_outline=True
         )
 
-    overlay = _scale_to_max_width(overlay, _MAX_WIDTH)
+    overlay = _scale_to_max_width(overlay, preview_max_width())
     _OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not cv2.imwrite(str(_OUTPUT_PATH), overlay):
         return {"ok": False, "mode": mode, "error": "failed to write %s" % _OUTPUT_PATH}
@@ -168,9 +217,14 @@ def main() -> int:
         default="inventory_identify",
         help="overlay style (default: inventory_identify)",
     )
+    parser.add_argument(
+        "--force-sync",
+        action="store_true",
+        help="recovery: sync screen grab when stream snapshot is unavailable",
+    )
     args = parser.parse_args()
     _ensure_capture_env()
-    result = render_debug_frame(args.mode)
+    result = render_debug_frame(args.mode, force_sync=bool(args.force_sync))
     _emit(result)
     return 0 if result.get("ok") else 1
 

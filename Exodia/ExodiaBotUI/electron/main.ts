@@ -13,6 +13,7 @@ import {
   type DebugFrameMode,
   type LogLinePayload,
   type SmokeTestResult,
+  type TemplateWatchlist,
 } from '../shared/ipc';
 import { listActionBlocks, runSingleAction } from './actionRunner';
 import { refreshDebugFrame, saveDebugFrameSnapshot } from './debugFrame';
@@ -21,6 +22,7 @@ import { listDirectory, readTextFile } from './files';
 import { listItemCatalog, resolveTemplateItem } from './itemCatalog';
 import { saveTemplate } from './saveTemplate';
 import { selectTemplateFile } from './templateFile';
+import { loadTemplateWatchlist, saveTemplateWatchlist, syncWatchlistToControlFile } from './templateWatchlist';
 import { loadBotsManifest } from './manifestLoader';
 import { fetchGamePreview, fetchInventoryOverlay, fetchPristineClient } from './previewClient';
 import { StreamProcessManager } from './streamManager';
@@ -258,6 +260,20 @@ function registerIpc(): void {
       emitLog('Calibration cancelled.', 'system');
     } else if (result.ok) {
       emitLog('Client rect calibration saved.', 'system');
+      if (streamManager) {
+        const status = await streamManager.start();
+        mainWindow?.webContents.send(IPC.STREAM_STATUS_UPDATE, status);
+        if (status.running) {
+          emitLog(
+            status.attached
+              ? `Attached to perception stream on port ${status.port}`
+              : `Perception stream live on port ${status.port}`,
+            'system',
+          );
+        } else if (status.error) {
+          emitLog(`Perception stream failed to start: ${status.error}`, 'stderr');
+        }
+      }
     } else if (result.error) {
       emitLog(result.error, 'stderr');
     }
@@ -302,6 +318,17 @@ function registerIpc(): void {
         return { ok: false, blockId: request?.blockId ?? '', error };
       }
       actionRunning = true;
+      const settings = loadSettings();
+      const blockId = request?.blockId ?? '';
+      const templateAction =
+        blockId === 'click_template_world' || blockId === 'click_template_inv';
+      let seqBefore = 0;
+      let port = settings.streamPort ?? 8765;
+      if (streamManager) {
+        const stBefore = await streamManager.getStatus();
+        seqBefore = stBefore.meta?.capture_seq ?? 0;
+        port = stBefore.port;
+      }
       try {
         return await runSingleAction(
           request,
@@ -310,18 +337,17 @@ function registerIpc(): void {
         );
       } finally {
         actionRunning = false;
-        if (streamManager && loadSettings().autoStartStream) {
-          const blockId = request?.blockId ?? '';
-          const templateAction =
-            blockId === 'click_template_world' || blockId === 'click_template_inv';
+        if (streamManager) {
           const st = await streamManager.getStatus();
-          if (templateAction || !st.running) {
-            emitLog(
-              templateAction
-                ? 'Hard-resetting perception stream after template action…'
-                : 'Perception stream offline after action — restarting…',
-              'system',
-            );
+          if (templateAction) {
+            const advanced = await streamManager.waitForCaptureSeqAdvance(port, seqBefore, 2000);
+            if (!advanced) {
+              emitLog('Stream capture_seq frozen after action — hard-resetting…', 'system');
+              const restarted = await streamManager.restart();
+              mainWindow?.webContents.send(IPC.STREAM_STATUS_UPDATE, restarted);
+            }
+          } else if (!st.running) {
+            emitLog('Perception stream offline after action — restarting…', 'system');
             const restarted = await streamManager.restart();
             mainWindow?.webContents.send(IPC.STREAM_STATUS_UPDATE, restarted);
           }
@@ -397,6 +423,14 @@ function registerIpc(): void {
     if (!status.running || !status.meta) return { ok: false };
     return { ok: true, meta: status.meta };
   });
+
+  ipcMain.handle(IPC.GET_TEMPLATE_WATCHLIST, () => loadTemplateWatchlist());
+
+  ipcMain.handle(IPC.SET_TEMPLATE_WATCHLIST, (_event, watchlist: TemplateWatchlist) => {
+    const saved = saveTemplateWatchlist(watchlist);
+    streamManager?.syncWatchlistControl();
+    return saved;
+  });
 }
 
 app.whenReady().then(() => {
@@ -417,21 +451,25 @@ app.whenReady().then(() => {
 
   streamManager = new StreamProcessManager((line, stream) => emitLog(line, stream));
 
-  const settings = loadSettings();
-  if (settings.autoStartStream) {
-    void streamManager.start().then((status) => {
-      if (status.running) {
-        emitLog(
-          status.attached
-            ? `Attached to existing stream on port ${status.port}`
-            : `Perception stream live on port ${status.port}`,
-          'system',
-        );
-      } else if (status.error) {
-        emitLog(`Perception stream not started: ${status.error}`, 'system');
-      }
-    });
+  try {
+    const { resolvedExodiaRoot } = resolveSettings(loadSettings());
+    syncWatchlistToControlFile(resolvedExodiaRoot);
+  } catch {
+    // settings may be incomplete on first launch
   }
+
+  void streamManager.start().then((status) => {
+    if (status.running) {
+      emitLog(
+        status.attached
+          ? `Attached to existing stream on port ${status.port}`
+          : `Perception stream live on port ${status.port}`,
+        'system',
+      );
+    } else if (status.error) {
+      emitLog(`Perception stream not started: ${status.error}`, 'system');
+    }
+  });
 
   emitLog('Exodia desktop ready.', 'system');
 

@@ -2,12 +2,13 @@ import { useCallback, useState } from 'react';
 import { MenuBar } from './components/MenuBar';
 import { useLogStream } from './components/LogConsole';
 import { useBotSession } from './hooks/useBotSession';
+import { useOverlayAnnotations } from './hooks/useOverlayAnnotations';
 import { usePerceptionStream } from './hooks/usePerceptionStream';
 import { MainDashboard } from './layout/MainDashboard';
 import type { MenuActionId, MenuItemDef } from './menu/menuConfig';
 import { debugModeForAction } from './menu/menuConfig';
 import { SettingsPage } from './pages/SettingsPage';
-import type { ActionClickPreview, DebugFrameMode, DebugFrameResult } from '../shared/ipc';
+import type { DebugFrameMode, DebugFrameResult } from '../shared/ipc';
 import './App.css';
 
 function AboutModal({
@@ -49,23 +50,37 @@ export default function App() {
     resumeBot,
   } = useBotSession();
   const {
+    streamPortUp,
     streamRunning,
     streamStale,
     streamImage,
+    streamMeta,
     perception,
+    worldHitCount,
     invalidateCache,
     restartStream,
+    startStream,
     restarting,
+    streamError,
   } = usePerceptionStream();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [aboutDetail, setAboutDetail] = useState('');
+  const [showStreamDebugOverlay, setShowStreamDebugOverlay] = useState(false);
+  const [showTemplateTracks, setShowTemplateTracks] = useState(true);
+  const [showInventoryTracks, setShowInventoryTracks] = useState(true);
   const [debugMode, setDebugMode] = useState<DebugFrameMode>('inventory_identify');
   const [debugResult, setDebugResult] = useState<DebugFrameResult | null>(null);
   const [debugImage, setDebugImage] = useState<string | undefined>();
   const [debugLoading, setDebugLoading] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
-  const [actionClickPreview, setActionClickPreview] = useState<ActionClickPreview | null>(null);
+  const {
+    annotations: overlayAnnotations,
+    latestPreview: latestActionPreview,
+    pushAnnotation,
+    clearGroup: clearOverlayGroup,
+    refreshGroup: refreshOverlayGroup,
+  } = useOverlayAnnotations();
 
   const refreshDebugFrame = useCallback(
     async (mode: DebugFrameMode = debugMode) => {
@@ -99,34 +114,26 @@ export default function App() {
     try {
       const result = await window.exodia.runCalibrateClientRect();
       if (result.ok) {
-        await window.exodia.startStream();
-        if (!streamRunning) {
-          await refreshDebugFrame(debugMode);
-        }
+        await startStream();
       }
     } finally {
       setCalibrating(false);
     }
-  }, [debugMode, refreshDebugFrame, streamRunning]);
+  }, [startStream]);
 
   const prepareActionClickPreview = useCallback(async () => {
     if (previewLive) {
       setPreviewLive(false);
     }
-    // Pristine downscaled frame from stream (no inventory overlay) — matches action dry-run coords.
-    const frame = await window.exodia.fetchGamePreview();
-    if (frame.ok && frame.imageDataUrl) {
-      setDebugImage(frame.imageDataUrl);
-      setDebugResult({
-        ok: true,
-        mode: 'raw_client',
-        imageDataUrl: frame.imageDataUrl,
-        refreshedAt: frame.fetchedAt ?? Date.now(),
-      });
-      return;
-    }
-    await refreshDebugFrame('raw_client');
-  }, [previewLive, refreshDebugFrame]);
+    // Stream stays the base layer; action overlays stack on top (no debug-image swap).
+  }, [previewLive, setPreviewLive]);
+
+  const viewportImage =
+    previewLive && botRunning && liveImage
+      ? liveImage
+      : streamPortUp && streamImage && !(previewLive && botRunning)
+        ? streamImage
+        : debugImage;
 
   const handleMenuAction = useCallback(
     async (actionId: MenuActionId, _item: MenuItemDef) => {
@@ -159,11 +166,12 @@ export default function App() {
           await refreshDebugFrame(debugMode);
           break;
         case 'saveSnapshot': {
-          if (!debugImage) {
-            appendLog({ line: 'No debug frame to save.', stream: 'system', ts: Date.now() });
+          const snapshot = viewportImage;
+          if (!snapshot) {
+            appendLog({ line: 'No frame to save.', stream: 'system', ts: Date.now() });
             break;
           }
-          const saved = await window.exodia.saveDebugSnapshot(debugImage);
+          const saved = await window.exodia.saveDebugSnapshot(snapshot);
           if (saved.ok && saved.path) {
             appendLog({ line: `Saved snapshot: ${saved.path}`, stream: 'system', ts: Date.now() });
           } else if (!saved.canceled && saved.error) {
@@ -178,6 +186,12 @@ export default function App() {
           if (mode) setDebugMode(mode);
           break;
         }
+        case 'toggleShowTemplateTracks':
+          setShowTemplateTracks((v) => !v);
+          break;
+        case 'toggleShowInventoryTracks':
+          setShowInventoryTracks((v) => !v);
+          break;
         case 'botStop':
           await stopBot();
           break;
@@ -198,17 +212,8 @@ export default function App() {
           });
       }
     },
-    [clearLog, appendLog, debugMode, debugImage, refreshDebugFrame, stopBot, pauseBot, resumeBot],
+    [clearLog, appendLog, debugMode, refreshDebugFrame, stopBot, pauseBot, resumeBot, viewportImage],
   );
-
-  const displayImage =
-    previewLive && botRunning && liveImage
-      ? liveImage
-      : actionClickPreview && debugImage
-        ? debugImage
-      : streamRunning && streamImage && !(previewLive && botRunning)
-        ? streamImage
-        : debugImage;
 
   return (
     <div className="app">
@@ -218,20 +223,31 @@ export default function App() {
           botRunning,
           chainDirty: false,
           previewLive: previewLive && botRunning,
-          hasDebugFrame: Boolean(displayImage),
+          hasDebugFrame: Boolean(viewportImage),
+          streamRunning,
           debugMode,
+          showTemplateTracks,
+          showInventoryTracks,
         }}
       />
       <MainDashboard
         logEntries={logEntries}
         onClearLog={clearLog}
         debugResult={debugResult}
-        debugImage={displayImage}
+        viewportImage={viewportImage}
+        streamPortUp={streamPortUp}
         streamRunning={streamRunning}
         streamStale={streamStale}
         streamRestarting={restarting}
+        streamError={streamError}
         onRestartStream={restartStream}
         perception={perception}
+        streamMeta={streamMeta}
+        showStreamDebugOverlay={showStreamDebugOverlay}
+        onToggleStreamDebugOverlay={setShowStreamDebugOverlay}
+        showTemplateTracks={showTemplateTracks}
+        showInventoryTracks={showInventoryTracks}
+        worldHitCount={worldHitCount}
         debugLoading={debugLoading}
         calibrating={calibrating}
         debugMode={debugMode}
@@ -242,8 +258,11 @@ export default function App() {
         previewLive={previewLive}
         onTogglePreviewLive={setPreviewLive}
         botRunning={botRunning}
-        actionClickPreview={actionClickPreview}
-        onActionClickPreview={setActionClickPreview}
+        overlayAnnotations={overlayAnnotations}
+        latestActionPreview={latestActionPreview}
+        onPushOverlayAnnotation={pushAnnotation}
+        onClearOverlayGroup={clearOverlayGroup}
+        onRefreshOverlayGroup={refreshOverlayGroup}
         onPrepareClickPreview={prepareActionClickPreview}
       />
       <SettingsPage

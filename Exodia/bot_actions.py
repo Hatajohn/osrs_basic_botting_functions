@@ -19,14 +19,21 @@ def bgr_bounds_from_color(color, shade):
     return lower, upper
 
 
-def bot_init(DEBUG=False, win_rect=None, window_title="RuneLite"):
+def bot_init(DEBUG=False, win_rect=None, window_title="RuneLite", refresh_frame=None):
     """Question: How do I create and wire client, eyes, and arms for a bot session?"""
     if win_rect is not None:
         client = Client.FixedClientWindow(win_rect)
     else:
         client = Client.ClientWindow(DEBUG=DEBUG, window_title_substring=window_title)
     bot_e = Eyes.BotEyes(DEBUG=DEBUG)
-    bot_e.setRect(client.win_rect)
+    if refresh_frame is None:
+        try:
+            from bot_stream_client import stream_expected
+
+            refresh_frame = not stream_expected()
+        except ImportError:
+            refresh_frame = True
+    bot_e.setRect(client.win_rect, refresh=refresh_frame)
     bot_a = Arms.BotArms()
     return [client, bot_e, bot_a]
 

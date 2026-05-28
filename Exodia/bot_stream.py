@@ -26,11 +26,38 @@ __all__ = [
     "PerceptionStreamPublisher",
     "MJPEGStreamServer",
     "publish_game_preview",
+    "preview_dimensions",
+    "preview_max_width",
     "GAME_PREVIEW_MAX_WIDTH",
 ]
 
 BOUNDARY = b"frame"
 GAME_PREVIEW_MAX_WIDTH = 640
+
+
+def preview_max_width() -> int:
+    """Default preview scale — matches ``EXODIA_DEBUG_FRAME_MAX_WIDTH`` / UI stream max width."""
+    raw = os.environ.get("EXODIA_DEBUG_FRAME_MAX_WIDTH", str(GAME_PREVIEW_MAX_WIDTH))
+    try:
+        width = int(raw)
+    except (TypeError, ValueError):
+        width = GAME_PREVIEW_MAX_WIDTH
+    return width if width > 0 else GAME_PREVIEW_MAX_WIDTH
+
+
+def preview_dimensions(frame_w: int, frame_h: int, max_width: int) -> tuple[int, int]:
+    """Display size after max-width downscale (same contract as ``bot_chain._frame_display_scale``)."""
+    w, h = int(frame_w), int(frame_h)
+    mw = int(max_width)
+    if w <= mw or mw <= 0:
+        return w, h
+    scale = mw / float(w)
+    return max(1, int(round(w * scale))), max(1, int(round(h * scale)))
+
+
+def _baked_overlay_enabled() -> bool:
+    """Server-side inventory/world JPEG composite (off by default; UI draws debug overlays client-side)."""
+    return os.environ.get("EXODIA_STREAM_BAKED_OVERLAY", "0").strip().lower() in ("1", "true", "yes")
 
 
 def _encode_jpeg(img, quality: int = 85) -> Optional[bytes]:
@@ -48,17 +75,22 @@ def _resize_for_preview(img, max_width: int = GAME_PREVIEW_MAX_WIDTH):
     if img is None or not getattr(img, "size", 0):
         return None
     h, w = img.shape[:2]
-    if w <= max_width:
+    new_w, new_h = preview_dimensions(w, h, max_width)
+    if new_w == w and new_h == h:
         return img
-    scale = max_width / float(w)
-    new_w = max_width
-    new_h = max(1, int(round(h * scale)))
     return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
 
-def publish_game_preview(publisher: "FramePublisher", bgr, *, quality: int = 80) -> None:
+def publish_game_preview(
+    publisher: "FramePublisher",
+    bgr,
+    *,
+    max_width: Optional[int] = None,
+    quality: int = 80,
+) -> None:
     """Downscaled pristine client JPEG for UI preview (no inventory overlay)."""
-    preview = _resize_for_preview(bgr)
+    mw = int(max_width) if max_width is not None else preview_max_width()
+    preview = _resize_for_preview(bgr, max_width=mw)
     data = _encode_jpeg(preview, quality=quality)
     if data:
         publisher.publish("game_preview", data)
@@ -81,13 +113,15 @@ def publish_inventory_overlay_live(
     bgr,
     inv_cache: "InventoryPerceptionCache",
     *,
-    max_width: int = GAME_PREVIEW_MAX_WIDTH,
+    world_cache: Any = None,
+    max_width: Optional[int] = None,
     quality: int = 80,
 ) -> None:
-    """Composite inventory labels on a **copy** of the live frame (display only)."""
+    """Composite inventory + world detect on a **copy** of the live frame (display only)."""
     import numpy as np
     from bot_inventory_items import draw_inventory_item_identify_overlay
 
+    mw = int(max_width) if max_width is not None else preview_max_width()
     snap = inv_cache.snapshot()
     inv_rect = snap.inventory_rect
     if bgr is None or not getattr(bgr, "size", 0):
@@ -95,17 +129,35 @@ def publish_inventory_overlay_live(
 
     pristine = np.asarray(bgr, dtype=np.uint8).copy()
 
-    if inv_rect is None or len(inv_rect) != 4:
-        preview = _resize_for_preview(pristine, max_width=max_width)
-        data = _encode_jpeg(preview, quality=quality)
-        if data:
-            publisher.publish("inventory_overlay", data)
-        return
+    if inv_rect is not None and len(inv_rect) == 4:
+        occ = [list(row) for row in snap.occupancy]
+        items = [list(row) for row in snap.slot_items]
+        overlay_bgr = draw_inventory_item_identify_overlay(pristine, inv_rect, items, occ)
+    else:
+        overlay_bgr = pristine
 
-    occ = [list(row) for row in snap.occupancy]
-    items = [list(row) for row in snap.slot_items]
-    overlay_bgr = draw_inventory_item_identify_overlay(pristine, inv_rect, items, occ)
-    preview = _resize_for_preview(overlay_bgr, max_width=max_width)
+    if world_cache is not None:
+        from bot_world_objects import WorldObjectHit, draw_world_detect_overlay
+
+        world_snap = world_cache.snapshot()
+        if world_snap.hits:
+            hits = [
+                WorldObjectHit(
+                    name=h["template"],
+                    client_xy=h["client_xy"][:],
+                    screen_xy=h["screen_xy"][:],
+                    score=float(h["score"]),
+                )
+                for h in world_snap.hits
+            ]
+            overlay_bgr = draw_world_detect_overlay(
+                overlay_bgr,
+                hits,
+                inventory_rect=inv_rect,
+                search_roi=world_snap.search_roi,
+            )
+
+    preview = _resize_for_preview(overlay_bgr, max_width=mw)
     data = _encode_jpeg(preview, quality=quality)
     if data:
         publisher.publish("inventory_overlay", data)
@@ -129,6 +181,7 @@ class FramePublisher:
     def __init__(self) -> None:
         self._frames: Dict[str, bytes] = {}
         self._meta: Dict[str, Any] = {}
+        self._pristine_meta: Dict[str, Any] = {}
         self._lock = threading.Lock()
 
     def publish(self, name: str, jpeg_bytes: bytes) -> None:
@@ -146,6 +199,14 @@ class FramePublisher:
     def get_meta(self) -> Dict[str, Any]:
         with self._lock:
             return dict(self._meta)
+
+    def set_pristine_meta(self, meta: Dict[str, Any]) -> None:
+        with self._lock:
+            self._pristine_meta = dict(meta)
+
+    def get_pristine_meta(self) -> Dict[str, Any]:
+        with self._lock:
+            return dict(self._pristine_meta)
 
     def available_streams(self) -> Dict[str, bool]:
         with self._lock:
@@ -166,7 +227,7 @@ class FramePublisher:
             data = _encode(eyes.curr_client)
             if data:
                 self.publish("world_masked", data)
-            publish_game_preview(self, eyes.curr_client)
+            publish_game_preview(self, eyes.curr_client, max_width=preview_max_width())
 
         inv = getattr(eyes, "curr_inventory", None)
         if inv is not None:
@@ -236,7 +297,9 @@ class CaptureStreamPublisher:
             snap = self._pipeline.buffer.latest_copy()
             pcache = self._pipeline.cache.snapshot()
             if snap is not None:
-                publish_game_preview(self._publisher, snap.bgr)
+                publish_game_preview(
+                    self._publisher, snap.bgr, max_width=preview_max_width()
+                )
                 play = playspace_bgr_from_frame(snap.bgr)
                 if play is not None:
                     ok, buf = cv2.imencode(".jpg", play, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
@@ -278,9 +341,9 @@ class CaptureStreamPublisher:
 
 class PerceptionStreamPublisher:
     """
-    Publishes raw client preview + inventory overlay from ``InventoryPerceptionCache``.
+    Publishes pristine ``game_preview`` JPEGs plus ``/meta`` perception data.
 
-    When ``inventory_cache`` is set, ``/stream/inventory_overlay`` is the primary UI feed.
+    Optional ``inventory_overlay`` JPEG compositing when ``EXODIA_STREAM_BAKED_OVERLAY=1``.
     """
 
     def __init__(
@@ -288,12 +351,16 @@ class PerceptionStreamPublisher:
         publisher: FramePublisher,
         pipeline: "CapturePipeline",
         inventory_cache: Optional["InventoryPerceptionCache"] = None,
+        world_cache: Any = None,
         *,
         fps: float = 0.0,
+        max_width: Optional[int] = None,
     ) -> None:
         self._publisher = publisher
         self._pipeline = pipeline
         self._inventory_cache = inventory_cache
+        self._world_cache = world_cache
+        self._max_width = int(max_width) if max_width is not None else preview_max_width()
         raw = fps if fps > 0 else os.environ.get("EXODIA_STREAM_PUBLISH_FPS", "15")
         try:
             self._fps = max(1.0, float(raw))
@@ -326,24 +393,58 @@ class PerceptionStreamPublisher:
 
             if snap is not None:
                 publish_pristine_client_snapshot(self._publisher, snap.bgr)
-                publish_game_preview(self._publisher, snap.bgr)
+                self._publisher.set_pristine_meta(
+                    {
+                        "capture_seq": snap.seq,
+                        "width": snap.bgr.shape[1],
+                        "height": snap.bgr.shape[0],
+                        "ts": snap.ts,
+                        "frame_age_ms": round(snap.age_ms, 1),
+                        "source": "stream",
+                    }
+                )
+                native_w = int(snap.bgr.shape[1])
+                native_h = int(snap.bgr.shape[0])
+                preview_w, preview_h = preview_dimensions(
+                    native_w, native_h, self._max_width
+                )
+                publish_game_preview(
+                    self._publisher, snap.bgr, max_width=self._max_width
+                )
                 meta = {
                     "capture_seq": snap.seq,
                     "client_rect": list(snap.client_rect),
                     "capture_fps": self._pipeline.capture_fps,
                     "ts": snap.ts,
+                    "frame_age_ms": round(snap.age_ms, 1),
+                    "overlay_max_width": self._max_width,
+                    "frame_width": native_w,
+                    "frame_height": native_h,
+                    "preview_width": preview_w,
+                    "preview_height": preview_h,
                 }
 
             inv_cache = self._inventory_cache
             if inv_cache is not None:
-                if snap is not None:
-                    publish_inventory_overlay_live(self._publisher, snap.bgr, inv_cache)
-                else:
-                    overlay = inv_cache.overlay_jpeg()
-                    if overlay:
-                        self._publisher.publish("inventory_overlay", overlay)
+                if _baked_overlay_enabled():
+                    if snap is not None:
+                        publish_inventory_overlay_live(
+                            self._publisher,
+                            snap.bgr,
+                            inv_cache,
+                            world_cache=self._world_cache,
+                            max_width=self._max_width,
+                        )
+                    else:
+                        overlay = inv_cache.overlay_jpeg()
+                        if overlay:
+                            self._publisher.publish("inventory_overlay", overlay)
                 inv_snap = inv_cache.snapshot()
-                meta["perception"] = inv_cache.perception_meta()
+                world_cache = self._world_cache
+                meta["perception"] = {
+                    "inventory": inv_cache.inventory_meta(),
+                    "world": world_cache.world_meta() if world_cache is not None else {},
+                }
                 meta["processed_seq"] = inv_snap.processed_seq
                 meta["vision_fps"] = inv_snap.vision_fps
                 if snap is not None:
@@ -381,7 +482,7 @@ def _make_handler(publisher: FramePublisher):
                 for name, ready in sorted(streams.items()):
                     status = "ready" if ready else "waiting"
                     body += "/stream/%s (%s)\n/snapshot/%s\n\n" % (name, status, name)
-                body += "/meta\n/snapshot/meta.json\n"
+                body += "/meta\n/snapshot/meta.json\n/snapshot/pristine_meta.json\n"
                 data = body.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -421,6 +522,20 @@ def _make_handler(publisher: FramePublisher):
                         time.sleep(0.1)
                 except (BrokenPipeError, ConnectionResetError):
                     return
+
+            if path == "/snapshot/pristine_meta.json":
+                pristine_meta = publisher.get_pristine_meta()
+                if not pristine_meta:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                data = json.dumps(pristine_meta, indent=2).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
 
             if path.startswith("/snapshot/"):
                 name = path.split("/", 2)[2]

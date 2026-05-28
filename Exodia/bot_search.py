@@ -42,18 +42,23 @@ def playspace_search_roi(
 ) -> Optional[List[int]]:
     """Question: What client-local ROI excludes inventory and chat?
 
-    When ``inventory_rect`` / ``chat_rect`` are known, tighten the ROI to the
-    playspace left of the inventory panel and above the chat strip.
+    When ``inventory_rect`` is known, search the full playspace **left of** the
+    inventory column (``x < inventory_rect[0]``), including lower rows beside the
+    panel — not clipped to ``inventory_rect[1]`` (that dropped center/low spots).
+
+    ``chat_rect`` caps height above the chat strip. Without inventory geometry,
+    fall back to ``right_margin`` / ``bottom_margin`` heuristics.
 
     Returns ``[x, y, w, h]`` or ``None`` if the frame is too small.
     """
     w0, h0 = int(frame_width), int(frame_height)
     if w0 < 100 or h0 < 100:
         return None
-    w = max(100, w0 - right_margin)
-    h = max(100, h0 - bottom_margin)
     if inventory_rect is not None and len(inventory_rect) == 4:
-        w = min(w, max(100, int(inventory_rect[0])))
+        w = max(100, int(inventory_rect[0]))
+    else:
+        w = max(100, w0 - right_margin)
+    h = max(100, h0 - bottom_margin)
     if chat_rect is not None and len(chat_rect) == 4:
         h = min(h, max(100, int(chat_rect[1])))
     if w < 100 or h < 100:

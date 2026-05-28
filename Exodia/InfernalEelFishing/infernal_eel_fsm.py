@@ -225,18 +225,81 @@ def _after_cracking_done(ctx: InfernalEelContext) -> InfernalEelState:
     return _transition(ctx, InfernalEelState.SEEK_SPOT, "cracked; no fishing UI — seek spot")
 
 
-def _locate_spots(bot_e: "Eyes.BotEyes") -> list:
-    hits: list = []
+def _resolve_spot_templates() -> tuple[list[str], dict[str, str]]:
+    from bot_world_objects import resolve_world_template_file
+
+    stems: list[str] = []
+    paths: dict[str, str] = {}
     for template in SPOT_TEMPLATES:
-        found = bot_e.locate_image(
-            filename=template,
+        stem, tpl_path = resolve_world_template_file(template)
+        if tpl_path:
+            stems.append(stem)
+            paths[stem] = tpl_path
+    return stems, paths
+
+
+def _locate_spots_shape(bot_e: "Eyes.BotEyes") -> list:
+    """Playspace shape match (ripple stripping + body mask)."""
+    from bot_shape_match import shape_match_threshold, shape_preprocess_playspace
+    from bot_spot_verify import _client_bgr_for_spot_ops
+    from bot_template_targets import filter_matches_outside_inventory, playspace_search_roi
+
+    stems, paths = _resolve_spot_templates()
+    if not stems:
+        return []
+
+    search_roi = playspace_search_roi(bot_e)
+    if search_roi is None:
+        return []
+
+    client_bgr = _client_bgr_for_spot_ops(bot_e)
+    if client_bgr is None or client_bgr.size == 0:
+        return []
+
+    use_shape = shape_preprocess_playspace()
+    threshold = shape_match_threshold()
+    hits: list = []
+    for stem in stems:
+        detailed = bot_e.locate_image_detailed(
             inv=False,
-            name="infernal spot %s" % template,
-            threshold=SPOT_TEMPLATE_THRESHOLD,
+            filename=stem,
+            threshold=threshold,
+            name="infernal spot %s (shape)" % stem,
+            search_roi=search_roi,
+            template_path=paths[stem],
+            frame_bgr=client_bgr,
+            shape_preprocess=use_shape,
+            shape_playspace=True,
         )
-        if found:
-            hits.extend(found)
+        if not detailed.found:
+            continue
+        matches, _dropped = filter_matches_outside_inventory(bot_e, list(detailed.matches))
+        hits.extend(m.screen_xy[:] for m in matches)
     return hits
+
+
+def _locate_spots_cyan(bot_e: "Eyes.BotEyes") -> list:
+    """Cyan tile markers → icon window match (fallback when shape finds nothing)."""
+    from bot_world_objects import locate_world_objects_from_eyes, world_match_threshold
+
+    stems, paths = _resolve_spot_templates()
+    if not stems:
+        return []
+
+    wo = locate_world_objects_from_eyes(
+        bot_e,
+        stems,
+        threshold=world_match_threshold(),
+        template_paths=paths,
+    )
+    return [h.screen_xy[:] for h in wo.hits]
+
+
+def _locate_spots(bot_e: "Eyes.BotEyes") -> list:
+    hits = _locate_spots_shape(bot_e)
+    if hits:
+        return hits
+    return _locate_spots_cyan(bot_e)
 
 
 class InfernalEelMachine:

@@ -28,7 +28,8 @@ if str(_EXODIA) not in sys.path:
 from bot_capture import start_capture_pipeline, stop_capture_pipeline
 from bot_client_config import default_client_rect_path, load_client_rect
 from bot_inventory_vision import InventoryPerceptionCache, InventoryVisionProcessor
-from bot_stream import FramePublisher, MJPEGStreamServer, PerceptionStreamPublisher
+from bot_stream import FramePublisher, MJPEGStreamServer, PerceptionStreamPublisher, preview_max_width
+from bot_world_vision import WorldPerceptionCache, WorldVisionProcessor
 
 _CONTROL_FILE = _EXODIA / "captures" / "perception_stream_control.json"
 _shutdown = False
@@ -36,7 +37,7 @@ _runtime: dict = {}
 
 
 def _shutdown_runtime() -> None:
-    """Stop HTTP, vision, and capture immediately (signal handler / fast exit)."""
+    """Stop HTTP, vision, capture, and WSL PowerShell session (SIGTERM / fast exit)."""
     global _shutdown
     _shutdown = True
     srv = _runtime.get("server")
@@ -45,16 +46,24 @@ def _shutdown_runtime() -> None:
             srv.stop()
         except Exception:
             pass
-    inv = _runtime.get("inv_vision")
-    if inv is not None:
+    for key in ("inv_vision", "world_vision"):
+        proc = _runtime.get(key)
+        if proc is not None:
+            try:
+                proc.stop()
+            except Exception:
+                pass
+    pipe = _runtime.get("pipe")
+    if pipe is not None:
         try:
-            inv.stop()
+            pipe.stop()
         except Exception:
             pass
     try:
         stop_capture_pipeline()
     except Exception:
         pass
+    _runtime.clear()
 
 
 def _on_signal(_signum: int, _frame: object) -> None:
@@ -101,12 +110,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Inventory vision FPS (0=EXODIA_INVENTORY_VISION_FPS or 15)",
     )
     p.add_argument(
+        "--world-vision-fps",
+        type=float,
+        default=0.0,
+        help="World vision FPS (0=EXODIA_WORLD_VISION_FPS or 2)",
+    )
+    p.add_argument(
         "--publish-fps",
         type=float,
         default=0.0,
         help="MJPEG publish FPS (0=EXODIA_STREAM_PUBLISH_FPS or 15)",
     )
-    p.add_argument("--max-width", type=int, default=640, help="Overlay max width px")
+    p.add_argument(
+        "--max-width",
+        type=int,
+        default=None,
+        help="Overlay / game_preview max width px (default EXODIA_DEBUG_FRAME_MAX_WIDTH or 640)",
+    )
     p.add_argument(
         "--control-file",
         default="",
@@ -136,7 +156,9 @@ def main(argv: list[str] | None = None) -> int:
     capture_fps = max(1.0, min(30.0, capture_fps))
 
     vision_fps = args.vision_fps if args.vision_fps > 0 else 0.0
+    world_vision_fps = args.world_vision_fps if args.world_vision_fps > 0 else 0.0
     publish_fps = args.publish_fps if args.publish_fps > 0 else 0.0
+    max_width = preview_max_width() if args.max_width is None else int(args.max_width)
 
     control_path = Path(args.control_file).expanduser() if args.control_file else _CONTROL_FILE
     _write_control_template()
@@ -153,17 +175,30 @@ def main(argv: list[str] | None = None) -> int:
         pipe.buffer,
         inv_cache,
         fps=vision_fps if vision_fps > 0 else None,
-        max_overlay_width=args.max_width,
+        max_overlay_width=max_width,
         control_file=control_path,
     )
     inv_vision.start()
+
+    world_cache = WorldPerceptionCache()
+    world_vision = WorldVisionProcessor(
+        pipe.buffer,
+        inv_cache,
+        world_cache,
+        rect,
+        fps=world_vision_fps if world_vision_fps > 0 else None,
+        control_file=control_path,
+    )
+    world_vision.start()
 
     publisher = FramePublisher()
     stream_pub = PerceptionStreamPublisher(
         publisher,
         pipe,
         inv_cache,
+        world_cache=world_cache,
         fps=publish_fps if publish_fps > 0 else 0.0,
+        max_width=max_width,
     )
     server = MJPEGStreamServer(
         port=args.port,
@@ -173,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     _runtime["server"] = server
     _runtime["inv_vision"] = inv_vision
+    _runtime["world_vision"] = world_vision
     _runtime["pipe"] = pipe
     server.start_daemon()
 

@@ -1,10 +1,20 @@
-import { useRef } from 'react';
-import { ActionClickOverlay } from '../components/ActionClickOverlay';
-import type { ActionClickPreview, DebugFrameMode, DebugFrameResult, PerceptionMeta } from '../../shared/ipc';
+import { useRef, useState } from 'react';
+import { EphemeralOverlayLayer } from '../components/EphemeralOverlayLayer';
+import { PerceptionDebugOverlay } from '../components/PerceptionDebugOverlay';
+import { StreamViewport } from '../components/StreamViewport';
+import { TemplateWatchPanel } from './TemplateWatchPanel';
+import type { OverlayAnnotationEntry } from '../hooks/useOverlayAnnotations';
+import type {
+  ActionClickPreview,
+  DebugFrameMode,
+  DebugFrameResult,
+  InventoryPerceptionMeta,
+  StreamMeta,
+} from '../../shared/ipc';
 import './Panel.css';
 
 type RuneLiteViewPanelProps = {
-  imageDataUrl?: string;
+  viewportImage?: string;
   result?: DebugFrameResult | null;
   loading: boolean;
   calibrating: boolean;
@@ -14,12 +24,21 @@ type RuneLiteViewPanelProps = {
   previewLive?: boolean;
   onTogglePreviewLive?: (live: boolean) => void;
   botRunning?: boolean;
+  streamPortUp?: boolean;
   streamRunning?: boolean;
   streamStale?: boolean;
   streamRestarting?: boolean;
+  streamError?: string;
   onRestartStream?: () => Promise<unknown>;
-  perception?: PerceptionMeta | null;
-  actionClickPreview?: ActionClickPreview | null;
+  perception?: InventoryPerceptionMeta | null;
+  streamMeta?: StreamMeta | null;
+  showStreamDebugOverlay?: boolean;
+  showTemplateTracks?: boolean;
+  showInventoryTracks?: boolean;
+  onToggleStreamDebugOverlay?: (show: boolean) => void;
+  worldHitCount?: number;
+  overlayAnnotations?: OverlayAnnotationEntry[];
+  latestActionPreview?: ActionClickPreview | null;
 };
 
 function formatMode(mode: DebugFrameMode): string {
@@ -41,7 +60,7 @@ function formatTime(ts?: number): string {
 }
 
 export function RuneLiteViewPanel({
-  imageDataUrl,
+  viewportImage,
   result,
   loading,
   calibrating,
@@ -51,34 +70,76 @@ export function RuneLiteViewPanel({
   previewLive = false,
   onTogglePreviewLive,
   botRunning = false,
+  streamPortUp = false,
   streamRunning = false,
   streamStale = false,
   streamRestarting = false,
+  streamError,
   onRestartStream,
   perception = null,
-  actionClickPreview = null,
+  streamMeta = null,
+  showStreamDebugOverlay = false,
+  showTemplateTracks = true,
+  showInventoryTracks = true,
+  onToggleStreamDebugOverlay,
+  worldHitCount,
+  overlayAnnotations = [],
+  latestActionPreview = null,
 }: RuneLiteViewPanelProps) {
   const imageRef = useRef<HTMLImageElement>(null);
+  const [watchCollapsed, setWatchCollapsed] = useState(false);
+  const showingStreamBase = Boolean(streamPortUp && viewportImage && !previewLive && !botRunning);
   const usingLiveStream = Boolean(streamRunning && !previewLive && !botRunning);
   const showStreamControls = Boolean(!previewLive && !botRunning && onRestartStream);
-  const hasImage = Boolean(imageDataUrl);
+  const streamRecovery = !streamPortUp && !previewLive && !botRunning;
+  const hasImage = Boolean(viewportImage);
   const error = result && !result.ok ? result.error : undefined;
   const hint = result && !result.ok ? result.hint : undefined;
   const busy = loading || calibrating;
+  const templateStats = streamMeta?.perception?.world?.template_stats ?? [];
+  const invTemplateStats = streamMeta?.perception?.inventory?.inventory_template_stats ?? [];
   const modeLabel = previewLive && botRunning
     ? 'Live preview'
-    : usingLiveStream
-      ? 'Live stream'
-      : formatMode(debugMode);
+    : streamStale && showingStreamBase
+      ? 'Stream stale'
+      : usingLiveStream
+        ? 'Live stream'
+        : formatMode(debugMode);
 
   return (
     <section className="panel panel--runelite">
       <header className="panel__header">
         <h2 className="panel__title">RuneLite view</h2>
         <div className="panel__header-actions">
-          <span className={`panel__badge${previewLive && botRunning ? ' panel__badge--live' : usingLiveStream ? ' panel__badge--live' : streamStale ? ' panel__badge--warn' : ''}`}>
-            {previewLive && botRunning ? 'Live' : usingLiveStream ? 'Stream' : streamStale ? 'Stream stale' : 'Debug'}
+          <span
+            className={`panel__badge${
+              previewLive && botRunning
+                ? ' panel__badge--live'
+                : usingLiveStream
+                  ? ' panel__badge--live'
+                  : streamStale && showingStreamBase
+                    ? ' panel__badge--warn'
+                    : ''
+            }`}
+          >
+            {previewLive && botRunning
+              ? 'Live'
+              : usingLiveStream
+                ? 'Stream'
+                : streamStale
+                  ? 'Stream stale'
+                  : 'Debug'}
           </span>
+          {showStreamControls && onToggleStreamDebugOverlay && (
+            <button
+              type="button"
+              className={`btn btn--sm${showStreamDebugOverlay ? ' btn--active' : ''}`}
+              onClick={() => onToggleStreamDebugOverlay(!showStreamDebugOverlay)}
+              title="IDs view: numbered inventory slots with an ID list from /meta"
+            >
+              {showStreamDebugOverlay ? 'Hide IDs' : 'IDs view'}
+            </button>
+          )}
           {showStreamControls && onRestartStream && (
             <button
               type="button"
@@ -114,16 +175,37 @@ export function RuneLiteViewPanel({
             className="btn btn--sm"
             onClick={onRefresh}
             disabled={busy || (previewLive && botRunning)}
-            title={usingLiveStream ? 'Force full re-identify on next stream frame' : undefined}
+            title={
+              usingLiveStream
+                ? 'Force full re-identify on next stream frame'
+                : streamStale && showingStreamBase
+                  ? 'Stream capture_seq frozen — try Hard reset stream'
+                  : streamRecovery
+                    ? 'Recovery: capture a one-off debug frame when the perception stream is offline'
+                    : undefined
+            }
           >
-            {loading ? 'Refreshing…' : usingLiveStream ? 'Re-analyze' : 'Refresh'}
+            {loading
+              ? showingStreamBase
+                ? 'Re-analyzing…'
+                : 'Capturing…'
+              : showingStreamBase
+                ? 'Re-analyze'
+                : streamRecovery
+                  ? 'Debug capture'
+                  : 'Refresh'}
           </button>
         </div>
       </header>
-      <div className="panel__body panel__runelite-body">
+      <div className="panel--runelite-stack">
+        <div className="panel__body panel__runelite-body">
         {loading && !hasImage && (
           <div className="panel__placeholder">
-            <p>Capturing client and running inventory detect…</p>
+            <p>
+              {showingStreamBase || streamPortUp
+                ? 'Waiting for perception stream frames…'
+                : 'Capturing client and running inventory detect…'}
+            </p>
           </div>
         )}
         {!loading && !hasImage && !error && (
@@ -133,14 +215,35 @@ export function RuneLiteViewPanel({
                 ? 'Waiting for live preview from the bot stream…'
                 : streamRestarting
                   ? 'Restarting perception stream…'
-                : streamStale
-                  ? 'Stream stopped responding — click Restart stream or run a template action (auto-restart may apply).'
-                : streamRunning
-                  ? 'Waiting for perception stream frames…'
-                  : 'Click Refresh to capture the RuneLite client and show inventory overlays.'}
+                  : streamStale
+                    ? 'Stream stopped responding — use Hard reset stream below.'
+                    : streamRunning
+                      ? 'Waiting for perception stream frames…'
+                      : 'Calibrate the RuneLite client window to start the live perception stream.'}
             </p>
             {!previewLive && !streamRunning && !streamStale && (
-              <p className="panel__hint">Requires client_rect.json and a visible RuneLite window.</p>
+              <>
+                <p className="panel__hint">
+                  {streamError
+                    ? streamError
+                    : 'Requires client_rect.json and a visible RuneLite window.'}
+                </p>
+                <div className="panel__placeholder-actions">
+                  <button type="button" className="btn btn--sm btn--primary" onClick={onCalibrate} disabled={busy}>
+                    {calibrating ? 'Calibrating…' : 'Calibrate'}
+                  </button>
+                  {onRestartStream && (
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      onClick={() => void onRestartStream()}
+                      disabled={busy || streamRestarting}
+                    >
+                      {streamRestarting ? 'Resetting…' : 'Hard reset stream'}
+                    </button>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -155,38 +258,52 @@ export function RuneLiteViewPanel({
             )}
           </div>
         )}
-        {hasImage && (
-          <div className="panel__image-wrap panel__image-wrap--with-overlay">
-            <img
-              ref={imageRef}
-              className="panel__debug-image"
-              src={imageDataUrl}
-              alt={
-                previewLive && botRunning
-                  ? 'RuneLite live preview'
-                  : usingLiveStream
-                    ? 'RuneLite inventory overlay stream'
-                    : 'RuneLite debug frame'
-              }
-              draggable={false}
-            />
-            {!previewLive && !usingLiveStream && (
-              <ActionClickOverlay
-                key={imageDataUrl ?? 'frame'}
-                preview={actionClickPreview}
+        {hasImage && viewportImage && (
+          <StreamViewport
+            baseSrc={viewportImage}
+            imageRef={imageRef}
+            alt={
+              previewLive && botRunning
+                ? 'RuneLite live preview'
+                : showingStreamBase
+                  ? streamStale
+                    ? 'RuneLite stream (stale)'
+                    : 'RuneLite live stream'
+                  : 'RuneLite debug frame'
+            }
+          >
+            {showingStreamBase &&
+              (showStreamDebugOverlay || showTemplateTracks || showInventoryTracks) && (
+              <PerceptionDebugOverlay
+                meta={streamMeta}
                 imageRef={imageRef}
+                showInventoryDebug={showStreamDebugOverlay}
+                showInventoryTracks={showInventoryTracks}
+                showWorldTracks={showTemplateTracks}
               />
             )}
-          </div>
+            <EphemeralOverlayLayer annotations={overlayAnnotations} imageRef={imageRef} />
+          </StreamViewport>
+        )}
+        </div>
+        {showingStreamBase && (
+          <TemplateWatchPanel
+            streamMeta={streamMeta}
+            collapsed={watchCollapsed}
+            onToggleCollapsed={() => setWatchCollapsed((v) => !v)}
+          />
         )}
       </div>
       <footer className="panel__footer panel__footer--stats">
         <span>Mode: {modeLabel}</span>
-        {usingLiveStream && perception?.occupied != null && (
+        {showingStreamBase && streamMeta?.capture_seq != null && (
+          <span>seq: {streamMeta.capture_seq}</span>
+        )}
+        {showingStreamBase && perception?.occupied != null && (
           <span>Occupied: {perception.occupied}</span>
         )}
-        {usingLiveStream && perception?.unknown != null && <span>?: {perception.unknown}</span>}
-        {usingLiveStream && perception?.tmp_count != null && (
+        {showingStreamBase && perception?.unknown != null && <span>?: {perception.unknown}</span>}
+        {showingStreamBase && perception?.tmp_count != null && (
           <span>tmp: {perception.tmp_count}</span>
         )}
         {!usingLiveStream && !previewLive && result?.ok && result.occupied != null && (
@@ -198,35 +315,64 @@ export function RuneLiteViewPanel({
         {!usingLiveStream && !previewLive && result?.ok && result.tmpCount != null && (
           <span>tmp: {result.tmpCount}</span>
         )}
-        {usingLiveStream && perception?.vision_fps != null && (
+        {showingStreamBase && perception?.vision_fps != null && (
           <span>Vision: {perception.vision_fps.toFixed(1)} fps</span>
         )}
+        {showingStreamBase && worldHitCount != null && (
+          <span>World hits: {worldHitCount}</span>
+        )}
+        {showingStreamBase && templateStats.length > 0 && (
+          <span
+            className="panel__footer--tracks"
+            title={templateStats
+              .map((s) => `${s.template}: ${s.hits} hit(s)${s.best_score != null ? ` · ${s.best_score.toFixed(2)}` : ''}`)
+              .join('\n')}
+          >
+            World tracks:{' '}
+            {templateStats.map((s) => `${s.template}:${s.hits}`).join(' · ')}
+          </span>
+        )}
+        {showingStreamBase && invTemplateStats.length > 0 && (
+          <span
+            className="panel__footer--tracks"
+            title={invTemplateStats
+              .map((s) => {
+                const src = s.source ? ` · ${s.source}` : '';
+                const score = s.best_score != null ? ` · ${s.best_score.toFixed(2)}` : '';
+                return `${s.template}: ${s.slots} slot(s)${score}${src}`;
+              })
+              .join('\n')}
+          >
+            Inv tracks:{' '}
+            {invTemplateStats.map((s) => `${s.template}:${s.slots}`).join(' · ')}
+          </span>
+        )}
         <span>Last refresh: {formatTime(result?.refreshedAt)}</span>
-        {actionClickPreview && !previewLive && !usingLiveStream && (
+        {latestActionPreview && (
           <span className="panel__footer--click-preview">
-            {actionClickPreview.previewMode === 'find' ? (
+            {latestActionPreview.previewMode === 'find' ? (
               <>
-                Find: {actionClickPreview.matchCount ?? 0} hit
-                {actionClickPreview.matchCandidates
-                  ? ` (${actionClickPreview.matchCandidates.filter((c) => c.searchMode === 'playspace').length} world · ${actionClickPreview.matchCandidates.filter((c) => c.searchMode === 'inventory').length} inv)`
+                Find: {latestActionPreview.matchCount ?? 0} hit
+                {latestActionPreview.matchCandidates
+                  ? ` (${latestActionPreview.matchCandidates.filter((c) => c.searchMode === 'playspace').length} world · ${latestActionPreview.matchCandidates.filter((c) => c.searchMode === 'inventory').length} inv)`
                   : ''}
               </>
-            ) : actionClickPreview.previewMode === 'use_on' &&
-              actionClickPreview.fromClientXY &&
-              actionClickPreview.toClientXY ? (
+            ) : latestActionPreview.previewMode === 'use_on' &&
+              latestActionPreview.fromClientXY &&
+              latestActionPreview.toClientXY ? (
               <>
-                Use-on: {actionClickPreview.fromClientXY.join(',')} →{' '}
-                {actionClickPreview.toClientXY.join(',')}
-                {actionClickPreview.slot ? ` · ${actionClickPreview.slot}` : ''}
+                Use-on: {latestActionPreview.fromClientXY.join(',')} →{' '}
+                {latestActionPreview.toClientXY.join(',')}
+                {latestActionPreview.slot ? ` · ${latestActionPreview.slot}` : ''}
               </>
-            ) : actionClickPreview.clickClientXY ? (
+            ) : latestActionPreview.clickClientXY ? (
               <>
-                Click: {actionClickPreview.clickClientXY.join(',')}
-                {actionClickPreview.score != null
-                  ? ` · ${actionClickPreview.score.toFixed(2)}`
+                Click: {latestActionPreview.clickClientXY.join(',')}
+                {latestActionPreview.score != null
+                  ? ` · ${latestActionPreview.score.toFixed(2)}`
                   : ''}
-                {actionClickPreview.matchCount != null && actionClickPreview.matchCount > 1
-                  ? ` · ${actionClickPreview.matchCount} matches (amber = other)`
+                {latestActionPreview.matchCount != null && latestActionPreview.matchCount > 1
+                  ? ` · ${latestActionPreview.matchCount} matches (amber = other)`
                   : ''}
               </>
             ) : null}

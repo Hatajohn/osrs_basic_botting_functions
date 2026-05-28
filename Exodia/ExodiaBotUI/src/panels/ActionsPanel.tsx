@@ -6,6 +6,7 @@ import type {
   MatchCandidatePreview,
   RunSingleActionResult,
 } from '../../shared/ipc';
+import type { PushAnnotationOpts } from '../hooks/useOverlayAnnotations';
 import './ActionsPanel.css';
 import './Panel.css';
 
@@ -13,8 +14,9 @@ const DEFAULT_WORLD_CROP = 80;
 
 type ActionsPanelProps = {
   botRunning?: boolean;
-  actionClickPreview?: ActionClickPreview | null;
-  onActionClickPreview?: (preview: ActionClickPreview | null) => void;
+  latestActionPreview?: ActionClickPreview | null;
+  onPushOverlayAnnotation?: (preview: ActionClickPreview, opts?: PushAnnotationOpts) => string;
+  onClearOverlayGroup?: (blockId: string) => void;
   onPrepareClickPreview?: () => Promise<void>;
 };
 
@@ -257,8 +259,9 @@ function TemplateClickGroup({
 
 export function ActionsPanel({
   botRunning = false,
-  actionClickPreview = null,
-  onActionClickPreview,
+  latestActionPreview = null,
+  onPushOverlayAnnotation,
+  onClearOverlayGroup,
   onPrepareClickPreview,
 }: ActionsPanelProps) {
   const [sourceId, setSourceId] = useState('');
@@ -393,12 +396,6 @@ export function ActionsPanel({
     [blocks],
   );
 
-  const confirmInput = (blockId: string, detail: string): boolean => {
-    const block = blockById(blockId);
-    if (block?.sideEffects !== 'input') return true;
-    return window.confirm(`Run input action?\n\n${detail}`);
-  };
-
   const runAction = async (
     blockId: string,
     args: Record<string, string>,
@@ -419,7 +416,6 @@ export function ActionsPanel({
     }
 
     const block = blockById(blockId);
-    const label = block?.label ?? blockId;
     const isTemplateClick = blockId === BLOCK_INV || blockId === BLOCK_WORLD;
     const template = templateCtx?.template ?? '';
     const templatePath = templateCtx?.templatePath;
@@ -435,33 +431,20 @@ export function ActionsPanel({
         await onPrepareClickPreview?.();
         const dry = await window.exodia.runSingleAction({ blockId, args, dryRun: true });
         if (!dry.ok) {
-          onActionClickPreview?.(null);
+          onClearOverlayGroup?.(blockId);
           setValidationError(dry.error ?? 'Could not preview use-on targets');
           return;
         }
         if (dry.clickPreview) {
-          onActionClickPreview?.(withBlockLabel(dry.clickPreview, block, blockId));
-        }
-
-        const overlayNote = dry.clickPreview
-          ? '\n\nRuneLite view: red “Use” and green “On” markers on inventory slots.'
-          : '';
-        if (
-          !confirmInput(
-            blockId,
-            `${label}\n${sourceId.trim()} → ${destId.trim()}${overlayNote}`,
-          )
-        ) {
-          onActionClickPreview?.(null);
-          return;
+          onPushOverlayAnnotation?.(withBlockLabel(dry.clickPreview, block, blockId));
         }
 
         const result = await window.exodia.runSingleAction({ blockId, args });
         setLastResult(result);
         if (result.ok && result.clickPreview) {
-          onActionClickPreview?.(withBlockLabel(result.clickPreview, block, blockId));
+          onPushOverlayAnnotation?.(withBlockLabel(result.clickPreview, block, blockId));
         } else if (!result.ok) {
-          onActionClickPreview?.(null);
+          onClearOverlayGroup?.(blockId);
           setValidationError(result.error ?? 'Action failed');
         }
       } finally {
@@ -476,7 +459,6 @@ export function ActionsPanel({
         return;
       }
 
-      const itemNote = templateCtx?.itemLabel ? `\nItem: ${templateCtx.itemLabel}` : '';
       setBusy(true);
       try {
         await onPrepareClickPreview?.();
@@ -486,38 +468,23 @@ export function ActionsPanel({
           dryRun: true,
         });
         if (!dry.ok) {
-          onActionClickPreview?.(null);
+          onClearOverlayGroup?.(blockId);
           setValidationError(dry.error ?? 'Could not preview click target');
           return;
         }
         const previewLabel = templateCtx?.findLabel ?? block?.label ?? blockId;
         if (dry.clickPreview) {
-          onActionClickPreview?.(withBlockLabel(dry.clickPreview, block, blockId, previewLabel));
+          onPushOverlayAnnotation?.(
+            withBlockLabel(dry.clickPreview, block, blockId, previewLabel),
+          );
         }
 
         if (templateCtx?.findOnly) {
           setLastResult(dry);
           if (!dry.ok) {
-            onActionClickPreview?.(null);
+            onClearOverlayGroup?.(blockId);
             setValidationError(dry.error ?? 'Template not found on screenshot');
           }
-          return;
-        }
-
-        const matchNote =
-          dry.clickPreview?.matchCount != null && dry.clickPreview.matchCount > 1
-            ? `\n${dry.clickPreview.matchCount} matches: amber = alternates, green crosshair = click.`
-            : '';
-        const overlayNote = dry.clickPreview
-          ? `\n\nGreen crosshair in RuneLite view shows the planned click.${matchNote}`
-          : '';
-        if (
-          !confirmInput(
-            blockId,
-            `${label}\nTemplate: ${template.trim()}${itemNote}${overlayNote}`,
-          )
-        ) {
-          onActionClickPreview?.(null);
           return;
         }
 
@@ -527,9 +494,9 @@ export function ActionsPanel({
         });
         setLastResult(result);
         if (result.ok && result.clickPreview) {
-          onActionClickPreview?.(withBlockLabel(result.clickPreview, block, blockId));
+          onPushOverlayAnnotation?.(withBlockLabel(result.clickPreview, block, blockId));
         } else if (!result.ok) {
-          onActionClickPreview?.(null);
+          onClearOverlayGroup?.(blockId);
           setValidationError(result.error ?? 'Action failed');
         }
       } finally {
@@ -542,7 +509,7 @@ export function ActionsPanel({
   const saveDisabled = disabled || saveBusy;
 
   const fillSaveRectFromPreview = () => {
-    const preview = actionClickPreview;
+    const preview = latestActionPreview;
     if (!preview) {
       setSaveMessage('Run Find or a click preview first, or set crop manually.');
       return;
@@ -766,7 +733,7 @@ export function ActionsPanel({
 
       const preview = mergeFindPreview(worldDry, invDry);
       if (!preview) {
-        onActionClickPreview?.(null);
+        onClearOverlayGroup?.('find_template');
         const err = worldDry.error ?? invDry.error ?? 'template_not_found';
         setValidationError(
           `No matches in world or inventory (${err}). Open inventory for inv search.`,
@@ -775,7 +742,7 @@ export function ActionsPanel({
         return;
       }
 
-      onActionClickPreview?.(preview);
+      onPushOverlayAnnotation?.(preview);
       const worldN = preview.matchCandidates?.filter((c) => c.searchMode === 'playspace').length ?? 0;
       const invN = preview.matchCandidates?.filter((c) => c.searchMode === 'inventory').length ?? 0;
       setLastResult({
@@ -803,8 +770,9 @@ export function ActionsPanel({
         )}
 
         <p className="actions-panel__hint">
-          Item IDs drive <strong>use 1 on 2</strong>. Templates should be the <strong>item shape</strong>{' '}
-          (transparent PNG, tight crop). World/Find use shape match, not cyan markers.
+          Item IDs drive <strong>use 1 on 2</strong> (inventory labels first, then the item templates
+          below if labels are missing). Templates should be the <strong>item shape</strong> (transparent
+          PNG, tight crop). World/Find use shape match, not cyan markers.
         </p>
 
         <section className="actions-panel__slot">
@@ -816,7 +784,7 @@ export function ActionsPanel({
             onClear={() => clearItem('source')}
             catalogOptions={catalogOptions}
             disabled={disabled}
-            placeholder="e.g. imcando_hammer"
+            placeholder="e.g. hammer"
           />
           <TemplateClickGroup
             template={sourceTemplate}
@@ -875,6 +843,10 @@ export function ActionsPanel({
             runAction(BLOCK_USE_ON, {
               sourceId: sourceId.trim(),
               destId: destId.trim(),
+              ...(sourceTemplate.trim() ? { sourceTemplate: sourceTemplate.trim() } : {}),
+              ...(sourceTemplatePath ? { sourceTemplatePath: sourceTemplatePath } : {}),
+              ...(destTemplate.trim() ? { destTemplate: destTemplate.trim() } : {}),
+              ...(destTemplatePath ? { destTemplatePath: destTemplatePath } : {}),
             })
           }
         >

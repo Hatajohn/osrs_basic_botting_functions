@@ -115,6 +115,36 @@ Leave `pythonPath` blank to use the venv default. An invalid path shows an error
 
 Point `scriptsFolder` at a folder of task specs (e.g. `PlansTODO/` or a dedicated `specs/` directory).
 
+## Template watchlist (Priority 1f)
+
+The **Template watch** panel under the RuneLite view lets you add world and inventory templates to track on every perception stream frame (no manual Refresh).
+
+| File | Purpose |
+|------|---------|
+| `ExodiaBotUI/template_watchlist.json` | Persisted watchlist (`entries[]` with `id`, `template`, `region`, `enabled`) |
+| `{exodiaRoot}/captures/perception_stream_control.json` | Hot-reload control — `world_templates` (enabled world stems) and `invalidate` |
+
+When you save the watchlist from the UI, Electron writes both files. The stream process polls mtime on the control file and applies template list changes within ~1 s without restart.
+
+**Resolution order (Python):** non-empty `world_templates` in the control file → enabled world entries in the watchlist file → `EXODIA_WORLD_TEMPLATES` env → default `osrs_infernalEel`.
+
+**Overlays:** View → **Show template tracks** (world) and **Show inventory tracks** (inv slot markers with name + score). **Show labels** toggles the inventory identify grid only.
+
+## Active inventory tracking
+
+Distinct from world tracking: inventory watch entries run **per-slot template matching** on every inventory vision frame (~15 FPS), using the same path as Actions **Find/click inv**.
+
+| Piece | Detail |
+|-------|--------|
+| Add template | Template watch → **+ Inv file** or **+ Catalog** (region = `inventory`) |
+| PNG required | `items/<stem>.png` or `images/<stem>.png` — status shows **missing PNG** when absent |
+| `/meta` | `perception.inventory.inventory_watch[]` and `inventory_template_stats[]` |
+| Control file | `inventory_templates` hot-reloads like `world_templates` |
+| Overlay | View → **Show inventory tracks** — colored slot ring + label + score |
+| Fallback | If PNG missing, matches identified slot labels when names align |
+
+Hard-reset the stream after adding templates so Python picks up watchlist changes.
+
 ## Project layout
 
 ```

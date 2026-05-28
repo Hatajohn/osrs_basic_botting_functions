@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "wmpoonbb3xug",
+      "template": "infernal_eel",
+      "region": "inventory",
+      "enabled": true
+    }
+  ]
+}

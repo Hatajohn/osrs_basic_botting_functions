@@ -15,7 +15,7 @@ Python automation harness for **RuneLite** (OSRS): capture the client window, in
 | **Inventory items** | `bot_inventory_items.py` | Per-slot template match against `items/*.png`; known name or `?` if no match. |
 | **Game state** | `bot_gamestate.py` | `GameState` dataclass + `build_game_state()` from `BotEyes` (OCR, inventory occupancy). |
 | **Frames** | `bot_frames.py` | Per-tick PNG sidecar writer (world, inventory, action/chat strips). |
-| **Stream** | `bot_stream.py` | MJPEG HTTP publisher (`/stream/playspace_blobs`, `/meta`). |
+| **Stream** | `bot_stream.py` | MJPEG HTTP (`/stream/*`, `/snapshot/pristine`, `/meta` with nested inventory/world perception). |
 | **Capture** | `bot_capture.py` | Decoupled `CaptureProducer` + `VisionProcessor` @ ≥2× OSRS tick rate. |
 | **Track** | `bot_track.py` | Playspace blob motion + centroid IDs (v1). |
 | **Action log** | `bot_action_log.py` | Always-on JSONL + plain-text action log per run. |
@@ -99,6 +99,37 @@ Capture runs on a **separate timer** (default 4 FPS, ≥2× the 600 ms OSRS tick
 | `EXODIA_CAMERA_KEY_TAPS` | Optional multiplier on hold ms (legacy) |
 | `EXODIA_TESSERACT_CMD` | Path to tesseract binary |
 | `EXODIA_SIGNIFICANCE_MAX_SKIPS` | Stall escape for significance gate |
+
+## Stream + action frame contract
+
+When **`EXODIA_STREAM_PORT`** is set (or capture stream is on), **action subprocesses** (`bot_chain` handlers from ExodiaBotUI) use the perception MJPEG service for frames and cached vision — not a competing sync **`wsl_ps`** grab on each click.
+
+| Piece | Source | Role |
+|--------|--------|------|
+| Pristine frame | HTTP `/snapshot/pristine` + **`/snapshot/pristine_meta.json`** | `StreamFrameMeta`: `capture_seq`, size, `frame_age_ms`, `source` |
+| Perception | **`/meta`** | Nested `perception.inventory` (occupancy, `slot_items`, `inventory_rect`, …) and `perception.world` (`hits`, …) |
+| Overlay scale | **`/meta`** → `overlay_max_width` | Debug/action overlay width (must match UI stream max width) |
+
+**Dual vision on the stream:** `InventoryVisionProcessor` and `WorldVisionProcessor` run in parallel on the capture buffer (standalone `exodia_perception_stream.py` or harness publisher). Inventory thread fills the inventory slice; world thread fills `hits` for templates in **`EXODIA_WORLD_TEMPLATES`** (default `osrs_infernalEel`). Templates **not** in that list are not cached — `bot_chain` falls back to **live** playspace match (`live_match` / `live_identify`).
+
+**Action wiring:** `bot_stream_client.refresh_action_frame` (or `fetch_stream_snapshot` → `apply_stream_snapshot_to_eyes`) → template click uses `world_hit_for_template` (world) or cached slot grid (inventory). `perception_source` in action JSON: `stream_cache` vs `live_match` / `live_identify`. **`bot_init` skips the initial `capture_frame` when stream is expected** — the first frame comes from `refresh_action_frame` at dispatch.
+
+**Debug frame (`exodia_debug_frame.py`):** recovery only. When the stream snapshot is fresh, the script refuses to run (UI Refresh invalidates stream cache instead). Pass `--force-sync` for an explicit sync grab when the perception service is down.
+
+Set **`EXODIA_DEBUG_FRAME_MAX_WIDTH`** to the same value as **Stream max width** in ExodiaBotUI (Electron sets it from `streamMaxWidth`). Mismatch scales debug overlays vs action coordinates.
+
+| Error | Meaning | Typical fix |
+|-------|---------|-------------|
+| `stream_frame_unavailable` | No pristine JPEG or frame sidecar | Restart perception stream |
+| `stream_meta_stale` | Pristine frame older than freshness threshold | Hard reset stream (UI uses `capture_seq` health, not blind reset every action) |
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EXODIA_MATCH_MAX_FRAME_AGE_MS` | `500` | Re-fetch pristine before click actions (world, inv, use-on) if frame is older |
+| `EXODIA_STREAM_IDENTIFY_WAIT_MS` | `800` | Poll for inventory identify on stream before live fallback |
+| `EXODIA_WORLD_VISION_FPS` | `2` | World vision thread rate (0.5–15) |
+
+See [`FUNCTIONS.md`](FUNCTIONS.md) recipe *Run template action against stream cache* and [`bot_stream_client.py`](bot_stream_client.py).
 
 ## Action log review
 

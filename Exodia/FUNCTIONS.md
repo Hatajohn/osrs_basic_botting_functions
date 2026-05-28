@@ -101,8 +101,9 @@ Infernal seek uses template peaks in playspace (`InfernalEelMachine` + `search_w
 
 1. `harness.refresh_geometry()` or `bot_update`
 2. `bot_gamestate.build_game_state(eyes, tick)` — **compound** (action OCR + `read_inventory_labels`)
-3. Labels land on `eyes.perception_envelope["inventory_slot_items"]`; `GameState` carries occupancy count, not per-slot names yet
-4. `bot_gamestate.game_state_to_dict(state)` for JSON/meta
+3. Labels on `eyes.perception_envelope["inventory_slot_items"]` (flat envelope on `BotEyes`; stream `/meta` uses nested `perception.inventory` / `perception.world` — applied via `apply_stream_snapshot_to_eyes`)
+4. `GameState` carries occupancy count, not per-slot names yet
+5. `bot_gamestate.game_state_to_dict(state)` for JSON/meta
 
 ### 10. Detect world objects (cyan marker → icon template)
 
@@ -125,6 +126,19 @@ Outer session loops: `SacredEelFishing/sacred_eel_fishing.py`, `InfernalEelFishi
 1. Offline: `python tests/bot_inventory_test.py`
 2. Live: `python tests/bot_inventory_test.py --online`
 3. Pipeline: outline match → occupancy grid → `identify_inventory_slot_items` → overlay at `captures/inventory_test_overlay.png`
+
+### 13. Run template action against stream cache
+
+Requires perception stream running (`EXODIA_STREAM_PORT` > 0 or `exodia_perception_stream.py` / harness with stream).
+
+1. `bot_stream_client.stream_expected()` — actions should use HTTP, not sync grab
+2. `snap, err = refresh_action_frame(client, eyes)` — sync geometry + pristine BGR + `/meta` (or legacy `bot_update` when stream off)
+3. `stream_snapshot_usable(snap, max_age_ms=…)` — fail with `stream_meta_stale` if too old
+4. `apply_stream_snapshot_to_eyes(eyes, snap, client_rect=…)` — fills `curr_client` and flat `perception_envelope` from nested inventory/world meta (no panel mask)
+5. **World click:** `hit = world_hit_for_template(snap.world, template)` when stem is in `EXODIA_WORLD_TEMPLATES` cache; else `bot_chain` live path (`locate_world_objects_from_eyes` / shape match, `perception_source=live_match`)
+6. **Inventory click/identify:** use `snap.inventory` `slot_items` / `occupancy` when calibrated (`stream_cache`); else `bind_inventory_to_eyes` + live identify (`live_identify`)
+
+Wired from ExodiaBotUI via `bot_chain` (`click_template`, `use_item_id_on_item_id`). Errors: `stream_frame_unavailable`, `stream_meta_stale`.
 
 ---
 
@@ -499,8 +513,12 @@ Consolidation removed misleading or duplicate paths. Migrate as follows:
 
 Diagnostic and runtime tooling is **not** a building-block layer — it wraps capture, logging, streams, and live control for long sessions.
 
-- **Capture pipeline** (`bot_capture.py`): `CapturePipeline`, `start_capture_pipeline` / `stop_capture_pipeline`, `capture_stream_latest` — decoupled grab + optional `bot_track` vision thread.
-- **Stream** (`bot_stream.py`): `MJPEGStreamServer`, `FramePublisher` — HTTP `/stream/*`, `/snapshot/*` for debug UIs.
+- **Capture pipeline** (`bot_capture.py`): `CapturePipeline`, `start_capture_pipeline` / `stop_capture_pipeline`, `capture_stream_latest`, `StreamFrameMeta`, `fetch_pristine_client_http_meta` — decoupled grab + HTTP pristine for actions.
+- **Stream** (`bot_stream.py`): `MJPEGStreamServer`, `FramePublisher`, `PerceptionStreamPublisher` — HTTP `/stream/*`, `/snapshot/pristine`, `/snapshot/pristine_meta.json`, `/meta` with nested `perception.inventory` / `perception.world`.
+- **Stream client** (`bot_stream_client.py`): `refresh_action_frame`, `fetch_stream_snapshot`, `apply_stream_snapshot_to_eyes`, `world_hit_for_template` — action subprocess consumption (no competing grab).
+- **Perception vision** (`bot_inventory_vision.py`, `bot_world_vision.py`): parallel `InventoryVisionProcessor` + `WorldVisionProcessor` on stream buffer; world cache honors `EXODIA_WORLD_TEMPLATES`.
+- **Action chain** (`bot_chain.py`): stream-aware `click_template` / use-on; `perception_source` `stream_cache` vs `live_match` / `live_identify`.
+- **Standalone stream** (`exodia_perception_stream.py`): UI-spawned perception-only MJPEG (dual vision, no bot tick).
 - **Runtime control** (`bot_runtime.py`, `exodia_ctl.py`): `RuntimeBridge` — JSON control/status files under `logs/` while FSM scripts run.
 - **Overlay** (`bot_overlay.py`, session `--overlay`): live window + `logs/diag/overlay_latest.png`; spot overlays via `EXODIA_OVERLAY_SPOTS`.
 - **Calibration** (`bot_calibration.py`, `calibrate_client_rect.py`, `roi_picker.py`): one-shot geometry and ROI tooling.
@@ -526,6 +544,7 @@ Primary recipe only — see §2 for full stacks.
 | `tests/bot_inventory_arms_test.py --online` | drag + occupancy read-back |
 | `tests/bot_inventory_use_on_test.py --online` | `use_named_item_on_named_item` |
 | `tests/bot_world_detect_test.py` | `locate_world_objects` (+ `--live` from eyes) |
+| `exodia_perception_stream.py` | dual vision → MJPEG; actions via §2.13 |
 | `label_inventory_item.py` | interactive naming → `save_named_item_template` |
 
 ---
@@ -614,6 +633,17 @@ Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/functio
 | `EXODIA_WORLD_CYAN_FIRST` / `CYAN_FALLBACK` | Cyan vs full-scan path |
 | `EXODIA_WORLD_CYAN_*` | HSV area, tile split, icon pad |
 | `EXODIA_WORLD_TEST_LIVE` / `OFFLINE_IMAGE` | Test harness |
+
+### Stream / action frame contract
+
+| Variable | Default / notes |
+|----------|-----------------|
+| `EXODIA_STREAM_PORT` | MJPEG port (`0` = off); actions prefer HTTP when set |
+| `EXODIA_DEBUG_FRAME_MAX_WIDTH` | Match ExodiaBotUI **Stream max width** (default `640`) |
+| `EXODIA_MATCH_MAX_FRAME_AGE_MS` | Re-fetch pristine before click actions (world, inv, use-on; default `500`) |
+| `EXODIA_STREAM_IDENTIFY_WAIT_MS` | Poll for stream inventory identify (default `800`) |
+| `EXODIA_WORLD_VISION_FPS` | World vision thread (default `2`) |
+| `EXODIA_WORLD_TEMPLATES` | Comma stems cached in `perception.world.hits` (default `osrs_infernalEel`) |
 
 ### Runtime / session
 

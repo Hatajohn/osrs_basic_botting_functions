@@ -103,6 +103,7 @@ export function clickPreviewFromActionResult(
         : typeof inner.matches === 'number'
           ? inner.matches
           : undefined,
+    captureSeq: typeof inner.capture_seq === 'number' ? inner.capture_seq : undefined,
   };
 }
 

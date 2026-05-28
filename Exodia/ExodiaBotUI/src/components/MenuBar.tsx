@@ -3,6 +3,7 @@ import {
   MENUS,
   debugModeForAction,
   isDebugModeSelected,
+  refreshMenuLabel,
   type MenuActionId,
   type MenuContext,
   type MenuItemDef,
@@ -22,7 +23,10 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
     chainDirty: false,
     previewLive: false,
     hasDebugFrame: false,
+    streamRunning: false,
     debugMode: 'inventory_identify',
+    showTemplateTracks: true,
+    showInventoryTracks: true,
   };
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const barRef = useRef<HTMLElement>(null);
@@ -53,7 +57,7 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
         e.preventDefault();
         onAction('refreshDebugFrame', {
           id: 'refreshDebugFrame',
-          label: 'Refresh debug frame',
+          label: refreshMenuLabel(ctx),
           shortcut: 'F5',
         });
       }
@@ -75,6 +79,22 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
       return (
         <>
           <span className="menu-bar__radio">{selected ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
+    if (item.id === 'toggleShowTemplateTracks') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.showTemplateTracks ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
+    if (item.id === 'toggleShowInventoryTracks') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.showInventoryTracks ? '●' : '○'}</span>
           <span>{item.label}</span>
         </>
       );
@@ -113,7 +133,7 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
                       title={!enabled ? item.stubMessage : undefined}
                       onClick={() => handleItemClick(item)}
                     >
-                      {renderLabel(item)}
+                      {item.id === 'refreshDebugFrame' ? refreshMenuLabel(ctx) : renderLabel(item)}
                       {item.shortcut && (
                         <span className="menu-bar__shortcut">{item.shortcut}</span>
                       )}

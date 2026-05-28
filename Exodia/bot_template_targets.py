@@ -25,15 +25,23 @@ def point_in_rect(px: int, py: int, rect: Sequence[int]) -> bool:
 
 
 def playspace_search_roi(eyes) -> Optional[List[int]]:
-    """Client-local ROI above the inventory panel (exclude inv for world clicks)."""
+    """Client-local playspace ROI (left of inventory, above chat)."""
     if eyes.curr_client is None or getattr(eyes.curr_client, "size", 0) == 0:
         return None
     h, w = eyes.curr_client.shape[:2]
-    if eyes.inventory_rect is not None and len(eyes.inventory_rect) == 4:
-        iy = int(eyes.inventory_rect[1])
-        if iy >= max(20, int(h * 0.12)):
-            return [0, 0, int(w), iy]
-    return None
+    inv = (
+        eyes.inventory_rect
+        if eyes.inventory_rect is not None and len(eyes.inventory_rect) == 4
+        else None
+    )
+    chat = (
+        eyes.chat_rect
+        if getattr(eyes, "chat_rect", None) is not None and len(eyes.chat_rect) == 4
+        else None
+    )
+    from bot_search import playspace_search_roi as _roi
+
+    return _roi(int(w), int(h), inventory_rect=inv, chat_rect=chat)
 
 
 def filter_matches_outside_inventory(eyes, matches: List[Any]) -> Tuple[List[Any], int]:

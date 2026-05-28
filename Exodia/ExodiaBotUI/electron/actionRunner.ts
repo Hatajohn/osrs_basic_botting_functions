@@ -119,6 +119,10 @@ export async function runSingleAction(
         ...process.env,
         EXODIA_ROOT: resolvedExodiaRoot,
         EXODIA_STREAM_PORT: String(loadSettings().streamPort ?? 8765),
+        EXODIA_CAPTURE_STREAM: '1',
+        EXODIA_MASK_PANELS: '0',
+        EXODIA_DEBUG_FRAME_MAX_WIDTH: String(loadSettings().streamMaxWidth ?? 640),
+        EXO_SHAPE_THR: process.env.EXO_SHAPE_THR ?? '0.52',
         ...(useWslPs
           ? {
               EXODIA_CAPTURE_BACKEND: process.env.EXODIA_CAPTURE_BACKEND ?? 'wsl_ps',
@@ -172,6 +176,19 @@ export async function runSingleAction(
         sink(`action ${blockId} ok${durationMs != null ? ` (${durationMs}ms)` : ''}`, 'system');
       } else {
         sink(`action ${blockId} failed: ${error ?? 'unknown'}`, 'stderr');
+      }
+
+      if (inner && typeof inner.capture_seq === 'number') {
+        const captureSeq = inner.capture_seq;
+        const frameAgeMs =
+          typeof inner.frame_age_ms === 'number' ? inner.frame_age_ms : undefined;
+        const source = typeof inner.source === 'string' ? inner.source : undefined;
+        const perceptionSource =
+          typeof inner.perception_source === 'string' ? inner.perception_source : undefined;
+        sink(
+          `frame seq=${captureSeq} age=${frameAgeMs ?? '?'}ms source=${source || perceptionSource || '?'}`,
+          'system',
+        );
       }
 
       resolve(

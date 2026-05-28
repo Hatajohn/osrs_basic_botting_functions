@@ -336,6 +336,16 @@ def inventory_grid_cell_xywh(
     h_c = tile_h - 2 * inset
     if w_c < 2 or h_c < 2:
         return None
+    # Keep crops inside the panel — grid drift / sidebar trim skews bottom-right slots.
+    panel_x2, panel_y2 = ix + iw, iy + ih
+    if x0 >= panel_x2 or y0 >= panel_y2:
+        return None
+    if x0 + w_c > panel_x2:
+        w_c = panel_x2 - x0
+    if y0 + h_c > panel_y2:
+        h_c = panel_y2 - y0
+    if w_c < 2 or h_c < 2:
+        return None
     return x0, y0, w_c, h_c
 
 

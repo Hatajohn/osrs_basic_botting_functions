@@ -6,14 +6,45 @@ import { loadSettings, resolveSettings } from './settings';
 import { pythonExists } from './paths';
 import { defaultClientRectPath } from './clientRect';
 import { killListenersOnPort, killPerceptionStreamProcesses } from './streamPortKill';
+import {
+  controlFilePath as watchlistControlFilePath,
+  loadTemplateWatchlist,
+  syncWatchlistToControlFile,
+} from './templateWatchlist';
 
-export type PerceptionMeta = {
+export type InventoryPerceptionMeta = {
   occupied?: number;
   unknown?: number;
   tmp_count?: number;
   inventory_calibrated?: boolean;
   vision_fps?: number;
   dirty_slots?: number[][];
+  occupancy?: boolean[][];
+  slot_items?: (string | null)[][];
+  inventory_rect?: number[] | null;
+  outline_score?: number;
+  reidentify_pending?: number;
+  capture_seq?: number;
+  processed_seq?: number;
+};
+
+export type WorldTemplateStat = {
+  template: string;
+  hits: number;
+  best_score?: number | null;
+};
+
+export type WorldPerceptionMeta = {
+  hits?: Array<{ template: string; client_xy: number[]; screen_xy?: number[]; score: number }>;
+  hit_count?: number;
+  templates_scanned?: string[];
+  template_stats?: WorldTemplateStat[];
+  vision_fps?: number;
+};
+
+export type PerceptionMeta = {
+  inventory?: InventoryPerceptionMeta;
+  world?: WorldPerceptionMeta;
 };
 
 export type StreamMeta = {
@@ -21,6 +52,12 @@ export type StreamMeta = {
   processed_seq?: number;
   capture_fps?: number;
   vision_fps?: number;
+  frame_age_ms?: number;
+  frame_width?: number;
+  frame_height?: number;
+  preview_width?: number;
+  preview_height?: number;
+  overlay_max_width?: number;
   perception?: PerceptionMeta;
 };
 
@@ -38,8 +75,80 @@ export type StreamStatus = {
 
 export type LogSink = (line: string, stream: 'stdout' | 'stderr' | 'system') => void;
 
+/** Matches ``EXODIA_CAPTURE_STALE_MS`` default in bot_capture.py. */
+const MAX_FRAME_AGE_MS = 600;
+/** Gap between meta polls when verifying capture_seq is advancing. */
+const HEALTH_POLL_GAP_MS = 500;
+const HEALTH_VERIFY_TIMEOUT_MS = 8000;
+
+export type StreamHealthResult = {
+  healthy: boolean;
+  error?: string;
+};
+
+/** ``capture_seq`` must advance across two polls and ``frame_age_ms`` must be below threshold. */
+export async function verifyStreamHealthy(port: number): Promise<StreamHealthResult> {
+  const meta1 = await fetchStreamMeta(port);
+  if (!meta1 || meta1.capture_seq == null) {
+    return { healthy: false, error: 'Stream meta missing capture_seq' };
+  }
+  await new Promise((r) => setTimeout(r, HEALTH_POLL_GAP_MS));
+  const meta2 = await fetchStreamMeta(port);
+  if (!meta2 || meta2.capture_seq == null) {
+    return { healthy: false, error: 'Stream meta unavailable on health re-poll' };
+  }
+  if (meta2.capture_seq <= meta1.capture_seq) {
+    return {
+      healthy: false,
+      error: `capture_seq frozen (${meta1.capture_seq} → ${meta2.capture_seq})`,
+    };
+  }
+  const frameAge = meta2.frame_age_ms;
+  if (frameAge != null && frameAge > MAX_FRAME_AGE_MS) {
+    return {
+      healthy: false,
+      error: `frame too stale (${frameAge}ms > ${MAX_FRAME_AGE_MS}ms)`,
+    };
+  }
+  return { healthy: true };
+}
+
+async function waitForStreamHealthy(
+  port: number,
+  timeoutMs = HEALTH_VERIFY_TIMEOUT_MS,
+): Promise<StreamHealthResult> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await verifyStreamHealthy(port);
+    if (result.healthy) {
+      return result;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return verifyStreamHealthy(port);
+}
+
 function controlFilePath(exodiaRoot: string): string {
-  return path.join(exodiaRoot, 'captures', 'perception_stream_control.json');
+  return watchlistControlFilePath(exodiaRoot);
+}
+
+function writeControlPayload(exodiaRoot: string, payload: Record<string, unknown>): void {
+  const filePath = controlFilePath(exodiaRoot);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function readControlPayload(exodiaRoot: string): Record<string, unknown> {
+  const filePath = controlFilePath(exodiaRoot);
+  if (!fs.existsSync(filePath)) {
+    return { invalidate: false, world_templates: [] };
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+    return typeof data === 'object' && data !== null ? data : { invalidate: false };
+  } catch {
+    return { invalidate: false, world_templates: [] };
+  }
 }
 
 export async function probeStreamPort(port: number): Promise<boolean> {
@@ -100,6 +209,18 @@ export class StreamProcessManager {
     return this.lastError;
   }
 
+  async waitForCaptureSeqAdvance(port: number, prevSeq: number, timeoutMs = 2000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const meta = await fetchStreamMeta(port);
+      if (meta?.capture_seq != null && meta.capture_seq > prevSeq) {
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  }
+
   async getStatus(): Promise<StreamStatus> {
     const settings = loadSettings();
     const port = settings.streamPort ?? 8765;
@@ -130,6 +251,7 @@ export class StreamProcessManager {
 
     if (!force && (await probeStreamPort(port))) {
       this.sink(`Perception stream already active on port ${port}`, 'system');
+      syncWatchlistToControlFile(resolvedExodiaRoot);
       return this.getStatus();
     }
 
@@ -164,6 +286,7 @@ export class StreamProcessManager {
     ];
 
     this.sink(`Starting perception stream (port ${port})…`, 'system');
+    syncWatchlistToControlFile(resolvedExodiaRoot);
     this.sink(`${resolvedPythonPath} ${args.join(' ')}`, 'system');
 
     return new Promise((resolve) => {
@@ -176,6 +299,8 @@ export class StreamProcessManager {
           EXODIA_ROOT: resolvedExodiaRoot,
           PYTHONUNBUFFERED: '1',
           EXODIA_CAPTURE_STREAM: '1',
+          EXODIA_DEBUG_FRAME_MAX_WIDTH: String(settings.streamMaxWidth ?? 640),
+          EXO_SHAPE_THR: process.env.EXO_SHAPE_THR ?? '0.52',
         },
       });
 
@@ -236,6 +361,12 @@ export class StreamProcessManager {
       const waitUntil = Date.now() + 8000;
       const poll = async () => {
         if (await probeStreamPort(port)) {
+          const health = await waitForStreamHealthy(port);
+          if (!health.healthy) {
+            this.lastError = health.error ?? 'Perception stream not healthy after start';
+            this.sink(this.lastError, 'stderr');
+            await this.hardKillAll(port);
+          }
           resolve(this.getStatus());
           return;
         }
@@ -366,10 +497,25 @@ export class StreamProcessManager {
 
   invalidateCache(): void {
     const { resolvedExodiaRoot } = resolveSettings(loadSettings());
-    const filePath = controlFilePath(resolvedExodiaRoot);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify({ invalidate: true }, null, 2), 'utf8');
+    const existing = readControlPayload(resolvedExodiaRoot);
+    const watchlist = loadTemplateWatchlist();
+    writeControlPayload(resolvedExodiaRoot, {
+      ...existing,
+      invalidate: true,
+      world_templates: watchlist.entries
+        .filter((e) => e.enabled && e.region === 'world')
+        .map((e) => e.template),
+      inventory_templates: watchlist.entries
+        .filter((e) => e.enabled && e.region === 'inventory')
+        .map((e) => e.template),
+    });
     this.sink('Requested perception cache invalidate', 'system');
+  }
+
+  syncWatchlistControl(): void {
+    const { resolvedExodiaRoot } = resolveSettings(loadSettings());
+    syncWatchlistToControlFile(resolvedExodiaRoot);
+    this.sink('Synced template watchlist to stream control file', 'system');
   }
 
   dispose(): void {

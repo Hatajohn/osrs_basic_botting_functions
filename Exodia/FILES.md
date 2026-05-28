@@ -133,6 +133,9 @@ Full per-file edges in §4. These rows validate the graph without listing all pa
 | `bot_world_objects.py` | `bot_spot_verify`, `bot_search`, `bot_inventory_detect` | compound → simple |
 | `bot_spot_verify.py` | `bot_eyes`, `bot_search` | simple → simple |
 | `bot_capture.py` | `bot_track`, `bot_env`, `constants` | infra → infra/simple |
+| `exodia_perception_stream.py` | `bot_inventory_vision`, `bot_world_vision`, `bot_stream`, `bot_capture` | entry → infra |
+| `bot_chain.py` | `bot_stream_client`, `bot_actions`, `bot_inventory_detect`, … | external-ui → compound |
+| `bot_stream_client.py` | `bot_capture` | compound → infra |
 | `SacredEelFishing/sacred_eel_fishing.py` | `bot_runtime`, `bot_session_events`, `bot_spot_verify` | entry → infra/compound |
 | `InfernalEelFishing/infernal_eel_fishing.py` | `bot_runtime`, `bot_inventory_detect`, `bot_gamestate` | entry → infra/compound |
 | `agents/reference_fishing_brain.py` | `bot_harness` | fsm → compound |
@@ -157,6 +160,7 @@ Full per-file edges in §4. These rows validate the graph without listing all pa
 | [`calibrate_client_rect.py`](calibrate_client_rect.py) | `python calibrate_client_rect.py` | `runs` → client geometry |
 | [`capture_runelite_once.py`](capture_runelite_once.py) | `python capture_runelite_once.py` | `runs` → one-shot capture |
 | [`label_inventory_item.py`](label_inventory_item.py) | `python label_inventory_item.py` | `runs` → item labeling |
+| [`exodia_perception_stream.py`](exodia_perception_stream.py) | `python exodia_perception_stream.py --port 8765` | `runs` → dual-vision MJPEG (UI spawn) |
 | [`exodia_ctl.py`](exodia_ctl.py) | `python exodia_ctl.py <cmd>` | `runs` → runtime control |
 | [`session_report.py`](session_report.py) | `python session_report.py …` | `runs` → JSONL summary |
 | [`SacredEelFishing/sacred_eel_report.py`](SacredEelFishing/sacred_eel_report.py) | `python -m SacredEelFishing.sacred_eel_report` | `runs` → eel event report |
@@ -202,8 +206,13 @@ Columns: **Path** | **Layer** | **Status** | **Imported by** | **Role** | **FUNC
 
 | Path | Layer | Status | Imported by | Role | FUNCTIONS |
 |------|-------|--------|-------------|------|-----------|
-| `bot_capture.py` | infra | infra-optional | env, harness, stream, `run_agent` | Capture pipeline | §7 |
-| `bot_stream.py` | infra | infra-optional | harness, `run_agent`, stream test | MJPEG HTTP | §7 |
+| `bot_capture.py` | infra | infra-optional | env, harness, stream, `run_agent`, `bot_stream_client` | Capture pipeline, `StreamFrameMeta`, HTTP pristine | §7 |
+| `bot_stream.py` | infra | infra-optional | harness, `run_agent`, stream test, `exodia_perception_stream` | MJPEG HTTP, nested `/meta` perception | §7 |
+| `bot_stream_client.py` | infra | active | `bot_chain` | Action subprocess: fetch/apply stream snapshot | §2.13 |
+| `bot_inventory_vision.py` | infra | infra-optional | `exodia_perception_stream`, `bot_stream` | Inventory vision thread + cache | §7 |
+| `bot_world_vision.py` | infra | infra-optional | `exodia_perception_stream`, `bot_stream` | World vision thread + `EXODIA_WORLD_TEMPLATES` cache | §7 |
+| `bot_chain.py` | compound | active | ExodiaBotUI action runner (subprocess) | Stream-aware template click / use-on | §2.13 |
+| `exodia_perception_stream.py` | entry-scripts | entry | ExodiaBotUI (spawn) | Standalone dual-vision MJPEG | §7 |
 | `bot_track.py` | infra | infra-optional | capture, stream, tests | Blob motion v1 | §7, §9 |
 | `bot_runtime.py` | infra | entry+imported | fishing scripts, `exodia_ctl`, tests | JSON control/status | §7 |
 | `bot_session_events.py` | infra | active | fishing, runtime, session_report, tests | Session JSONL | §7 |

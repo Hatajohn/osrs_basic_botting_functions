@@ -49,10 +49,26 @@ export async function refreshDebugFrame(mode: DebugFrameMode): Promise<DebugFram
   }
 
   return new Promise((resolve) => {
-    const child = spawn(resolvedPythonPath, [scriptPath, '--mode', mode], {
+    const settings = loadSettings();
+    const psExe = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+    const useWslPs = process.platform === 'linux' && fs.existsSync(psExe);
+    const argv = [scriptPath, '--mode', mode, '--force-sync'];
+    const child = spawn(resolvedPythonPath, argv, {
       cwd: resolvedExodiaRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, EXODIA_ROOT: resolvedExodiaRoot },
+      env: {
+        ...process.env,
+        EXODIA_ROOT: resolvedExodiaRoot,
+        EXODIA_STREAM_PORT: String(settings.streamPort ?? 8765),
+        EXODIA_CAPTURE_STREAM: '1',
+        EXODIA_DEBUG_FRAME_MAX_WIDTH: String(settings.streamMaxWidth ?? 640),
+        ...(useWslPs
+          ? {
+              EXODIA_CAPTURE_BACKEND: process.env.EXODIA_CAPTURE_BACKEND ?? 'wsl_ps',
+              EXODIA_INPUT_BACKEND: process.env.EXODIA_INPUT_BACKEND ?? 'wsl_ps',
+            }
+          : {}),
+      },
     });
 
     let stdout = '';

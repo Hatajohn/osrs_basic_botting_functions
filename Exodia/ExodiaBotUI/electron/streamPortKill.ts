@@ -31,12 +31,26 @@ function killListenersOnPortWindows(port: number): void {
   }
 }
 
-/** Kill orphaned WSL PowerShell GDI capture loops left after SIGKILL. */
+/** Kill orphaned PowerShell GDI capture loops left after SIGKILL / hard reset. */
 export function killOrphanCapturePowerShell(): void {
   if (process.platform === 'win32') {
+    killOrphanCapturePowerShellWindows();
     return;
   }
+  // Persistent wsl_ps session loop (stdin ReadLine → CopyFromScreen → base64 PNG).
   tryExec(`pkill -9 -f '[\\$]line=\\$in.ReadLine'`);
+  tryExec(`pkill -9 -f 'CopyFromScreen'`);
+  tryExec(`pkill -9 -f 'System.Drawing.Bitmap'`);
+  tryExec(`pkill -9 -f 'System.Windows.Forms'`);
+}
+
+function killOrphanCapturePowerShellWindows(): void {
+  const script = [
+    "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\"",
+    "| Where-Object { $_.CommandLine -match 'CopyFromScreen|ReadLine\\(\\)|System\\.Drawing\\.Bitmap' }",
+    '| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
+  ].join(' ');
+  tryExec(`powershell -NoProfile -Command "${script}"`);
 }
 
 /** Kill all perception stream Python processes (stream service + zombies). */
