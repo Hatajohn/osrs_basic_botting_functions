@@ -1,20 +1,20 @@
 import type { ActionClickPreview, StreamMeta } from '../../shared/ipc';
 
 export type PointLayout = {
-  left: number;
-  top: number;
+  left: string;
+  top: string;
   score?: number;
   searchMode?: 'inventory' | 'playspace';
 };
 
 export type DisplayPoint = {
-  left: number;
-  top: number;
+  left: string;
+  top: string;
 };
 
 export type DisplayRect = DisplayPoint & {
-  width: number;
-  height: number;
+  width: string;
+  height: string;
 };
 
 export type UseOnLayout = {
@@ -38,8 +38,8 @@ export type PerceptionHudSlotMarker = {
   /** 1-based index into idEntries for this slot's item id. */
   index: number;
   color: string;
-  left: number;
-  top: number;
+  left: string;
+  top: string;
 };
 
 export type PerceptionHudIdEntry = {
@@ -53,8 +53,8 @@ export type PerceptionHudWorldMarker = {
   key: string;
   template: string;
   score: number;
-  left: number;
-  top: number;
+  left: string;
+  top: string;
   color: string;
 };
 
@@ -62,8 +62,8 @@ export type PerceptionHudInvWatchMarker = {
   key: string;
   template: string;
   score?: number | null;
-  left: number;
-  top: number;
+  left: string;
+  top: string;
   color: string;
 };
 
@@ -118,72 +118,36 @@ function shortTemplateLabel(stem: string): string {
 
 export { shortTemplateLabel };
 
-function imageWrapOffset(img: HTMLImageElement): { scaleX: number; scaleY: number; offsetLeft: number; offsetTop: number } | null {
-  const nw = img.naturalWidth;
-  const nh = img.naturalHeight;
-  if (nw <= 0 || nh <= 0) return null;
-
-  const rect = img.getBoundingClientRect();
-  const wrap = img.parentElement;
-  if (!wrap) return null;
-  const wrapRect = wrap.getBoundingClientRect();
-
-  return {
-    scaleX: rect.width / nw,
-    scaleY: rect.height / nh,
-    offsetLeft: rect.left - wrapRect.left,
-    offsetTop: rect.top - wrapRect.top,
-  };
+function pct(value: number, total: number): string {
+  return `${(value / total) * 100}%`;
 }
 
-/** Map native client-frame coords to wrap-local display pixels (handles letterboxing). */
-export function clientXYToDisplay(
-  img: HTMLImageElement,
+/** Map native client-frame coords to image-layer percentage (survives CSS transform zoom). */
+export function clientXYToPercent(
   frameWidth: number,
   frameHeight: number,
   clientXY: [number, number],
 ): DisplayPoint | null {
   if (frameWidth <= 0 || frameHeight <= 0) return null;
-
-  const mapped = imageWrapOffset(img);
-  if (!mapped) return null;
-
-  const nw = img.naturalWidth;
-  const nh = img.naturalHeight;
-  const px = (clientXY[0] / frameWidth) * nw;
-  const py = (clientXY[1] / frameHeight) * nh;
-
   return {
-    left: mapped.offsetLeft + px * mapped.scaleX,
-    top: mapped.offsetTop + py * mapped.scaleY,
+    left: pct(clientXY[0], frameWidth),
+    top: pct(clientXY[1], frameHeight),
   };
 }
 
-/** Map native client-frame rect to wrap-local display pixels. */
-export function clientRectToDisplay(
-  img: HTMLImageElement,
+/** Map native client-frame rect to image-layer percentage box. */
+export function clientRectToPercent(
   frameWidth: number,
   frameHeight: number,
   rect: [number, number, number, number],
 ): DisplayRect | null {
   if (frameWidth <= 0 || frameHeight <= 0) return null;
-
-  const mapped = imageWrapOffset(img);
-  if (!mapped) return null;
-
-  const nw = img.naturalWidth;
-  const nh = img.naturalHeight;
   const [x, y, w, h] = rect;
-  const px = (x / frameWidth) * nw;
-  const py = (y / frameHeight) * nh;
-  const pw = (w / frameWidth) * nw;
-  const ph = (h / frameHeight) * nh;
-
   return {
-    left: mapped.offsetLeft + px * mapped.scaleX,
-    top: mapped.offsetTop + py * mapped.scaleY,
-    width: pw * mapped.scaleX,
-    height: ph * mapped.scaleY,
+    left: pct(x, frameWidth),
+    top: pct(y, frameHeight),
+    width: pct(w, frameWidth),
+    height: pct(h, frameHeight),
   };
 }
 
@@ -210,13 +174,12 @@ export function inventorySlotCenterClient(
 }
 
 export function clientXYToLayout(
-  img: HTMLImageElement,
   preview: ActionClickPreview,
   clientXY: [number, number],
   extra?: Pick<PointLayout, 'score' | 'searchMode'>,
 ): PointLayout | null {
   const { frameWidth, frameHeight } = preview;
-  const point = clientXYToDisplay(img, frameWidth, frameHeight, clientXY);
+  const point = clientXYToPercent(frameWidth, frameHeight, clientXY);
   if (!point) return null;
 
   return {
@@ -250,7 +213,6 @@ export function buildItemIdIndex(
 }
 
 export function computePerceptionHudLayout(
-  img: HTMLImageElement,
   meta: StreamMeta | null | undefined,
 ): PerceptionHudLayout | null {
   const frameWidth = meta?.frame_width ?? 0;
@@ -263,7 +225,7 @@ export function computePerceptionHudLayout(
   let invBox: DisplayRect | null = null;
   const rect = inventory?.inventory_rect;
   if (rect && rect.length === 4) {
-    invBox = clientRectToDisplay(img, frameWidth, frameHeight, rect as [number, number, number, number]);
+    invBox = clientRectToPercent(frameWidth, frameHeight, rect as [number, number, number, number]);
   }
 
   const items = inventory?.slot_items;
@@ -287,7 +249,7 @@ export function computePerceptionHudLayout(
         const index = idToIndex.get(String(raw));
         if (index == null) continue;
         const { cx, cy } = inventorySlotCenterClient(ix, iy, iw, ih, row, col);
-        const pos = clientXYToDisplay(img, frameWidth, frameHeight, [cx, cy]);
+        const pos = clientXYToPercent(frameWidth, frameHeight, [cx, cy]);
         if (!pos) continue;
         slotMarkers.push({
           key: `${row}-${col}`,
@@ -303,7 +265,7 @@ export function computePerceptionHudLayout(
   const worldMarkers: PerceptionHudWorldMarker[] = [];
   for (const [i, hit] of (world?.hits ?? []).entries()) {
     const xy = hit.client_xy ?? [0, 0];
-    const pos = clientXYToDisplay(img, frameWidth, frameHeight, [xy[0], xy[1]]);
+    const pos = clientXYToPercent(frameWidth, frameHeight, [xy[0], xy[1]]);
     if (!pos) continue;
     worldMarkers.push({
       key: `world-${i}-${hit.template}`,
@@ -325,7 +287,7 @@ export function computePerceptionHudLayout(
         for (const pt of points) {
           const xy = pt.client_xy ?? [];
           if (xy.length < 2) continue;
-          const pos = clientXYToDisplay(img, frameWidth, frameHeight, [xy[0], xy[1]]);
+          const pos = clientXYToPercent(frameWidth, frameHeight, [xy[0], xy[1]]);
           if (!pos) continue;
           const slot = pt.slot ?? [];
           invWatchMarkers.push({
@@ -341,7 +303,7 @@ export function computePerceptionHudLayout(
       }
       for (const [row, col] of entry.slots ?? []) {
         const { cx, cy } = inventorySlotCenterClient(ix, iy, iw, ih, row, col);
-        const pos = clientXYToDisplay(img, frameWidth, frameHeight, [cx, cy]);
+        const pos = clientXYToPercent(frameWidth, frameHeight, [cx, cy]);
         if (!pos) continue;
         invWatchMarkers.push({
           key: `inv-watch-${entry.template}-${row}-${col}`,
@@ -362,15 +324,15 @@ export function computePerceptionHudLayout(
   return { invBox, idEntries, slotMarkers, worldMarkers, invWatchMarkers };
 }
 
-export function computeClickLayout(img: HTMLImageElement, preview: ActionClickPreview): ClickLayout | null {
+export function computeClickLayout(preview: ActionClickPreview): ClickLayout | null {
   if (!preview.clickClientXY) return null;
-  const selected = clientXYToLayout(img, preview, preview.clickClientXY, { score: preview.score });
+  const selected = clientXYToLayout(preview, preview.clickClientXY, { score: preview.score });
   if (!selected) return null;
 
   const alternates: PointLayout[] = [];
   for (const cand of preview.matchCandidates ?? []) {
     if (cand.selected) continue;
-    const layout = clientXYToLayout(img, preview, cand.clickClientXY, {
+    const layout = clientXYToLayout(preview, cand.clickClientXY, {
       score: cand.score,
       searchMode: cand.searchMode,
     });
@@ -380,10 +342,10 @@ export function computeClickLayout(img: HTMLImageElement, preview: ActionClickPr
   return { selected, alternates };
 }
 
-export function computeFindLayout(img: HTMLImageElement, preview: ActionClickPreview): FindLayout | null {
+export function computeFindLayout(preview: ActionClickPreview): FindLayout | null {
   const markers: PointLayout[] = [];
   for (const cand of preview.matchCandidates ?? []) {
-    const layout = clientXYToLayout(img, preview, cand.clickClientXY, {
+    const layout = clientXYToLayout(preview, cand.clickClientXY, {
       score: cand.score,
       searchMode: cand.searchMode,
     });
@@ -392,28 +354,22 @@ export function computeFindLayout(img: HTMLImageElement, preview: ActionClickPre
   return markers.length > 0 ? { markers } : null;
 }
 
-export function computeUseOnLayout(
-  img: HTMLImageElement,
-  preview: ActionClickPreview,
-): UseOnLayout | null {
+export function computeUseOnLayout(preview: ActionClickPreview): UseOnLayout | null {
   if (!preview.fromClientXY || !preview.toClientXY) return null;
-  const from = clientXYToLayout(img, preview, preview.fromClientXY);
-  const to = clientXYToLayout(img, preview, preview.toClientXY);
+  const from = clientXYToLayout(preview, preview.fromClientXY);
+  const to = clientXYToLayout(preview, preview.toClientXY);
   if (!from || !to) return null;
   return { from, to };
 }
 
-export function computeOverlayLayout(
-  img: HTMLImageElement,
-  preview: ActionClickPreview,
-): OverlayLayout | null {
+export function computeOverlayLayout(preview: ActionClickPreview): OverlayLayout | null {
   if (preview.previewMode === 'find') {
-    return computeFindLayout(img, preview);
+    return computeFindLayout(preview);
   }
   if (preview.previewMode === 'use_on' || (preview.fromClientXY && preview.toClientXY)) {
-    return computeUseOnLayout(img, preview);
+    return computeUseOnLayout(preview);
   }
-  return computeClickLayout(img, preview);
+  return computeClickLayout(preview);
 }
 
 export function isUseOnLayout(layout: OverlayLayout | null): layout is UseOnLayout {

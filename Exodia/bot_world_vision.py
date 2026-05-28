@@ -19,6 +19,7 @@ from bot_template_watchlist import WatchlistResolver
 
 Rect = List[int]
 WorldHitDict = Dict[str, Any]
+WorldTrackDict = Dict[str, Any]
 
 
 def _env_bool(key: str, default: bool) -> bool:
@@ -29,11 +30,11 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 def default_world_vision_fps() -> float:
-    raw = os.environ.get("EXODIA_WORLD_VISION_FPS", "2").strip()
+    raw = os.environ.get("EXODIA_WORLD_VISION_FPS", "10").strip()
     try:
         fps = float(raw)
     except ValueError:
-        fps = 2.0
+        fps = 10.0
     return max(0.5, min(15.0, fps))
 
 
@@ -140,6 +141,7 @@ def _locate_cyan_matches(
 @dataclass(frozen=True)
 class WorldPerceptionSnapshot:
     hits: Tuple[WorldHitDict, ...]
+    tracks: Tuple[WorldTrackDict, ...]
     templates_scanned: Tuple[str, ...]
     search_roi: Optional[Rect]
     cyan_regions: int
@@ -156,6 +158,7 @@ class WorldPerceptionCache:
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _hits: List[WorldHitDict] = field(default_factory=list)
+    _tracks: List[WorldTrackDict] = field(default_factory=list)
     _templates_scanned: List[str] = field(default_factory=list)
     _search_roi: Optional[Rect] = None
     _cyan_regions: int = 0
@@ -169,6 +172,7 @@ class WorldPerceptionCache:
         self,
         *,
         hits: List[WorldHitDict],
+        tracks: Optional[List[WorldTrackDict]] = None,
         templates_scanned: Sequence[str],
         search_roi: Optional[Rect],
         cyan_regions: int,
@@ -179,6 +183,7 @@ class WorldPerceptionCache:
     ) -> None:
         with self._lock:
             self._hits = [dict(h) for h in hits]
+            self._tracks = [dict(t) for t in (tracks or [])]
             self._templates_scanned = [str(t) for t in templates_scanned]
             self._search_roi = list(search_roi) if search_roi else None
             self._cyan_regions = int(cyan_regions)
@@ -192,6 +197,7 @@ class WorldPerceptionCache:
         with self._lock:
             return WorldPerceptionSnapshot(
                 hits=tuple(dict(h) for h in self._hits),
+                tracks=tuple(dict(t) for t in self._tracks),
                 templates_scanned=tuple(self._templates_scanned),
                 search_roi=list(self._search_roi) if self._search_roi else None,
                 cyan_regions=self._cyan_regions,
@@ -223,7 +229,9 @@ class WorldPerceptionCache:
         ]
         return {
             "hits": [dict(h) for h in snap.hits],
+            "tracks": [dict(t) for t in snap.tracks],
             "hit_count": len(snap.hits),
+            "track_count": len(snap.tracks),
             "templates_scanned": list(snap.templates_scanned),
             "template_stats": template_stats,
             "search_roi": list(snap.search_roi) if snap.search_roi else None,
@@ -236,7 +244,7 @@ class WorldPerceptionCache:
 
 
 class WorldVisionProcessor:
-    """Daemon thread: world template locate at low FPS, parallel to inventory."""
+    """Daemon thread: world template locate at capture rate, parallel to inventory."""
 
     def __init__(
         self,
@@ -259,6 +267,9 @@ class WorldVisionProcessor:
         self._thread: Optional[threading.Thread] = None
         self._last_processed_seq = 0
         self._actual_fps = 0.0
+        from bot_world_track import WorldObjectTrackerState
+
+        self._tracker_state = WorldObjectTrackerState()
 
     @property
     def actual_fps(self) -> float:
@@ -313,8 +324,20 @@ class WorldVisionProcessor:
             )
             cyan_count = 0
 
+        from bot_world_track import tracks_to_dict, update_world_tracks
+
+        tracks = update_world_tracks(
+            self._tracker_state,
+            hits,
+            ts=time.monotonic(),
+            client_w=w0,
+            vision_fps=self._actual_fps if self._actual_fps > 0 else self._fps,
+        )
+        track_dicts = tracks_to_dict(tracks)
+
         self._cache.update(
             hits=hits,
+            tracks=track_dicts,
             templates_scanned=template_names,
             search_roi=search_roi,
             cyan_regions=cyan_count,
@@ -362,5 +385,6 @@ __all__ = [
     "WorldPerceptionCache",
     "WorldPerceptionSnapshot",
     "WorldVisionProcessor",
+    "WorldTrackDict",
     "default_world_vision_fps",
 ]

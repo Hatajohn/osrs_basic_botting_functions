@@ -15,9 +15,12 @@ import './MenuBar.css';
 type MenuBarProps = {
   onAction: (actionId: MenuActionId, item: MenuItemDef) => void;
   menuContext?: MenuContext;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onZoomFit?: () => void;
 };
 
-export function MenuBar({ onAction, menuContext }: MenuBarProps) {
+export function MenuBar({ onAction, menuContext, onZoomIn, onZoomOut, onZoomFit }: MenuBarProps) {
   const ctx: MenuContext = menuContext ?? {
     botRunning: false,
     chainDirty: false,
@@ -27,6 +30,9 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
     debugMode: 'inventory_identify',
     showTemplateTracks: true,
     showInventoryTracks: true,
+    hasZoomViewport: false,
+    highRes: false,
+    panelsVisible: { log: true, tasks: true, scripts: true, actions: true },
   };
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const barRef = useRef<HTMLElement>(null);
@@ -61,10 +67,38 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
           shortcut: 'F5',
         });
       }
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        onZoomIn?.();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault();
+        onZoomOut?.();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault();
+        onZoomFit?.();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        onAction('toggleLogPanel', { id: 'toggleLogPanel', label: 'Log' });
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        onAction('toggleTasksPanel', { id: 'toggleTasksPanel', label: 'Bot tasks' });
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        onAction('toggleScriptsPanel', { id: 'toggleScriptsPanel', label: 'Scripts' });
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        onAction('toggleActionsPanel', { id: 'toggleActionsPanel', label: 'Actions' });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onAction]);
+  }, [onAction, ctx, onZoomIn, onZoomOut, onZoomFit]);
 
   const handleItemClick = (item: MenuItemDef) => {
     closeMenus();
@@ -99,6 +133,46 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
         </>
       );
     }
+    if (item.id === 'toggleHighRes') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.highRes ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
+    if (item.id === 'toggleLogPanel') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.panelsVisible.log ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
+    if (item.id === 'toggleTasksPanel') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.panelsVisible.tasks ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
+    if (item.id === 'toggleScriptsPanel') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.panelsVisible.scripts ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
+    if (item.id === 'toggleActionsPanel') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.panelsVisible.actions ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
     return <span>{item.label}</span>;
   };
 
@@ -120,7 +194,8 @@ export function MenuBar({ onAction, menuContext }: MenuBarProps) {
               {menu.items.map((item, index) => {
                 const prev = index > 0 ? menu.items[index - 1] : undefined;
                 const showSeparator =
-                  item.radioGroup === 'debugMode' && prev && prev.radioGroup !== 'debugMode';
+                  (item.radioGroup === 'debugMode' && prev && prev.radioGroup !== 'debugMode') ||
+                  (item.id === 'toggleLogPanel' && prev?.id === 'toggleHighRes');
                 const enabled = isItemInteractive(item, ctx);
                 return (
                   <li key={item.id} role="none">

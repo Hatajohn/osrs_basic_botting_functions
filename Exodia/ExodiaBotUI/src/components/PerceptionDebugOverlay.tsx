@@ -1,6 +1,5 @@
-import { useCallback, useMemo, type RefObject } from 'react';
+import { useMemo } from 'react';
 import type { StreamMeta } from '../../shared/ipc';
-import { useImageAnchoredLayout } from '../hooks/useImageAnchoredLayout';
 import {
   computePerceptionHudLayout,
   type PerceptionHudInvWatchMarker,
@@ -10,7 +9,6 @@ import './PerceptionDebugOverlay.css';
 
 type PerceptionDebugOverlayProps = {
   meta: StreamMeta | null | undefined;
-  imageRef: RefObject<HTMLImageElement | null>;
   showInventoryDebug?: boolean;
   showInventoryTracks?: boolean;
   showWorldTracks?: boolean;
@@ -18,8 +16,8 @@ type PerceptionDebugOverlayProps = {
 
 type TrackDot = {
   key: string;
-  left: number;
-  top: number;
+  left: string;
+  top: string;
   color: string;
   title: string;
 };
@@ -50,20 +48,14 @@ function toTrackDots(
   return dots;
 }
 
-/** Live HUD from /meta — img-anchored, replaced each poll, no fade. */
+/** Live HUD from /meta — percentage-anchored, replaced each poll, no fade. */
 export function PerceptionDebugOverlay({
   meta,
-  imageRef,
   showInventoryDebug = true,
   showInventoryTracks = true,
   showWorldTracks = true,
 }: PerceptionDebugOverlayProps) {
-  const computeLayout = useCallback(
-    (img: HTMLImageElement) => computePerceptionHudLayout(img, meta),
-    [meta],
-  );
-
-  const layout = useImageAnchoredLayout(imageRef, computeLayout, [meta]);
+  const layout = useMemo(() => computePerceptionHudLayout(meta), [meta]);
 
   const trackDots = useMemo(() => {
     if (!layout) return [];

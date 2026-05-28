@@ -308,6 +308,47 @@ def _wsl_motion_timing(duration_ms: int) -> Tuple[int, int]:
     return steps, step_ms
 
 
+def mouse_speed_factor() -> float:
+    """Point-click / A→B move speed multiplier (default ``1.5`` = 1.5× faster). Set ``EXODIA_MOUSE_SPEED=1.0`` for legacy timing."""
+    raw = (os.environ.get("EXODIA_MOUSE_SPEED") or "1.5").strip()
+    try:
+        factor = float(raw)
+    except ValueError:
+        factor = 1.5
+    return max(0.1, factor)
+
+
+def scale_move_duration_s(seconds: float) -> float:
+    """Scale a move duration in seconds (higher ``mouse_speed_factor`` → shorter duration)."""
+    return max(0.0, float(seconds)) / mouse_speed_factor()
+
+
+def click_pause_s(*, pre: bool = True) -> float:
+    """Brief pause before/after a click so the OS registers input (~4–6 ms at default speed)."""
+    lo, hi = (0.004, 0.006)
+    return random.uniform(lo, hi) / mouse_speed_factor()
+
+
+def pre_click_settle_s() -> float:
+    """Pause after focus / hover-clear before a template or inventory click (default ~10 ms)."""
+    raw = (os.environ.get("EXODIA_PRE_CLICK_SETTLE_S") or "0.01").strip()
+    try:
+        base = float(raw)
+    except ValueError:
+        base = 0.01
+    return max(0.0, base) / mouse_speed_factor()
+
+
+def use_on_click_gap_s() -> float:
+    """Gap between use-on source and destination clicks (default ~13 ms at speed 1.5)."""
+    raw = (os.environ.get("EXODIA_INV_USE_ON_GAP_S") or "0.02").strip()
+    try:
+        base = float(raw)
+    except ValueError:
+        base = 0.02
+    return max(0.006, base) / mouse_speed_factor()
+
+
 def wsl_move_duration_ms(
     distance_px: float,
     move_profile: str = "tight",
@@ -320,8 +361,12 @@ def wsl_move_duration_ms(
         ms = int(ms * 1.08)
     elif move_profile == "normal":
         ms = int(ms * 1.04)
+    speed = mouse_speed_factor()
+    ms = int(ms / speed)
     lo = int(os.environ.get("EXODIA_WSL_MOVE_MS_MIN", "110"))
     hi = int(os.environ.get("EXODIA_WSL_MOVE_MS_MAX", "260"))
+    lo = max(1, int(lo / speed))
+    hi = max(lo, int(hi / speed))
     return max(lo, min(hi, ms))
 
 

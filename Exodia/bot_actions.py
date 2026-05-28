@@ -67,7 +67,6 @@ def use_x_on_y(
     """Question: How do I use inventory item X on item Y (source then closest dest)?"""
     from bot_inventory_actions import (
         UseItemOnResult,
-        _env_float,
         clear_inventory_hover,
         focus_runelite,
         pick_distinct_screen_points,
@@ -97,7 +96,7 @@ def use_x_on_y(
 
     if focus:
         focus_runelite()
-        time.sleep(0.2)
+        time.sleep(Env.pre_click_settle_s())
     if center_first and eyes.client_rect is not None:
         clear_inventory_hover(eyes.client_rect)
 
@@ -106,8 +105,7 @@ def use_x_on_y(
         rad = int(os.environ.get("EXODIA_INV_CLICK_RAD", "6"))
 
     arms.click_at(list(src_pt), rad=rad)
-    gap = _env_float("EXODIA_INV_USE_ON_GAP_S", 0.18)
-    time.sleep(max(0.05, gap))
+    time.sleep(Env.use_on_click_gap_s())
     arms.click_at(list(dst_pt), rad=rad)
     return UseItemOnResult(True)
 
@@ -143,7 +141,7 @@ def click_on_image(client, bot_arms, bot_eyes, target, refresh=True, inv=False, 
     from bot_inventory_actions import focus_runelite
 
     focus_runelite()
-    time.sleep(0.2)
+    time.sleep(Env.pre_click_settle_s())
     bot_arms.click_at(best.screen_xy)
 
 

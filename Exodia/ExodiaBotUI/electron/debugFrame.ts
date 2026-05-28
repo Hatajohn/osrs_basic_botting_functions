@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { dialog } from 'electron';
-import type { DebugFrameMode, DebugFrameResult } from '../shared/ipc';
+import type { DebugFrameMode, DebugFrameOptions, DebugFrameResult } from '../shared/ipc';
 import { pythonExists } from './paths';
 import { loadSettings, resolveSettings } from './settings';
 
@@ -29,7 +29,10 @@ function readImageDataUrl(imagePath: string): string | undefined {
   return `data:image/png;base64,${buf.toString('base64')}`;
 }
 
-export async function refreshDebugFrame(mode: DebugFrameMode): Promise<DebugFrameResult> {
+export async function refreshDebugFrame(
+  mode: DebugFrameMode,
+  options?: DebugFrameOptions,
+): Promise<DebugFrameResult> {
   const { resolvedExodiaRoot, resolvedPythonPath } = resolveSettings(loadSettings());
   const scriptPath = path.join(resolvedExodiaRoot, SCRIPT_NAME);
 
@@ -52,7 +55,9 @@ export async function refreshDebugFrame(mode: DebugFrameMode): Promise<DebugFram
     const settings = loadSettings();
     const psExe = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
     const useWslPs = process.platform === 'linux' && fs.existsSync(psExe);
-    const argv = [scriptPath, '--mode', mode, '--force-sync'];
+    const maxWidth =
+      options?.maxWidth !== undefined ? options.maxWidth : (settings.streamMaxWidth ?? 640);
+    const argv = [scriptPath, '--mode', mode, '--force-sync', '--max-width', String(maxWidth)];
     const child = spawn(resolvedPythonPath, argv, {
       cwd: resolvedExodiaRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -61,7 +66,7 @@ export async function refreshDebugFrame(mode: DebugFrameMode): Promise<DebugFram
         EXODIA_ROOT: resolvedExodiaRoot,
         EXODIA_STREAM_PORT: String(settings.streamPort ?? 8765),
         EXODIA_CAPTURE_STREAM: '1',
-        EXODIA_DEBUG_FRAME_MAX_WIDTH: String(settings.streamMaxWidth ?? 640),
+        EXODIA_DEBUG_FRAME_MAX_WIDTH: String(maxWidth),
         ...(useWslPs
           ? {
               EXODIA_CAPTURE_BACKEND: process.env.EXODIA_CAPTURE_BACKEND ?? 'wsl_ps',
@@ -110,6 +115,9 @@ export async function refreshDebugFrame(mode: DebugFrameMode): Promise<DebugFram
         tmpCount: typeof parsed.tmp_count === 'number' ? parsed.tmp_count : undefined,
         width: typeof parsed.width === 'number' ? parsed.width : undefined,
         height: typeof parsed.height === 'number' ? parsed.height : undefined,
+        sourceWidth: typeof parsed.source_width === 'number' ? parsed.source_width : undefined,
+        sourceHeight: typeof parsed.source_height === 'number' ? parsed.source_height : undefined,
+        scaled: typeof parsed.scaled === 'boolean' ? parsed.scaled : undefined,
         error: typeof parsed.error === 'string' ? parsed.error : undefined,
         hint: typeof parsed.hint === 'string' ? parsed.hint : undefined,
         refreshedAt: Date.now(),

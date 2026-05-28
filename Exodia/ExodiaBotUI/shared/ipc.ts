@@ -173,6 +173,10 @@ export type RunSingleActionResult = {
 
 export type DebugFrameMode = 'inventory_identify' | 'raw_client' | 'inventory_grid';
 
+export type DebugFrameOptions = {
+  maxWidth?: number;
+};
+
 export type DebugFrameResult = {
   ok: boolean;
   mode: DebugFrameMode;
@@ -183,6 +187,9 @@ export type DebugFrameResult = {
   tmpCount?: number;
   width?: number;
   height?: number;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  scaled?: boolean;
   error?: string;
   hint?: string;
   refreshedAt?: number;
@@ -318,9 +325,23 @@ export type WorldTemplateStat = {
   best_score?: number | null;
 };
 
+export type WorldTrackMeta = {
+  track_id: number;
+  template: string;
+  client_xy: number[];
+  screen_xy: number[];
+  velocity_xy: number[];
+  score: number;
+  age_frames: number;
+  missed_frames: number;
+  stable: boolean;
+};
+
 export type WorldPerceptionMeta = {
   hits?: Array<{ template: string; client_xy: number[]; screen_xy?: number[]; score: number }>;
+  tracks?: WorldTrackMeta[];
   hit_count?: number;
+  track_count?: number;
   templates_scanned?: string[];
   template_stats?: WorldTemplateStat[];
   vision_fps?: number;
@@ -385,7 +406,7 @@ export type ExodiaApi = {
   selectScriptsFolder: () => Promise<SelectFolderResult>;
   listDirectory: (dirPath: string, options?: ListDirectoryOptions) => Promise<ListDirectoryResult>;
   readTextFile: (filePath: string) => Promise<ReadTextFileResult>;
-  refreshDebugFrame: (mode?: DebugFrameMode) => Promise<DebugFrameResult>;
+  refreshDebugFrame: (mode?: DebugFrameMode, options?: DebugFrameOptions) => Promise<DebugFrameResult>;
   saveDebugSnapshot: (imageDataUrl: string, defaultName?: string) => Promise<SaveSnapshotResult>;
   openLogsFolder: () => Promise<void>;
   runCalibrateClientRect: () => Promise<CalibrateClientRectResult>;

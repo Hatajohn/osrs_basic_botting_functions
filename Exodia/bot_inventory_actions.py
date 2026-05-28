@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from bot_eyes import INV_COLS, INV_ROWS, inventory_slot_screen_xy
+import bot_env as Env
 
 
 @dataclass(frozen=True)
@@ -270,7 +271,7 @@ def use_inventory_slot_on_slot(
         )
     if focus:
         focus_runelite()
-        time.sleep(0.2)
+        time.sleep(Env.pre_click_settle_s())
     if center_first:
         clear_inventory_hover(client_rect)
     if arms is None:
@@ -293,8 +294,9 @@ def use_inventory_slot_on_slot(
         )
     gap = between_clicks_s
     if gap is None:
-        gap = _env_float("EXODIA_INV_USE_ON_GAP_S", 0.18)
-    time.sleep(max(0.05, gap))
+        time.sleep(Env.use_on_click_gap_s())
+    else:
+        time.sleep(max(0.006, float(gap) / Env.mouse_speed_factor()))
     if not click_inventory_slot(
         inventory_rect,
         client_rect,

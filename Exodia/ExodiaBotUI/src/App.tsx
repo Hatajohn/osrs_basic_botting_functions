@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MenuBar } from './components/MenuBar';
 import { useLogStream } from './components/LogConsole';
+import type { ZoomViewportHandle } from './components/ZoomableImageViewport';
 import { useBotSession } from './hooks/useBotSession';
 import { useOverlayAnnotations } from './hooks/useOverlayAnnotations';
 import { usePerceptionStream } from './hooks/usePerceptionStream';
-import { MainDashboard } from './layout/MainDashboard';
+import { MainDashboard, useDashboardLayout } from './layout/MainDashboard';
 import type { MenuActionId, MenuItemDef } from './menu/menuConfig';
 import { debugModeForAction } from './menu/menuConfig';
 import { SettingsPage } from './pages/SettingsPage';
@@ -74,6 +75,10 @@ export default function App() {
   const [debugImage, setDebugImage] = useState<string | undefined>();
   const [debugLoading, setDebugLoading] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
+  const [highRes, setHighRes] = useState(false);
+  const zoomViewportRef = useRef<ZoomViewportHandle>(null);
+  const dashboardRef = useRef<HTMLElement>(null);
+  const dashboardLayout = useDashboardLayout(dashboardRef);
   const {
     annotations: overlayAnnotations,
     latestPreview: latestActionPreview,
@@ -81,6 +86,24 @@ export default function App() {
     clearGroup: clearOverlayGroup,
     refreshGroup: refreshOverlayGroup,
   } = useOverlayAnnotations();
+
+  useEffect(() => {
+    void window.exodia.getSettings().then(({ settings }) => {
+      setHighRes((settings.streamMaxWidth ?? 640) === 0);
+    });
+  }, []);
+
+  const applyHighRes = useCallback(
+    async (enabled: boolean) => {
+      const maxWidth = enabled ? 0 : 640;
+      setHighRes(enabled);
+      await window.exodia.setSettings({ streamMaxWidth: maxWidth });
+      if (streamRunning) {
+        await restartStream();
+      }
+    },
+    [restartStream, streamRunning],
+  );
 
   const refreshDebugFrame = useCallback(
     async (mode: DebugFrameMode = debugMode) => {
@@ -90,7 +113,9 @@ export default function App() {
       }
       setDebugLoading(true);
       try {
-        const result = await window.exodia.refreshDebugFrame(mode);
+        const result = await window.exodia.refreshDebugFrame(mode, {
+          maxWidth: highRes ? 0 : 640,
+        });
         setDebugResult(result);
         if (result.ok && result.imageDataUrl) {
           setDebugImage(result.imageDataUrl);
@@ -106,7 +131,7 @@ export default function App() {
         setDebugLoading(false);
       }
     },
-    [appendLog, debugMode, invalidateCache, previewLive, botRunning, streamRunning],
+    [appendLog, debugMode, highRes, invalidateCache, previewLive, botRunning, streamRunning],
   );
 
   const runCalibrateClientRect = useCallback(async () => {
@@ -192,6 +217,30 @@ export default function App() {
         case 'toggleShowInventoryTracks':
           setShowInventoryTracks((v) => !v);
           break;
+        case 'zoomIn':
+          zoomViewportRef.current?.zoomIn();
+          break;
+        case 'zoomOut':
+          zoomViewportRef.current?.zoomOut();
+          break;
+        case 'zoomFit':
+          zoomViewportRef.current?.zoomFit();
+          break;
+        case 'toggleHighRes':
+          await applyHighRes(!highRes);
+          break;
+        case 'toggleLogPanel':
+          dashboardLayout.togglePanelCollapsed('log');
+          break;
+        case 'toggleTasksPanel':
+          dashboardLayout.togglePanelCollapsed('tasks');
+          break;
+        case 'toggleScriptsPanel':
+          dashboardLayout.togglePanelCollapsed('scripts');
+          break;
+        case 'toggleActionsPanel':
+          dashboardLayout.togglePanelCollapsed('actions');
+          break;
         case 'botStop':
           await stopBot();
           break;
@@ -212,13 +261,16 @@ export default function App() {
           });
       }
     },
-    [clearLog, appendLog, debugMode, refreshDebugFrame, stopBot, pauseBot, resumeBot, viewportImage],
+    [clearLog, appendLog, applyHighRes, dashboardLayout, debugMode, highRes, refreshDebugFrame, stopBot, pauseBot, resumeBot, viewportImage],
   );
 
   return (
     <div className="app">
       <MenuBar
         onAction={handleMenuAction}
+        onZoomIn={() => zoomViewportRef.current?.zoomIn()}
+        onZoomOut={() => zoomViewportRef.current?.zoomOut()}
+        onZoomFit={() => zoomViewportRef.current?.zoomFit()}
         menuContext={{
           botRunning,
           chainDirty: false,
@@ -228,9 +280,19 @@ export default function App() {
           debugMode,
           showTemplateTracks,
           showInventoryTracks,
+          hasZoomViewport: Boolean(viewportImage),
+          highRes,
+          panelsVisible: {
+            log: !dashboardLayout.logCollapsed,
+            tasks: !dashboardLayout.tasksCollapsed,
+            scripts: !dashboardLayout.scriptsCollapsed,
+            actions: !dashboardLayout.actionsCollapsed,
+          },
         }}
       />
       <MainDashboard
+        containerRef={dashboardRef}
+        layoutApi={dashboardLayout}
         logEntries={logEntries}
         onClearLog={clearLog}
         debugResult={debugResult}
@@ -264,6 +326,9 @@ export default function App() {
         onClearOverlayGroup={clearOverlayGroup}
         onRefreshOverlayGroup={refreshOverlayGroup}
         onPrepareClickPreview={prepareActionClickPreview}
+        zoomViewportRef={zoomViewportRef}
+        highRes={highRes}
+        onToggleHighRes={(enabled) => void applyHighRes(enabled)}
       />
       <SettingsPage
         open={settingsOpen}

@@ -1,0 +1,48 @@
+.zoomable-viewport {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background: #0d0f12;
+  touch-action: none;
+}
+
+.zoomable-viewport--panning {
+  cursor: grabbing;
+}
+
+.zoomable-viewport--space-pan {
+  cursor: grab;
+}
+
+.zoomable-viewport__content {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.zoomable-viewport__image-layer {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.zoomable-viewport__image {
+  display: block;
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  image-rendering: pixelated;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.zoomable-viewport__overlay-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

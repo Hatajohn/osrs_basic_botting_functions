@@ -9,7 +9,7 @@ handshake line to stdout for Electron:
 
 Usage:
   python exodia_perception_stream.py --port 8765
-  python exodia_perception_stream.py --capture-fps 15 --vision-fps 15 --max-width 640
+  python exodia_perception_stream.py --capture-fps 10 --vision-fps 10 --max-width 640
 """
 from __future__ import annotations
 
@@ -101,25 +101,25 @@ def main(argv: list[str] | None = None) -> int:
         "--capture-fps",
         type=float,
         default=0.0,
-        help="Screen capture FPS (0=EXODIA_CAPTURE_FPS or 15)",
+        help="Screen capture FPS (0=EXODIA_CAPTURE_FPS or 10)",
     )
     p.add_argument(
         "--vision-fps",
         type=float,
         default=0.0,
-        help="Inventory vision FPS (0=EXODIA_INVENTORY_VISION_FPS or 15)",
+        help="Inventory vision FPS (0=EXODIA_INVENTORY_VISION_FPS or 10)",
     )
     p.add_argument(
         "--world-vision-fps",
         type=float,
         default=0.0,
-        help="World vision FPS (0=EXODIA_WORLD_VISION_FPS or 2)",
+        help="World vision FPS (0=EXODIA_WORLD_VISION_FPS or 10)",
     )
     p.add_argument(
         "--publish-fps",
         type=float,
         default=0.0,
-        help="MJPEG publish FPS (0=EXODIA_STREAM_PUBLISH_FPS or 15)",
+        help="MJPEG publish FPS (0=EXODIA_STREAM_PUBLISH_FPS or 10)",
     )
     p.add_argument(
         "--max-width",
@@ -148,11 +148,11 @@ def main(argv: list[str] | None = None) -> int:
 
     capture_fps = args.capture_fps if args.capture_fps > 0 else 0.0
     if capture_fps <= 0:
-        raw_cap = os.environ.get("EXODIA_CAPTURE_FPS", "15").strip()
+        raw_cap = os.environ.get("EXODIA_CAPTURE_FPS", "10").strip()
         try:
             capture_fps = float(raw_cap)
         except ValueError:
-            capture_fps = 15.0
+            capture_fps = 10.0
     capture_fps = max(1.0, min(30.0, capture_fps))
 
     vision_fps = args.vision_fps if args.vision_fps > 0 else 0.0

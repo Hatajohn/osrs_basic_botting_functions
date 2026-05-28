@@ -6,6 +6,12 @@
       "template": "infernal_eel",
       "world": true,
       "inventory": true
+    },
+    {
+      "id": "wmpp4yb8shfj",
+      "template": "hammer",
+      "world": false,
+      "inventory": true
     }
   ]
 }

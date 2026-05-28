@@ -36,9 +36,9 @@ function defaultSettings(): ExodiaSettings {
     streamPort: 8765,
     autoStartStream: true,
     streamMaxWidth: 640,
-    streamCaptureFps: 15,
-    streamVisionFps: 15,
-    streamPublishFps: 15,
+    streamCaptureFps: 10,
+    streamVisionFps: 10,
+    streamPublishFps: 10,
   };
 }
 

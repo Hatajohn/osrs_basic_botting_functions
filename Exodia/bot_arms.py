@@ -92,21 +92,23 @@ class BotArms:
             image = cv2.circle(image, (x, y), radius=rad, color=(0, 0, 255), thickness=2)
             Env.debug_view(image, title='Moving the mouse here')
 
+        scaled_duration = Env.scale_move_duration_s(duration)
         if Env.input_backend_label() == "wsl_ps":
-            self.move_mouse(target, rad=0, duration=max(0.12, duration), move_profile=move_profile)
-            b = random.uniform(0.03, 0.05)
-            time.sleep(b)
+            self.move_mouse(
+                target,
+                rad=0,
+                duration=max(0.06, scaled_duration),
+                move_profile=move_profile,
+            )
+            time.sleep(Env.click_pause_s(pre=True))
             Env.wsl_windows_click_current()
-            b = random.uniform(0.04, 0.06)
-            time.sleep(b)
+            time.sleep(Env.click_pause_s(pre=False))
             return
 
-        self.move_mouse(target, rad=0, duration=duration, move_profile=move_profile)
-        b = random.uniform(0.03, 0.05)
-        time.sleep(b)
+        self.move_mouse(target, rad=0, duration=scaled_duration, move_profile=move_profile)
+        time.sleep(Env.click_pause_s(pre=True))
         pyautogui.click()
-        b = random.uniform(0.04, 0.06)
-        time.sleep(b)
+        time.sleep(Env.click_pause_s(pre=False))
 
 
     def drag_at(
@@ -256,7 +258,7 @@ class BotArms:
             list_length = 1
             pick_tween = None
 
-        timeout = duration / max(list_length, 1)
+        timeout = Env.scale_move_duration_s(duration) / max(list_length, 1)
         for pt in point_list:
             pyautogui.moveTo(*pt, tween=pick_tween)
             time.sleep(timeout)

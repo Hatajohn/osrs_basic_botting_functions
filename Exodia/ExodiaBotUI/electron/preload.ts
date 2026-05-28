@@ -22,7 +22,7 @@ const api: ExodiaApi = {
   selectScriptsFolder: () => ipcRenderer.invoke(IPC.SELECT_SCRIPTS_FOLDER),
   listDirectory: (dirPath, options) => ipcRenderer.invoke(IPC.LIST_DIRECTORY, dirPath, options),
   readTextFile: (filePath) => ipcRenderer.invoke(IPC.READ_TEXT_FILE, filePath),
-  refreshDebugFrame: (mode) => ipcRenderer.invoke(IPC.REFRESH_DEBUG_FRAME, mode),
+  refreshDebugFrame: (mode, options) => ipcRenderer.invoke(IPC.REFRESH_DEBUG_FRAME, mode, options),
   saveDebugSnapshot: (imageDataUrl, defaultName) =>
     ipcRenderer.invoke(IPC.SAVE_DEBUG_SNAPSHOT, imageDataUrl, defaultName),
   openLogsFolder: () => ipcRenderer.invoke(IPC.OPEN_LOGS_FOLDER),

@@ -1,7 +1,12 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { EphemeralOverlayLayer } from '../components/EphemeralOverlayLayer';
 import { PerceptionDebugOverlay } from '../components/PerceptionDebugOverlay';
-import { StreamViewport } from '../components/StreamViewport';
+import {
+  ZoomableImageViewport,
+  zoomPercent,
+  type ZoomViewportHandle,
+  type ZoomViewportInfo,
+} from '../components/ZoomableImageViewport';
 import { TemplateWatchPanel } from './TemplateWatchPanel';
 import type { OverlayAnnotationEntry } from '../hooks/useOverlayAnnotations';
 import type {
@@ -39,6 +44,9 @@ type RuneLiteViewPanelProps = {
   worldHitCount?: number;
   overlayAnnotations?: OverlayAnnotationEntry[];
   latestActionPreview?: ActionClickPreview | null;
+  zoomViewportRef?: RefObject<ZoomViewportHandle | null>;
+  highRes?: boolean;
+  onToggleHighRes?: (enabled: boolean) => void;
 };
 
 function formatMode(mode: DebugFrameMode): string {
@@ -57,6 +65,22 @@ function formatMode(mode: DebugFrameMode): string {
 function formatTime(ts?: number): string {
   if (!ts) return '—';
   return new Date(ts).toLocaleTimeString();
+}
+
+function formatDimensions(info: ZoomViewportInfo | null, result?: DebugFrameResult | null, meta?: StreamMeta | null): string | null {
+  if (info && info.naturalWidth > 0 && info.naturalHeight > 0) {
+    return `${info.naturalWidth}×${info.naturalHeight}`;
+  }
+  if (result?.sourceWidth && result?.sourceHeight) {
+    return `${result.sourceWidth}×${result.sourceHeight}`;
+  }
+  if (result?.width && result?.height) {
+    return `${result.width}×${result.height}`;
+  }
+  if (meta?.frame_width && meta?.frame_height) {
+    return `${meta.frame_width}×${meta.frame_height}`;
+  }
+  return null;
 }
 
 export function RuneLiteViewPanel({
@@ -85,9 +109,13 @@ export function RuneLiteViewPanel({
   worldHitCount,
   overlayAnnotations = [],
   latestActionPreview = null,
+  zoomViewportRef,
+  highRes = false,
+  onToggleHighRes,
 }: RuneLiteViewPanelProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const [watchCollapsed, setWatchCollapsed] = useState(false);
+  const [zoomInfo, setZoomInfo] = useState<ZoomViewportInfo | null>(null);
   const showingStreamBase = Boolean(streamPortUp && viewportImage && !previewLive && !botRunning);
   const usingLiveStream = Boolean(streamRunning && !previewLive && !botRunning);
   const showStreamControls = Boolean(!previewLive && !botRunning && onRestartStream);
@@ -105,6 +133,12 @@ export function RuneLiteViewPanel({
       : usingLiveStream
         ? 'Live stream'
         : formatMode(debugMode);
+  const zoomResetKey = showingStreamBase || (previewLive && botRunning) ? undefined : result?.refreshedAt;
+  const dimensionsLabel = formatDimensions(zoomInfo, result ?? undefined, streamMeta ?? undefined);
+  const zoomLabel =
+    zoomInfo && zoomInfo.fitScale > 0
+      ? `${zoomPercent(zoomInfo.scale, zoomInfo.fitScale)}%`
+      : null;
 
   return (
     <section className="panel panel--runelite">
@@ -130,6 +164,53 @@ export function RuneLiteViewPanel({
                   ? 'Stream stale'
                   : 'Debug'}
           </span>
+          {hasImage && (
+            <div className="panel__zoom-toolbar" title="Ctrl+wheel to zoom · Space or middle-click to pan">
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => zoomViewportRef?.current?.zoomOut()}
+                title="Zoom out (Ctrl+-)"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => zoomViewportRef?.current?.zoom100()}
+                title="100% pixel size"
+              >
+                100%
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => zoomViewportRef?.current?.zoomIn()}
+                title="Zoom in (Ctrl+=)"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                onClick={() => zoomViewportRef?.current?.zoomFit()}
+                title="Fit to panel (Ctrl+0)"
+              >
+                Fit
+              </button>
+            </div>
+          )}
+          {onToggleHighRes && (
+            <label className="panel__high-res-toggle" title="Full client resolution (restarts stream when live)">
+              <input
+                type="checkbox"
+                checked={highRes}
+                onChange={(e) => onToggleHighRes(e.target.checked)}
+                disabled={busy || streamRestarting}
+              />
+              High res
+            </label>
+          )}
           {showStreamControls && onToggleStreamDebugOverlay && (
             <button
               type="button"
@@ -259,9 +340,12 @@ export function RuneLiteViewPanel({
           </div>
         )}
         {hasImage && viewportImage && (
-          <StreamViewport
+          <ZoomableImageViewport
+            ref={zoomViewportRef}
             baseSrc={viewportImage}
             imageRef={imageRef}
+            resetKey={zoomResetKey}
+            onZoomChange={setZoomInfo}
             alt={
               previewLive && botRunning
                 ? 'RuneLite live preview'
@@ -276,14 +360,13 @@ export function RuneLiteViewPanel({
               (showStreamDebugOverlay || showTemplateTracks || showInventoryTracks) && (
               <PerceptionDebugOverlay
                 meta={streamMeta}
-                imageRef={imageRef}
                 showInventoryDebug={showStreamDebugOverlay}
                 showInventoryTracks={showInventoryTracks}
                 showWorldTracks={showTemplateTracks}
               />
             )}
-            <EphemeralOverlayLayer annotations={overlayAnnotations} imageRef={imageRef} />
-          </StreamViewport>
+            <EphemeralOverlayLayer annotations={overlayAnnotations} />
+          </ZoomableImageViewport>
         )}
         </div>
         {showingStreamBase && (
@@ -296,6 +379,8 @@ export function RuneLiteViewPanel({
       </div>
       <footer className="panel__footer panel__footer--stats">
         <span>Mode: {modeLabel}</span>
+        {zoomLabel && <span>Zoom: {zoomLabel}</span>}
+        {dimensionsLabel && <span>{dimensionsLabel}</span>}
         {showingStreamBase && streamMeta?.capture_seq != null && (
           <span>seq: {streamMeta.capture_seq}</span>
         )}

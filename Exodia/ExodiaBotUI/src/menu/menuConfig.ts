@@ -19,6 +19,14 @@ export type MenuContext = {
   debugMode: DebugFrameMode;
   showTemplateTracks: boolean;
   showInventoryTracks: boolean;
+  hasZoomViewport: boolean;
+  highRes: boolean;
+  panelsVisible: {
+    log: boolean;
+    tasks: boolean;
+    scripts: boolean;
+    actions: boolean;
+  };
 };
 
 export type MenuActionId =
@@ -43,6 +51,14 @@ export type MenuActionId =
   | 'togglePlayByPlay'
   | 'toggleShowTemplateTracks'
   | 'toggleShowInventoryTracks'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'zoomFit'
+  | 'toggleHighRes'
+  | 'toggleLogPanel'
+  | 'toggleTasksPanel'
+  | 'toggleScriptsPanel'
+  | 'toggleActionsPanel'
   | 'tools'
   | 'about'
   | 'openLogsFolder';
@@ -189,6 +205,66 @@ export const MENUS: MenuDef[] = [
         radioGroup: 'inventoryTracks',
       },
       {
+        id: 'zoomIn',
+        label: 'Zoom in',
+        shortcut: 'Ctrl+=',
+        enabledWhen: 'hasDebugFrame',
+        phase: 1,
+      },
+      {
+        id: 'zoomOut',
+        label: 'Zoom out',
+        shortcut: 'Ctrl+-',
+        enabledWhen: 'hasDebugFrame',
+        phase: 1,
+      },
+      {
+        id: 'zoomFit',
+        label: 'Reset zoom',
+        shortcut: 'Ctrl+0',
+        enabledWhen: 'hasDebugFrame',
+        phase: 1,
+      },
+      {
+        id: 'toggleHighRes',
+        label: 'High resolution stream',
+        enabledWhen: 'always',
+        phase: 1,
+        radioGroup: 'highRes',
+      },
+      {
+        id: 'toggleLogPanel',
+        label: 'Log',
+        shortcut: 'Ctrl+Shift+L',
+        enabledWhen: 'always',
+        phase: 1,
+        radioGroup: 'panelLog',
+      },
+      {
+        id: 'toggleTasksPanel',
+        label: 'Bot tasks',
+        shortcut: 'Ctrl+Shift+T',
+        enabledWhen: 'always',
+        phase: 1,
+        radioGroup: 'panelTasks',
+      },
+      {
+        id: 'toggleScriptsPanel',
+        label: 'Scripts',
+        shortcut: 'Ctrl+Shift+S',
+        enabledWhen: 'always',
+        phase: 1,
+        radioGroup: 'panelScripts',
+      },
+      {
+        id: 'toggleActionsPanel',
+        label: 'Actions',
+        shortcut: 'Ctrl+Shift+A',
+        enabledWhen: 'always',
+        phase: 1,
+        radioGroup: 'panelActions',
+      },
+      {
         id: 'previewFps',
         label: 'Preview FPS (0.5 / 1 / 2)',
         enabledWhen: 'never',
@@ -284,6 +360,14 @@ export const PHASE1_ENABLED = new Set<MenuActionId>([
   'openLogsFolder',
   'toggleShowTemplateTracks',
   'toggleShowInventoryTracks',
+  'zoomIn',
+  'zoomOut',
+  'zoomFit',
+  'toggleHighRes',
+  'toggleLogPanel',
+  'toggleTasksPanel',
+  'toggleScriptsPanel',
+  'toggleActionsPanel',
 ]);
 
 /** Phase 2 enabled items. */

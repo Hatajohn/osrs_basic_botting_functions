@@ -7,6 +7,7 @@ import type {
   RunSingleActionResult,
 } from '../../shared/ipc';
 import type { PushAnnotationOpts } from '../hooks/useOverlayAnnotations';
+import { PanelHeader } from '../components/PanelHeader';
 import './ActionsPanel.css';
 import './Panel.css';
 
@@ -18,6 +19,9 @@ type ActionsPanelProps = {
   onPushOverlayAnnotation?: (preview: ActionClickPreview, opts?: PushAnnotationOpts) => string;
   onClearOverlayGroup?: (blockId: string) => void;
   onPrepareClickPreview?: () => Promise<void>;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  stripMode?: boolean;
 };
 
 type ItemSlot = 'source' | 'dest';
@@ -263,6 +267,9 @@ export function ActionsPanel({
   onPushOverlayAnnotation,
   onClearOverlayGroup,
   onPrepareClickPreview,
+  collapsed = false,
+  onToggleCollapse,
+  stripMode = false,
 }: ActionsPanelProps) {
   const [sourceId, setSourceId] = useState('');
   const [destId, setDestId] = useState('');
@@ -758,10 +765,15 @@ export function ActionsPanel({
   };
 
   return (
-    <section className="panel panel--actions">
-      <header className="panel__header">
-        <h2 className="panel__title">Actions</h2>
-      </header>
+    <section className={`panel panel--actions${collapsed ? ' panel--collapsed-header' : ''}${stripMode ? ' panel--collapsed-strip' : ''}`}>
+      <PanelHeader
+        title="Actions"
+        minimizable
+        collapsed={collapsed}
+        onToggleCollapse={onToggleCollapse}
+        strip={stripMode ? 'vertical' : 'none'}
+      />
+      {!collapsed && (
       <div className="panel__body actions-panel__body">
         {botRunning && (
           <p className="actions-panel__hint actions-panel__hint--warn">
@@ -1029,6 +1041,7 @@ export function ActionsPanel({
           {busy ? 'Running…' : formatLastResult(lastResult)}
         </p>
       </div>
+      )}
     </section>
   );
 }

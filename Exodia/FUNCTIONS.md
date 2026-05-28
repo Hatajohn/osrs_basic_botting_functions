@@ -516,7 +516,7 @@ Diagnostic and runtime tooling is **not** a building-block layer — it wraps ca
 - **Capture pipeline** (`bot_capture.py`): `CapturePipeline`, `start_capture_pipeline` / `stop_capture_pipeline`, `capture_stream_latest`, `StreamFrameMeta`, `fetch_pristine_client_http_meta` — decoupled grab + HTTP pristine for actions.
 - **Stream** (`bot_stream.py`): `MJPEGStreamServer`, `FramePublisher`, `PerceptionStreamPublisher` — HTTP `/stream/*`, `/snapshot/pristine`, `/snapshot/pristine_meta.json`, `/meta` with nested `perception.inventory` / `perception.world`.
 - **Stream client** (`bot_stream_client.py`): `refresh_action_frame`, `fetch_stream_snapshot`, `apply_stream_snapshot_to_eyes`, `world_hit_for_template` — action subprocess consumption (no competing grab).
-- **Perception vision** (`bot_inventory_vision.py`, `bot_world_vision.py`): parallel `InventoryVisionProcessor` + `WorldVisionProcessor` on stream buffer; world cache honors `EXODIA_WORLD_TEMPLATES`.
+- **Perception vision** (`bot_inventory_vision.py`, `bot_world_vision.py`): parallel `InventoryVisionProcessor` + `WorldVisionProcessor` on stream buffer; world cache honors `EXODIA_WORLD_TEMPLATES`. Stream defaults **10 FPS** (capture, inventory, world, publish). **Bottlenecks:** `wsl_ps` grab often caps fresh frames (~12 FPS at ~1920×1080 client); world shape match scales with template count and ROI size (see README *Perception bottlenecks*); world env capped at 15 in code; `run_agent` harness capture stays tick-aligned (~4 FPS) separately.
 - **Action chain** (`bot_chain.py`): stream-aware `click_template` / use-on; `perception_source` `stream_cache` vs `live_match` / `live_identify`.
 - **Standalone stream** (`exodia_perception_stream.py`): UI-spawned perception-only MJPEG (dual vision, no bot tick).
 - **Runtime control** (`bot_runtime.py`, `exodia_ctl.py`): `RuntimeBridge` — JSON control/status files under `logs/` while FSM scripts run.
@@ -642,7 +642,7 @@ Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/functio
 | `EXODIA_DEBUG_FRAME_MAX_WIDTH` | Match ExodiaBotUI **Stream max width** (default `640`) |
 | `EXODIA_MATCH_MAX_FRAME_AGE_MS` | Re-fetch pristine before click actions (world, inv, use-on; default `500`) |
 | `EXODIA_STREAM_IDENTIFY_WAIT_MS` | Poll for stream inventory identify (default `800`) |
-| `EXODIA_WORLD_VISION_FPS` | World vision thread (default `2`) |
+| `EXODIA_WORLD_VISION_FPS` | World vision thread (default `10`; code cap 15) |
 | `EXODIA_WORLD_TEMPLATES` | Comma stems cached in `perception.world.hits` (default `osrs_infernalEel`) |
 
 ### Runtime / session

@@ -361,11 +361,11 @@ class PerceptionStreamPublisher:
         self._inventory_cache = inventory_cache
         self._world_cache = world_cache
         self._max_width = int(max_width) if max_width is not None else preview_max_width()
-        raw = fps if fps > 0 else os.environ.get("EXODIA_STREAM_PUBLISH_FPS", "15")
+        raw = fps if fps > 0 else os.environ.get("EXODIA_STREAM_PUBLISH_FPS", "10")
         try:
             self._fps = max(1.0, float(raw))
         except (TypeError, ValueError):
-            self._fps = 15.0
+            self._fps = 10.0
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 

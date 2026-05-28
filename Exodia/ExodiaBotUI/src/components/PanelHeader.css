@@ -1,0 +1,93 @@
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 36px;
+}
+
+.panel-header--collapsed {
+  cursor: pointer;
+  border-bottom: none;
+}
+
+.panel-header--collapsed:hover {
+  background: var(--surface-hover);
+}
+
+.panel-header__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.panel-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.panel-header__collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.panel-header__collapse-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Vertical strip (collapsed Log, or both right panels collapsed). */
+.panel-header--strip-vertical {
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-bottom: none;
+  cursor: pointer;
+}
+
+.panel-header--strip-vertical:hover {
+  background: var(--surface-hover);
+}
+
+.panel-header__strip-title {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 100%;
+}

@@ -134,8 +134,31 @@
 }
 
 .panel__runelite-body {
-  overflow: auto;
+  overflow: hidden;
   background: #0d0f12;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel__zoom-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.panel__high-res-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel__high-res-toggle input {
+  margin: 0;
 }
 
 .panel__image-wrap {

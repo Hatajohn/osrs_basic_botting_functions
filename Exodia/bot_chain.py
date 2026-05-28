@@ -600,15 +600,14 @@ def _execute_use_on_screen_clicks(
     src_screen: Tuple[int, int],
     dst_screen: Tuple[int, int],
 ) -> None:
-    from bot_inventory_actions import _env_float, clear_inventory_hover
+    from bot_inventory_actions import clear_inventory_hover
 
     focus_runelite()
-    time.sleep(0.2)
+    time.sleep(Env.pre_click_settle_s())
     clear_inventory_hover(client_rect)
     rad = int(os.environ.get("EXODIA_INV_CLICK_RAD", "6"))
     arms.click_at([int(src_screen[0]), int(src_screen[1])], rad=rad)
-    gap = _env_float("EXODIA_INV_USE_ON_GAP_S", 0.18)
-    time.sleep(max(0.05, gap))
+    time.sleep(Env.use_on_click_gap_s())
     arms.click_at([int(dst_screen[0]), int(dst_screen[1])], rad=rad)
 
 
@@ -894,9 +893,8 @@ def _dispatch_click_template(
         )
 
     focus_runelite()
-    time.sleep(0.2)
+    time.sleep(Env.pre_click_settle_s())
     arms.click_at(best.screen_xy)
-    time.sleep(0.05)
 
     return _ok(
         template=template,

@@ -35,6 +35,11 @@ import {
   saveSettings,
   type ExodiaSettings,
 } from './settings';
+import {
+  attachWindowStatePersistence,
+  loadWindowState,
+  windowOptionsFromState,
+} from './windowState';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,11 +67,10 @@ function emitLog(line: string, stream: LogLinePayload['stream'] = 'system'): voi
 }
 
 function createWindow(): void {
+  const savedState = loadWindowState();
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    ...windowOptionsFromState(savedState),
     title: 'Exodia',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -75,6 +79,12 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+
+  if (savedState.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  attachWindowStatePersistence(mainWindow);
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -223,10 +233,12 @@ function registerIpc(): void {
     return result;
   });
 
-  ipcMain.handle(IPC.REFRESH_DEBUG_FRAME, async (_event, mode?: DebugFrameMode) => {
+  ipcMain.handle(
+    IPC.REFRESH_DEBUG_FRAME,
+    async (_event, mode?: DebugFrameMode, options?: import('../shared/ipc').DebugFrameOptions) => {
     const frameMode = mode ?? 'inventory_identify';
     emitLog(`Debug frame refresh (${frameMode})…`, 'system');
-    const result = await refreshDebugFrame(frameMode);
+    const result = await refreshDebugFrame(frameMode, options);
     if (result.ok) {
       const stats = [
         result.occupied != null ? `occupied=${result.occupied}` : null,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FileEntry } from '../../shared/ipc';
 import type { BotSpecFile } from '../../shared/specs';
+import { PanelHeader } from '../components/PanelHeader';
 import { BotsTab } from './BotsTab';
 import './BotsTab.css';
 import './ScriptsPanel.css';
@@ -8,11 +9,19 @@ import './Panel.css';
 
 type ScriptsPanelProps = {
   onPathChange?: (path: string) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  stripMode?: boolean;
 };
 
 type TabId = 'bots' | 'specs';
 
-export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
+export function ScriptsPanel({
+  onPathChange,
+  collapsed = false,
+  onToggleCollapse,
+  stripMode = false,
+}: ScriptsPanelProps) {
   const [tab, setTab] = useState<TabId>('bots');
   const [rootPath, setRootPath] = useState('');
   const [browsePath, setBrowsePath] = useState('');
@@ -114,16 +123,24 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
   const canLoadSelected = selectedEntry?.kind === 'file';
 
   return (
-    <section className="panel panel--scripts">
-      <header className="panel__header panel__header--stacked">
-        <h2 className="panel__title">Scripts</h2>
-        {tab === 'specs' && (
-          <button type="button" className="btn btn--sm" onClick={chooseFolder}>
-            Choose folder…
-          </button>
-        )}
-      </header>
+    <section className={`panel panel--scripts${collapsed ? ' panel--collapsed-header' : ''}${stripMode ? ' panel--collapsed-strip' : ''}`}>
+      <PanelHeader
+        title="Scripts"
+        minimizable
+        collapsed={collapsed}
+        onToggleCollapse={onToggleCollapse}
+        strip={stripMode ? 'vertical' : 'none'}
+        actions={
+          !collapsed && tab === 'specs' ? (
+            <button type="button" className="btn btn--sm" onClick={chooseFolder}>
+              Choose folder…
+            </button>
+          ) : undefined
+        }
+      />
 
+      {!collapsed && (
+        <>
       <div className="scripts-panel__tabs" role="tablist">
         <button
           type="button"
@@ -216,6 +233,8 @@ export function ScriptsPanel({ onPathChange }: ScriptsPanelProps) {
           </>
         )}
       </div>
+        </>
+      )}
     </section>
   );
 }

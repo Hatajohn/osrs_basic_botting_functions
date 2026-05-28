@@ -102,14 +102,14 @@ def _capture_client_bgr(*, force_sync: bool = False) -> Tuple[Optional[np.ndarra
     return capture_client_bgr()
 
 
-def _scale_to_max_width(image: np.ndarray, max_width: int) -> np.ndarray:
+def _scale_to_max_width(image: np.ndarray, max_width: int) -> tuple[np.ndarray, bool]:
     h, w = image.shape[:2]
-    if w <= max_width:
-        return image
+    if max_width <= 0 or w <= max_width:
+        return image, False
     scale = max_width / float(w)
     new_w = max(1, int(round(w * scale)))
     new_h = max(1, int(round(h * scale)))
-    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA), True
 
 
 def _count_slot_stats(
@@ -138,9 +138,11 @@ def _emit(result: Dict[str, Any]) -> None:
     print(json.dumps(result, separators=(",", ":")))
 
 
-def render_debug_frame(mode: str, *, force_sync: bool = False) -> Dict[str, Any]:
+def render_debug_frame(mode: str, *, force_sync: bool = False, max_width: Optional[int] = None) -> Dict[str, Any]:
     if mode not in _MODES:
         return {"ok": False, "mode": mode, "error": "invalid mode: %s" % mode}
+
+    mw = preview_max_width() if max_width is None else int(max_width)
 
     client, err = _capture_client_bgr(force_sync=force_sync)
     if client is None:
@@ -152,17 +154,21 @@ def render_debug_frame(mode: str, *, force_sync: bool = False) -> Dict[str, Any]
         }
 
     if mode == "raw_client":
-        overlay = _scale_to_max_width(client, preview_max_width())
+        overlay, scaled = _scale_to_max_width(client, mw)
         _OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
         if not cv2.imwrite(str(_OUTPUT_PATH), overlay):
             return {"ok": False, "mode": mode, "error": "failed to write %s" % _OUTPUT_PATH}
         h, w = overlay.shape[:2]
+        sh, sw = client.shape[:2]
         return {
             "ok": True,
             "mode": mode,
             "path": str(_OUTPUT_PATH),
             "width": w,
             "height": h,
+            "source_width": sw,
+            "source_height": sh,
+            "scaled": scaled,
         }
 
     inv_rect, _outline_score, _grid_score = locate_inventory_rect(client)
@@ -192,19 +198,23 @@ def render_debug_frame(mode: str, *, force_sync: bool = False) -> Dict[str, Any]
             client, inv_rect, occ, draw_panel_outline=True
         )
 
-    overlay = _scale_to_max_width(overlay, preview_max_width())
+    overlay, scaled = _scale_to_max_width(overlay, mw)
     _OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not cv2.imwrite(str(_OUTPUT_PATH), overlay):
         return {"ok": False, "mode": mode, "error": "failed to write %s" % _OUTPUT_PATH}
 
     stats = _count_slot_stats(occ, slot_items)
     h, w = overlay.shape[:2]
+    sh, sw = client.shape[:2]
     return {
         "ok": True,
         "mode": mode,
         "path": str(_OUTPUT_PATH),
         "width": w,
         "height": h,
+        "source_width": sw,
+        "source_height": sh,
+        "scaled": scaled,
         **stats,
     }
 
@@ -222,9 +232,19 @@ def main() -> int:
         action="store_true",
         help="recovery: sync screen grab when stream snapshot is unavailable",
     )
+    parser.add_argument(
+        "--max-width",
+        type=int,
+        default=None,
+        help="max output width in px (0 = full client width, default from env or 640)",
+    )
     args = parser.parse_args()
     _ensure_capture_env()
-    result = render_debug_frame(args.mode, force_sync=bool(args.force_sync))
+    result = render_debug_frame(
+        args.mode,
+        force_sync=bool(args.force_sync),
+        max_width=args.max_width,
+    )
     _emit(result)
     return 0 if result.get("ok") else 1
 

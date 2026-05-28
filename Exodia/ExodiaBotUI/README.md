@@ -132,7 +132,7 @@ When you save the watchlist from the UI, Electron writes both files. The stream 
 
 ## Active inventory tracking
 
-Distinct from world tracking: inventory watch entries run **per-slot template matching** on every inventory vision frame (~15 FPS), using the same path as Actions **Find/click inv**.
+Distinct from world tracking: inventory watch entries run **per-slot template matching** on every inventory vision frame (~10 FPS stream default), using the same path as Actions **Find/click inv**.
 
 | Piece | Detail |
 |-------|--------|

@@ -1,5 +1,6 @@
 import type { BotRunInfo, RuntimeStatusPayload } from '../../shared/bots';
 import type { DebugFrameResult } from '../../shared/ipc';
+import { PanelHeader } from '../components/PanelHeader';
 import './Panel.css';
 
 type BotTasksPanelProps = {
@@ -8,6 +9,8 @@ type BotTasksPanelProps = {
   botRun?: BotRunInfo | null;
   runtimeStatus?: RuntimeStatusPayload | null;
   streamRunning?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 };
 
 function formatUptime(startedAt: number | null, sessionUptimeS?: number): string {
@@ -35,6 +38,8 @@ export function BotTasksPanel({
   botRun,
   runtimeStatus,
   streamRunning = false,
+  collapsed = false,
+  onToggleCollapse,
 }: BotTasksPanelProps) {
   const hasActiveBot =
     botRun &&
@@ -61,10 +66,14 @@ export function BotTasksPanel({
   const hasStats = debugResult?.ok && debugResult.occupied != null;
 
   return (
-    <section className="panel panel--tasks">
-      <header className="panel__header">
-        <h2 className="panel__title">Current bot tasks</h2>
-      </header>
+    <section className={`panel panel--tasks${collapsed ? ' panel--collapsed-header' : ''}`}>
+      <PanelHeader
+        title="Current bot tasks"
+        minimizable
+        collapsed={collapsed}
+        onToggleCollapse={onToggleCollapse}
+      />
+      {!collapsed && (
       <div className="panel__body panel__placeholder panel__placeholder--compact">
         {hasActiveBot && (
           <div className="panel__task-summary">
@@ -108,6 +117,7 @@ export function BotTasksPanel({
           </div>
         )}
       </div>
+      )}
     </section>
   );
 }

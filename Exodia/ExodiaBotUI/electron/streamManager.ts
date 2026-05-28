@@ -36,9 +36,23 @@ export type WorldTemplateStat = {
   best_score?: number | null;
 };
 
+export type WorldTrackMeta = {
+  track_id: number;
+  template: string;
+  client_xy: number[];
+  screen_xy: number[];
+  velocity_xy: number[];
+  score: number;
+  age_frames: number;
+  missed_frames: number;
+  stable: boolean;
+};
+
 export type WorldPerceptionMeta = {
   hits?: Array<{ template: string; client_xy: number[]; screen_xy?: number[]; score: number }>;
+  tracks?: WorldTrackMeta[];
   hit_count?: number;
+  track_count?: number;
   templates_scanned?: string[];
   template_stats?: WorldTemplateStat[];
   vision_fps?: number;
@@ -280,11 +294,11 @@ export class StreamProcessManager {
       '--max-width',
       String(settings.streamMaxWidth ?? 640),
       '--capture-fps',
-      String(settings.streamCaptureFps ?? 15),
+      String(settings.streamCaptureFps ?? 10),
       '--vision-fps',
-      String(settings.streamVisionFps ?? 15),
+      String(settings.streamVisionFps ?? 10),
       '--publish-fps',
-      String(settings.streamPublishFps ?? 15),
+      String(settings.streamPublishFps ?? 10),
     ];
 
     this.sink(`Starting perception stream (port ${port})…`, 'system');

@@ -1,6 +1,5 @@
-import { useCallback } from 'react';
+import { useMemo } from 'react';
 import type { ActionClickPreview } from '../../shared/ipc';
-import { useImageAnchoredLayout } from '../hooks/useImageAnchoredLayout';
 import {
   computeOverlayLayout,
   isClickLayout,
@@ -15,7 +14,6 @@ import './ActionClickOverlay.css';
 
 type ActionClickOverlayProps = {
   preview: ActionClickPreview | null;
-  imageRef: React.RefObject<HTMLImageElement | null>;
 };
 
 function UseOnOverlay({
@@ -165,12 +163,11 @@ function SingleClickOverlay({
   );
 }
 
-export function ActionClickOverlay({ preview, imageRef }: ActionClickOverlayProps) {
-  const computeLayout = useCallback(
-    (img: HTMLImageElement) => (preview ? computeOverlayLayout(img, preview) : null),
+export function ActionClickOverlay({ preview }: ActionClickOverlayProps) {
+  const layout = useMemo<OverlayLayout | null>(
+    () => (preview ? computeOverlayLayout(preview) : null),
     [preview],
   );
-  const layout = useImageAnchoredLayout<OverlayLayout>(imageRef, computeLayout, [preview]);
 
   if (!preview || !layout) return null;
 

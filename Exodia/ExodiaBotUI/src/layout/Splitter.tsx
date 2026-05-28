@@ -54,20 +54,36 @@ export function Splitter({ orientation, onDrag }: SplitterProps) {
   );
 }
 
+export type PanelId = 'log' | 'tasks' | 'scripts' | 'actions';
+
 export type DashboardLayout = {
   logPct: number;
   scriptsPct: number;
   tasksFlex: number;
   actionsFlex: number;
+  collapsed: Record<PanelId, boolean>;
 };
 
-const STORAGE_KEY = 'exodia-dashboard-layout-v4';
+const STORAGE_KEY = 'exodia-dashboard-layout-v5';
+const STORAGE_KEY_V4 = 'exodia-dashboard-layout-v4';
+
+const DEFAULT_COLLAPSED: Record<PanelId, boolean> = {
+  log: false,
+  tasks: false,
+  scripts: false,
+  actions: false,
+};
+
 const DEFAULT_LAYOUT: DashboardLayout = {
   logPct: 18,
   scriptsPct: 22,
   tasksFlex: 28,
   actionsFlex: 38,
+  collapsed: { ...DEFAULT_COLLAPSED },
 };
+
+const COLLAPSED_STRIP_PX = 40;
+const COLLAPSED_HEADER_PX = 36;
 
 const MIN_SIDE = 12;
 const MAX_SIDE = 48;
@@ -77,9 +93,18 @@ const MAX_TASKS_FLEX = 55;
 const MIN_ACTIONS_FLEX = 20;
 const MAX_ACTIONS_FLEX = 65;
 
+function loadCollapsed(parsed: Partial<DashboardLayout>): Record<PanelId, boolean> {
+  return {
+    log: parsed.collapsed?.log ?? DEFAULT_COLLAPSED.log,
+    tasks: parsed.collapsed?.tasks ?? DEFAULT_COLLAPSED.tasks,
+    scripts: parsed.collapsed?.scripts ?? DEFAULT_COLLAPSED.scripts,
+    actions: parsed.collapsed?.actions ?? DEFAULT_COLLAPSED.actions,
+  };
+}
+
 function loadLayout(): DashboardLayout {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_KEY_V4);
     if (!raw) return DEFAULT_LAYOUT;
     const parsed = JSON.parse(raw) as Partial<DashboardLayout>;
     return {
@@ -87,6 +112,7 @@ function loadLayout(): DashboardLayout {
       scriptsPct: parsed.scriptsPct ?? DEFAULT_LAYOUT.scriptsPct,
       tasksFlex: parsed.tasksFlex ?? DEFAULT_LAYOUT.tasksFlex,
       actionsFlex: parsed.actionsFlex ?? DEFAULT_LAYOUT.actionsFlex,
+      collapsed: loadCollapsed(parsed),
     };
   } catch {
     return DEFAULT_LAYOUT;
@@ -101,6 +127,10 @@ function paneFlex(value: number): string {
   return `${value} 1 0`;
 }
 
+function fixedFlex(px: number): string {
+  return `0 0 ${px}px`;
+}
+
 export function useDashboardLayout(containerRef: React.RefObject<HTMLElement | null>) {
   const [layout, setLayout] = useState<DashboardLayout>(loadLayout);
 
@@ -108,9 +138,59 @@ export function useDashboardLayout(containerRef: React.RefObject<HTMLElement | n
     localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
   }, [layout]);
 
+  const togglePanelCollapsed = useCallback((id: PanelId) => {
+    setLayout((prev) => ({
+      ...prev,
+      collapsed: { ...prev.collapsed, [id]: !prev.collapsed[id] },
+    }));
+  }, []);
+
+  const setPanelCollapsed = useCallback((id: PanelId, value: boolean) => {
+    setLayout((prev) => ({
+      ...prev,
+      collapsed: { ...prev.collapsed, [id]: value },
+    }));
+  }, []);
+
+  const { collapsed } = layout;
+  const logCollapsed = collapsed.log;
+  const tasksCollapsed = collapsed.tasks;
+  const scriptsCollapsed = collapsed.scripts;
+  const actionsCollapsed = collapsed.actions;
+  const rightStripCollapsed = scriptsCollapsed && actionsCollapsed;
+
   const centerPct = 100 - layout.logPct - layout.scriptsPct;
-  const runeliteFlex = 100 - layout.tasksFlex;
-  const scriptsColumnFlex = 100 - layout.actionsFlex;
+  const runeliteFlex = tasksCollapsed ? 100 : 100 - layout.tasksFlex;
+  const scriptsColumnFlex = actionsCollapsed ? 100 : 100 - layout.actionsFlex;
+
+  // When a side column collapses to a fixed strip, give its flex weight to the center
+  // so the remaining columns keep the same proportional split (avoid 1:22 center:scripts).
+  const centerFlexWeight =
+    centerPct +
+    (logCollapsed ? layout.logPct : 0) +
+    (rightStripCollapsed ? layout.scriptsPct : 0);
+
+  const effectiveLogFlex = logCollapsed ? fixedFlex(COLLAPSED_STRIP_PX) : paneFlex(layout.logPct);
+  const effectiveCenterFlex = paneFlex(centerFlexWeight);
+  const effectiveScriptsColumnFlex = rightStripCollapsed
+    ? fixedFlex(COLLAPSED_STRIP_PX)
+    : paneFlex(layout.scriptsPct);
+  const effectiveRuneliteFlex = tasksCollapsed ? '1 1 0' : paneFlex(runeliteFlex);
+  const effectiveTasksFlex = tasksCollapsed ? fixedFlex(COLLAPSED_HEADER_PX) : paneFlex(layout.tasksFlex);
+  const effectiveScriptsFlex = rightStripCollapsed
+    ? '1 1 0'
+    : scriptsCollapsed
+      ? fixedFlex(COLLAPSED_HEADER_PX)
+      : actionsCollapsed
+        ? '1 1 0'
+        : paneFlex(scriptsColumnFlex);
+  const effectiveActionsFlex = rightStripCollapsed
+    ? '1 1 0'
+    : actionsCollapsed
+      ? fixedFlex(COLLAPSED_HEADER_PX)
+      : scriptsCollapsed
+        ? '1 1 0'
+        : paneFlex(layout.actionsFlex);
 
   const applyHorizontalDelta = useCallback(
     (deltaPx: number, sign: 1 | -1, field: 'logPct' | 'scriptsPct') => {
@@ -184,6 +264,20 @@ export function useDashboardLayout(containerRef: React.RefObject<HTMLElement | n
     runeliteFlex,
     scriptsColumnFlex,
     paneFlex,
+    togglePanelCollapsed,
+    setPanelCollapsed,
+    effectiveLogFlex,
+    effectiveCenterFlex,
+    effectiveScriptsColumnFlex,
+    effectiveRuneliteFlex,
+    effectiveTasksFlex,
+    effectiveScriptsFlex,
+    effectiveActionsFlex,
+    logCollapsed,
+    tasksCollapsed,
+    scriptsCollapsed,
+    actionsCollapsed,
+    rightStripCollapsed,
     resizeLog,
     resizeScripts,
     resizeTasks,

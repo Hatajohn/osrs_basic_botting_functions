@@ -48,11 +48,11 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 def default_inventory_vision_fps() -> float:
-    raw = os.environ.get("EXODIA_INVENTORY_VISION_FPS", "15").strip()
+    raw = os.environ.get("EXODIA_INVENTORY_VISION_FPS", "10").strip()
     try:
         fps = float(raw)
     except ValueError:
-        fps = 15.0
+        fps = 10.0
     return max(1.0, min(30.0, fps))
 
 

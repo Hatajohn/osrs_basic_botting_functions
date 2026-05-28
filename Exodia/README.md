@@ -112,6 +112,33 @@ When **`EXODIA_STREAM_PORT`** is set (or capture stream is on), **action subproc
 
 **Dual vision on the stream:** `InventoryVisionProcessor` and `WorldVisionProcessor` run in parallel on the capture buffer (standalone `exodia_perception_stream.py` or harness publisher). Inventory thread fills the inventory slice; world thread fills `hits` for templates in **`EXODIA_WORLD_TEMPLATES`** (default `osrs_infernalEel`). Templates **not** in that list are not cached — `bot_chain` falls back to **live** playspace match (`live_match` / `live_identify`).
 
+**Perception FPS stack** (ExodiaBotUI / `exodia_perception_stream.py` defaults **10 FPS**; env-tunable):
+
+| Layer | Target rate | Where |
+|-------|-------------|--------|
+| Capture buffer | 10 FPS | `bot_capture.py` `CaptureProducer`; `EXODIA_CAPTURE_FPS` |
+| Inventory vision | 10 FPS | `bot_inventory_vision.py`; `EXODIA_INVENTORY_VISION_FPS` |
+| World vision | 10 FPS | `bot_world_vision.py`; `EXODIA_WORLD_VISION_FPS` (hard cap 15; was 2 FPS before stream-first refactor) |
+| UI JPEG poll | ~10 FPS (100 ms) | `ExodiaBotUI/src/hooks/usePerceptionStream.ts` `FRAME_POLL_MS` |
+| UI `/meta` poll | ~2 Hz (500 ms) | same, `META_POLL_MS` |
+
+Bots should use **`/meta`** + `capture_seq` for coordinate freshness, not JPEG poll age.
+
+**Perception bottlenecks (stream / WSL)** — measured on a typical setup (~1912×1012 `client_rect`, `EXODIA_CAPTURE_BACKEND=wsl_ps`); your numbers will vary:
+
+| Bottleneck | Approx. cost | Effect |
+|------------|--------------|--------|
+| **`wsl_ps` screen grab** | ~80 ms/frame | **~12 FPS ceiling** for new frames — often limits the whole pipeline before vision config does |
+| **World shape match** (1 template, `playspace_search_roi`) | ~70 ms/frame | ~14 FPS vision-only if capture kept up |
+| **World shape match** (1 template, full client) | ~160 ms/frame | ~6 FPS — avoid matching outside playspace ROI |
+| **World shape match** (N templates) | ~linear in N | 3 templates ≈ 3× single-template cost |
+| **Parallel threads** | capture + inventory + world | Compete for CPU; `/meta` `seq_lag` shows vision falling behind capture |
+| **Code caps** | world ≤15, capture/inv ≤30 in stream entry | Raising env above measured throughput does not help until grab/match get faster |
+
+We target **10 FPS** as a conservative default (below `wsl_ps` and single-template match headroom). To profile live: `curl -s http://127.0.0.1:8765/meta` → `capture_fps`, `perception.world.vision_fps`, `seq_lag`. Faster paths: fewer `world_templates`, smaller `client_rect`, faster capture backend (e.g. `mss` when applicable), or lower `EXODIA_WORLD_VISION_FPS` under load.
+
+**Harness note:** `run_agent.py` still defaults capture to **4 FPS** (`EXODIA_CAPTURE_FPS` for tick-aligned bots) — separate from the stream service above.
+
 **Action wiring:** `bot_stream_client.refresh_action_frame` (or `fetch_stream_snapshot` → `apply_stream_snapshot_to_eyes`) → template click uses `world_hit_for_template` (world) or cached slot grid (inventory). `perception_source` in action JSON: `stream_cache` vs `live_match` / `live_identify`. **`bot_init` skips the initial `capture_frame` when stream is expected** — the first frame comes from `refresh_action_frame` at dispatch.
 
 **Debug frame (`exodia_debug_frame.py`):** recovery only. When the stream snapshot is fresh, the script refuses to run (UI Refresh invalidates stream cache instead). Pass `--force-sync` for an explicit sync grab when the perception service is down.
@@ -127,7 +154,7 @@ Set **`EXODIA_DEBUG_FRAME_MAX_WIDTH`** to the same value as **Stream max width**
 |----------|---------|---------|
 | `EXODIA_MATCH_MAX_FRAME_AGE_MS` | `500` | Re-fetch pristine before click actions (world, inv, use-on) if frame is older |
 | `EXODIA_STREAM_IDENTIFY_WAIT_MS` | `800` | Poll for inventory identify on stream before live fallback |
-| `EXODIA_WORLD_VISION_FPS` | `2` | World vision thread rate (0.5–15) |
+| `EXODIA_WORLD_VISION_FPS` | `10` | World vision thread rate (0.5–15 cap in code) |
 
 See [`FUNCTIONS.md`](FUNCTIONS.md) recipe *Run template action against stream cache* and [`bot_stream_client.py`](bot_stream_client.py).
 
@@ -323,7 +350,10 @@ Useful env overrides:
 | `EXODIA_INV_DRAG_ROUNDS` | Arms: consecutive drags (default `1`; round 2+ in `test_drag_multiple_rounds`) |
 | `EXODIA_INV_DRAG_SETTLE_S` | Wait after drag before re-capture (default `1.0`) |
 | `EXODIA_INV_HOVER_CLEAR_S` | Wait after moving mouse to center (default `0.35`) |
-| `EXODIA_WSL_MOVE_MS_MIN` / `_MAX` | WSL move duration bounds (default `110`–`260` ms) |
+| `EXODIA_MOUSE_SPEED` | Point-click / move speed multiplier (default `1.5`; set `1.0` for legacy timing) |
+| `EXODIA_PRE_CLICK_SETTLE_S` | Pause after focus before template/inventory click (default `0.01` s) |
+| `EXODIA_INV_USE_ON_GAP_S` | Gap between use-on source/dest clicks (default `0.02` s; scaled by `EXODIA_MOUSE_SPEED`) |
+| `EXODIA_WSL_MOVE_MS_MIN` / `_MAX` | WSL move duration bounds at `EXODIA_MOUSE_SPEED=1.0` (default `110`–`260` ms; effective ~73–173 ms at default speed) |
 
 Other live scripts:
 
