@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { StreamMeta, TemplateWatchEntry, TemplateWatchlist, TemplateWatchRegion } from '../../shared/ipc';
+import { worldScanStem } from '../../shared/templateWatchAliases';
 import './TemplateWatchPanel.css';
 import './Panel.css';
 
@@ -34,9 +35,18 @@ function statForTemplate(meta: StreamMeta | null | undefined, template: string) 
   return stats.find((s) => s.template === template);
 }
 
+function worldStatForEntry(meta: StreamMeta | null | undefined, entry: TemplateWatchEntry) {
+  if (!entry.world) return undefined;
+  return statForTemplate(meta, worldScanStem(entry.template));
+}
+
 function invWatchForTemplate(meta: StreamMeta | null | undefined, template: string) {
   const watch = meta?.perception?.inventory?.inventory_watch ?? [];
   return watch.find((w) => w.template === template);
+}
+
+function enabledCount(entries: TemplateWatchEntry[]): number {
+  return entries.filter((e) => e.world || e.inventory).length;
 }
 
 export function TemplateWatchPanel({
@@ -86,9 +96,11 @@ export function TemplateWatchPanel({
     [persist],
   );
 
-  const toggleEnabled = (id: string) => {
+  const toggleRegion = (id: string, region: 'world' | 'inventory') => {
     updateEntries(
-      watchlist.entries.map((e) => (e.id === id ? { ...e, enabled: !e.enabled } : e)),
+      watchlist.entries.map((e) =>
+        e.id === id ? { ...e, [region]: !e[region] } : e,
+      ),
     );
   };
 
@@ -99,9 +111,22 @@ export function TemplateWatchPanel({
   const addEntry = (template: string, region: TemplateWatchRegion) => {
     const stem = template.replace(/\.png$/i, '');
     if (!stem.trim()) return;
-    if (watchlist.entries.some((e) => e.template === stem && e.region === region)) return;
+
+    const existing = watchlist.entries.find((e) => e.template === stem);
+    if (existing) {
+      updateEntries(
+        watchlist.entries.map((e) =>
+          e.template === stem ? { ...e, [region]: true } : e,
+        ),
+      );
+      return;
+    }
+
     const id = `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    updateEntries([...watchlist.entries, { id, template: stem, region, enabled: true }]);
+    updateEntries([
+      ...watchlist.entries,
+      { id, template: stem, world: region === 'world', inventory: region === 'inventory' },
+    ]);
   };
 
   const openCatalog = async () => {
@@ -130,7 +155,7 @@ export function TemplateWatchPanel({
     return (
       <div className="template-watch template-watch--collapsed">
         <button type="button" className="template-watch__collapse-btn" onClick={onToggleCollapsed}>
-          Template watch ({watchlist.entries.filter((e) => e.enabled).length} enabled)
+          Template watch ({enabledCount(watchlist.entries)} enabled)
         </button>
       </div>
     );
@@ -163,17 +188,17 @@ export function TemplateWatchPanel({
         {!loading && error && <p className="panel__error">{error}</p>}
         {!loading && watchlist.entries.length === 0 && (
           <p className="template-watch__empty">
-            Add world templates for playspace tracking, or inventory templates for live per-slot matching
-            (requires items/&lt;name&gt;.png under items/ or images/).
+            Add templates once, then toggle world and inventory matching independently.
+            Inventory matching requires items/&lt;name&gt;.png under items/ or images/.
           </p>
         )}
         {!loading && watchlist.entries.length > 0 && (
           <table className="template-watch__table">
             <thead>
               <tr>
-                <th aria-label="Enabled" />
+                <th title="Match in playspace">World</th>
+                <th title="Match in inventory">Inv</th>
                 <th>Template</th>
-                <th>Region</th>
                 <th>Hits / slots</th>
                 <th>Score</th>
                 <th>Status</th>
@@ -182,38 +207,58 @@ export function TemplateWatchPanel({
             </thead>
             <tbody>
               {watchlist.entries.map((entry) => {
-                const worldStat = entry.region === 'world' ? statForTemplate(streamMeta, entry.template) : undefined;
-                const invWatch = entry.region === 'inventory' ? invWatchForTemplate(streamMeta, entry.template) : undefined;
-                const hitLabel =
-                  entry.region === 'world'
-                    ? String(worldStat?.hits ?? 0)
-                    : formatSlotSummary(invWatch?.slots);
-                const scoreLabel =
-                  entry.region === 'world' && worldStat?.best_score != null
-                    ? worldStat.best_score.toFixed(2)
-                    : entry.region === 'inventory' && invWatch?.best_score != null
-                      ? invWatch.best_score.toFixed(2)
-                      : '—';
-                const statusLabel =
-                  entry.region === 'inventory'
-                    ? formatInvStatus(invWatch?.source, invWatch?.slots?.length)
-                    : worldStat && (worldStat.hits ?? 0) > 0
-                      ? 'match'
-                      : '—';
+                const worldStat = worldStatForEntry(streamMeta, entry);
+                const invWatch = invWatchForTemplate(streamMeta, entry.template);
+                const hitParts: string[] = [];
+                if (entry.world) {
+                  hitParts.push(`w:${worldStat?.hits ?? 0}`);
+                }
+                if (entry.inventory) {
+                  hitParts.push(`i:${formatSlotSummary(invWatch?.slots)}`);
+                }
+                const hitLabel = hitParts.length > 0 ? hitParts.join(' · ') : '—';
+                const scoreParts: string[] = [];
+                if (entry.world && worldStat?.best_score != null) {
+                  scoreParts.push(`w:${worldStat.best_score.toFixed(2)}`);
+                }
+                if (entry.inventory && invWatch?.best_score != null) {
+                  scoreParts.push(`i:${invWatch.best_score.toFixed(2)}`);
+                }
+                const scoreLabel = scoreParts.length > 0 ? scoreParts.join(' · ') : '—';
+                const statusParts: string[] = [];
+                if (entry.world) {
+                  statusParts.push(
+                    worldStat && (worldStat.hits ?? 0) > 0 ? 'world: match' : 'world: —',
+                  );
+                }
+                if (entry.inventory) {
+                  statusParts.push(
+                    `inv: ${formatInvStatus(invWatch?.source, invWatch?.slots?.length)}`,
+                  );
+                }
+                const statusLabel = statusParts.length > 0 ? statusParts.join(' · ') : 'off';
+                const inactive = !entry.world && !entry.inventory;
                 return (
-                  <tr key={entry.id} className={entry.enabled ? '' : 'template-watch__row--disabled'}>
-                    <td>
+                  <tr key={entry.id} className={inactive ? 'template-watch__row--disabled' : ''}>
+                    <td className="template-watch__check">
                       <input
                         type="checkbox"
-                        checked={entry.enabled}
-                        onChange={() => toggleEnabled(entry.id)}
-                        aria-label={`Enable ${entry.template}`}
+                        checked={entry.world}
+                        onChange={() => toggleRegion(entry.id, 'world')}
+                        aria-label={`World match ${entry.template}`}
+                      />
+                    </td>
+                    <td className="template-watch__check">
+                      <input
+                        type="checkbox"
+                        checked={entry.inventory}
+                        onChange={() => toggleRegion(entry.id, 'inventory')}
+                        aria-label={`Inventory match ${entry.template}`}
                       />
                     </td>
                     <td className="template-watch__template" title={entry.template}>
                       {entry.template}
                     </td>
-                    <td>{entry.region}</td>
                     <td>{hitLabel}</td>
                     <td>{scoreLabel}</td>
                     <td className="template-watch__status">{statusLabel}</td>

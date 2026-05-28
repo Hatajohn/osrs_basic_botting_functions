@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { worldScanStemsForWatchlist } from '../shared/templateWatchAliases';
 import { resolveSettings, loadSettings } from './settings';
 
 export type TemplateWatchRegion = 'world' | 'inventory';
@@ -7,8 +8,8 @@ export type TemplateWatchRegion = 'world' | 'inventory';
 export type TemplateWatchEntry = {
   id: string;
   template: string;
-  region: TemplateWatchRegion;
-  enabled: boolean;
+  world: boolean;
+  inventory: boolean;
 };
 
 export type TemplateWatchlist = {
@@ -18,9 +19,58 @@ export type TemplateWatchlist = {
 
 const WATCHLIST_VERSION = 1 as const;
 
+type LegacyTemplateWatchEntry = {
+  id?: string;
+  template?: string;
+  region?: string;
+  enabled?: boolean;
+  world?: boolean;
+  inventory?: boolean;
+};
+
 function normalizeStem(template: string): string {
   const trimmed = template.trim();
   return trimmed.toLowerCase().endsWith('.png') ? trimmed.slice(0, -4) : trimmed;
+}
+
+function parseLegacyEntry(raw: LegacyTemplateWatchEntry, index: number): TemplateWatchEntry | null {
+  const template = normalizeStem(String(raw.template ?? ''));
+  if (!template) return null;
+
+  if ('world' in raw || 'inventory' in raw) {
+    return {
+      id: String(raw.id ?? `e${index}`),
+      template,
+      world: raw.world === true,
+      inventory: raw.inventory === true,
+    };
+  }
+
+  const region = raw.region === 'inventory' ? 'inventory' : 'world';
+  const enabled = raw.enabled !== false;
+  return {
+    id: String(raw.id ?? `e${index}`),
+    template,
+    world: region === 'world' && enabled,
+    inventory: region === 'inventory' && enabled,
+  };
+}
+
+function mergeEntries(entries: TemplateWatchEntry[]): TemplateWatchEntry[] {
+  const byTemplate = new Map<string, TemplateWatchEntry>();
+  for (const entry of entries) {
+    const existing = byTemplate.get(entry.template);
+    if (!existing) {
+      byTemplate.set(entry.template, entry);
+      continue;
+    }
+    byTemplate.set(entry.template, {
+      ...existing,
+      world: existing.world || entry.world,
+      inventory: existing.inventory || entry.inventory,
+    });
+  }
+  return [...byTemplate.values()];
 }
 
 export function watchlistFilePath(exodiaRoot: string): string {
@@ -43,33 +93,23 @@ export function loadTemplateWatchlist(): TemplateWatchlist {
   }
   try {
     const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Partial<TemplateWatchlist>;
-    const entries = Array.isArray(raw.entries)
+    const parsed = Array.isArray(raw.entries)
       ? raw.entries
-          .filter((e): e is TemplateWatchEntry => Boolean(e && typeof e === 'object'))
-          .map((e, i) => ({
-            id: String(e.id ?? `e${i}`),
-            template: normalizeStem(String(e.template ?? '')),
-            region: e.region === 'inventory' ? 'inventory' : 'world',
-            enabled: e.enabled !== false,
-          }))
-          .filter((e) => e.template.length > 0)
+          .map((e, i) => parseLegacyEntry((e ?? {}) as LegacyTemplateWatchEntry, i))
+          .filter((e): e is TemplateWatchEntry => e != null)
       : [];
-    return { version: WATCHLIST_VERSION, entries };
+    return { version: WATCHLIST_VERSION, entries: mergeEntries(parsed) };
   } catch {
     return defaultWatchlist();
   }
 }
 
 export function enabledWorldTemplates(watchlist: TemplateWatchlist): string[] {
-  return watchlist.entries
-    .filter((e) => e.enabled && e.region === 'world')
-    .map((e) => normalizeStem(e.template));
+  return worldScanStemsForWatchlist(watchlist.entries);
 }
 
 export function enabledInventoryTemplates(watchlist: TemplateWatchlist): string[] {
-  return watchlist.entries
-    .filter((e) => e.enabled && e.region === 'inventory')
-    .map((e) => normalizeStem(e.template));
+  return watchlist.entries.filter((e) => e.inventory).map((e) => normalizeStem(e.template));
 }
 
 function readControlFile(exodiaRoot: string): Record<string, unknown> {
@@ -85,18 +125,20 @@ function readControlFile(exodiaRoot: string): Record<string, unknown> {
   }
 }
 
-/** Write watchlist JSON and push enabled world templates to the stream control file. */
+/** Write watchlist JSON and push enabled templates to the stream control file. */
 export function saveTemplateWatchlist(watchlist: TemplateWatchlist): TemplateWatchlist {
   const { resolvedExodiaRoot } = resolveSettings(loadSettings());
   const filePath = watchlistFilePath(resolvedExodiaRoot);
   const normalized: TemplateWatchlist = {
     version: WATCHLIST_VERSION,
-    entries: watchlist.entries.map((e, i) => ({
-      id: e.id || `e${i}`,
-      template: normalizeStem(e.template),
-      region: e.region === 'inventory' ? 'inventory' : 'world',
-      enabled: e.enabled !== false,
-    })),
+    entries: mergeEntries(
+      watchlist.entries.map((e, i) => ({
+        id: e.id || `e${i}`,
+        template: normalizeStem(e.template),
+        world: e.world === true,
+        inventory: e.inventory === true,
+      })),
+    ).filter((e) => e.template.length > 0),
   };
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(normalized, null, 2), 'utf8');
@@ -128,7 +170,7 @@ export function newWatchEntry(
   return {
     id,
     template: normalizeStem(template),
-    region,
-    enabled: true,
+    world: region === 'world',
+    inventory: region === 'inventory',
   };
 }

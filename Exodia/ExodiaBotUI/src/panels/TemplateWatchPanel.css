@@ -79,6 +79,15 @@
   opacity: 0.45;
 }
 
+.template-watch__check {
+  width: 36px;
+  text-align: center;
+}
+
+.template-watch__check input {
+  margin: 0;
+}
+
 .template-watch__catalog {
   border-top: 1px solid var(--border);
   background: var(--surface-raised);

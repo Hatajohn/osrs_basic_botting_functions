@@ -2,10 +2,10 @@
   "version": 1,
   "entries": [
     {
-      "id": "wmpoonbb3xug",
+      "id": "wmporei5b40p",
       "template": "infernal_eel",
-      "region": "inventory",
-      "enabled": true
+      "world": true,
+      "inventory": true
     }
   ]
 }

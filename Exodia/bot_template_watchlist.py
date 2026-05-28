@@ -3,10 +3,13 @@ User-managed template watchlist for the perception stream.
 
 Resolution order for world templates (``WatchlistResolver.world_template_names``):
 
-1. ``world_templates`` in ``perception_stream_control.json`` (UI hot-reload)
-2. Enabled ``region: world`` entries in ``template_watchlist.json``
-3. ``EXODIA_WORLD_TEMPLATES`` env
-4. Default ``osrs_infernalEel``
+1. ``world_templates`` in ``perception_stream_control.json`` when the key is present
+   (including an empty list — checkbox off means no world scan)
+2. Enabled world entries in ``template_watchlist.json`` (with item→spot stem aliases applied)
+3. When no watchlist file exists: ``EXODIA_WORLD_TEMPLATES`` env → default ``osrs_infernalEel``
+
+Inventory uses the control file literally — an empty ``inventory_templates`` array means off.
+Watchlist world rows map inventory names to spot PNGs (``infernal_eel`` → ``osrs_infernalEel``).
 """
 from __future__ import annotations
 
@@ -39,8 +42,34 @@ def _normalize_stem(template: str) -> str:
 class WatchlistEntry:
     id: str
     template: str
-    region: str
-    enabled: bool = True
+    world: bool = False
+    inventory: bool = False
+
+
+def _parse_bool(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() not in ("0", "false", "no", "off")
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _merge_entries(entries: Sequence[WatchlistEntry]) -> List[WatchlistEntry]:
+    merged: Dict[str, WatchlistEntry] = {}
+    for entry in entries:
+        existing = merged.get(entry.template)
+        if existing is None:
+            merged[entry.template] = entry
+            continue
+        merged[entry.template] = WatchlistEntry(
+            id=existing.id,
+            template=entry.template,
+            world=existing.world or entry.world,
+            inventory=existing.inventory or entry.inventory,
+        )
+    return list(merged.values())
 
 
 def parse_watchlist_data(data: Any) -> List[WatchlistEntry]:
@@ -56,22 +85,30 @@ def parse_watchlist_data(data: Any) -> List[WatchlistEntry]:
         template = str(raw.get("template", "")).strip()
         if not template:
             continue
+        entry_id = str(raw.get("id", "")).strip() or ("e%d" % i)
+        if "world" in raw or "inventory" in raw:
+            out.append(
+                WatchlistEntry(
+                    id=entry_id,
+                    template=_normalize_stem(template),
+                    world=_parse_bool(raw.get("world"), default=False),
+                    inventory=_parse_bool(raw.get("inventory"), default=False),
+                )
+            )
+            continue
         region = str(raw.get("region", "world")).strip().lower()
         if region not in ("world", "inventory"):
             region = "world"
-        entry_id = str(raw.get("id", "")).strip() or ("e%d" % i)
-        enabled = raw.get("enabled", True)
-        if isinstance(enabled, str):
-            enabled = enabled.lower() not in ("0", "false", "no", "off")
+        enabled = _parse_bool(raw.get("enabled"), default=True)
         out.append(
             WatchlistEntry(
                 id=entry_id,
                 template=_normalize_stem(template),
-                region=region,
-                enabled=bool(enabled),
+                world=region == "world" and enabled,
+                inventory=region == "inventory" and enabled,
             )
         )
-    return out
+    return _merge_entries(out)
 
 
 def load_watchlist_file(path: Optional[Path] = None) -> List[WatchlistEntry]:
@@ -126,7 +163,7 @@ def resolve_world_template_names(
     from_entries = [
         _normalize_stem(e.template)
         for e in entries
-        if e.enabled and e.region == "world"
+        if e.world
     ]
     if from_entries:
         return from_entries
@@ -136,12 +173,37 @@ def resolve_world_template_names(
     return ["osrs_infernalEel"]
 
 
+def _world_scan_stem(watch_stem: str) -> str:
+    """Map watchlist row stems to playspace PNG stems (e.g. infernal_eel → osrs_infernalEel)."""
+    normalized = _normalize_stem(watch_stem)
+    aliases = {
+        "infernal_eel": "osrs_infernalEel",
+        "infernal_eel_spot": "osrs_infernalEel",
+    }
+    return aliases.get(normalized.lower(), normalized)
+
+
+def _world_scan_stems(raw_names: Sequence[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for raw in raw_names:
+        stem = _world_scan_stem(str(raw))
+        if not stem:
+            continue
+        key = stem.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(stem)
+    return out
+
+
+def enabled_world_templates(entries: Sequence[WatchlistEntry]) -> List[str]:
+    return _world_scan_stems([e.template for e in entries if e.world])
+
+
 def enabled_inventory_templates(entries: Sequence[WatchlistEntry]) -> List[str]:
-    return [
-        _normalize_stem(e.template)
-        for e in entries
-        if e.enabled and e.region == "inventory"
-    ]
+    return [_normalize_stem(e.template) for e in entries if e.inventory]
 
 
 def inventory_watch_matches(
@@ -306,25 +368,22 @@ class WatchlistResolver:
             return False
 
         entries = load_watchlist_file(self._watchlist_path)
+        has_watchlist_file = self._watchlist_path.is_file()
         control_world = _read_control_world_templates(self._control_file)
-        if control_world is not None and len(control_world) > 0:
-            world = [_normalize_stem(t) for t in control_world if str(t).strip()]
-        elif entries:
-            world = resolve_world_template_names(entries, control_templates=None)
-        elif control_world is not None and self._watchlist_path.is_file():
-            world = []
+        if control_world is not None:
+            world = _world_scan_stems(control_world)
+        elif has_watchlist_file:
+            world = enabled_world_templates(entries)
         else:
             world = resolve_world_template_names([], control_templates=None)
 
         control_inventory = _read_control_inventory_templates(self._control_file)
-        if control_inventory is not None and len(control_inventory) > 0:
+        if control_inventory is not None:
             inventory = [_normalize_stem(t) for t in control_inventory if str(t).strip()]
-        elif entries:
+        elif has_watchlist_file:
             inventory = enabled_inventory_templates(entries)
-        elif control_inventory is not None and self._watchlist_path.is_file():
-            inventory = []
         else:
-            inventory = enabled_inventory_templates(entries)
+            inventory = []
 
         with self._lock:
             self._watchlist_mtime = watch_mtime
@@ -352,6 +411,7 @@ __all__ = [
     "WatchlistResolver",
     "default_watchlist_path",
     "enabled_inventory_templates",
+    "enabled_world_templates",
     "inventory_watch_matches",
     "locate_inventory_watch_templates",
     "load_watchlist_file",

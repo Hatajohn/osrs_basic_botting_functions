@@ -367,8 +367,8 @@ export type TemplateWatchRegion = 'world' | 'inventory';
 export type TemplateWatchEntry = {
   id: string;
   template: string;
-  region: TemplateWatchRegion;
-  enabled: boolean;
+  world: boolean;
+  inventory: boolean;
 };
 
 export type TemplateWatchlist = {

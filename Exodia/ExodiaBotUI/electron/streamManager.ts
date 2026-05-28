@@ -8,6 +8,8 @@ import { defaultClientRectPath } from './clientRect';
 import { killListenersOnPort, killPerceptionStreamProcesses } from './streamPortKill';
 import {
   controlFilePath as watchlistControlFilePath,
+  enabledInventoryTemplates,
+  enabledWorldTemplates,
   loadTemplateWatchlist,
   syncWatchlistToControlFile,
 } from './templateWatchlist';
@@ -502,12 +504,8 @@ export class StreamProcessManager {
     writeControlPayload(resolvedExodiaRoot, {
       ...existing,
       invalidate: true,
-      world_templates: watchlist.entries
-        .filter((e) => e.enabled && e.region === 'world')
-        .map((e) => e.template),
-      inventory_templates: watchlist.entries
-        .filter((e) => e.enabled && e.region === 'inventory')
-        .map((e) => e.template),
+      world_templates: enabledWorldTemplates(watchlist),
+      inventory_templates: enabledInventoryTemplates(watchlist),
     });
     this.sink('Requested perception cache invalidate', 'system');
   }
