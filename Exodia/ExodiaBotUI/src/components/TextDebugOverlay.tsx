@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { StreamMeta, TextPerceptionMeta, TextSpanMeta } from '../../shared/ipc';
 import './TextDebugOverlay.css';
 
@@ -143,6 +143,15 @@ export function reconcileStableSpanList(
   return next;
 }
 
+function spanMatchesFilter(span: TextSpanMeta, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    span.text.toLowerCase().includes(q) ||
+    span.color.toLowerCase().includes(q)
+  );
+}
+
 type TextDebugOverlayProps = {
   streamMeta: StreamMeta | null | undefined;
   streamPortUp?: boolean;
@@ -150,6 +159,7 @@ type TextDebugOverlayProps = {
 
 export function TextDebugOverlay({ streamMeta, streamPortUp }: TextDebugOverlayProps) {
   const textMeta = streamMeta?.perception?.text;
+  const [filterQuery, setFilterQuery] = useState('');
   const incoming = useMemo(() => spansForList(textMeta), [textMeta]);
   const stableRef = useRef<TextSpanMeta[]>([]);
 
@@ -163,20 +173,32 @@ export function TextDebugOverlay({ streamMeta, streamPortUp }: TextDebugOverlayP
     return next;
   }, [incoming, streamPortUp]);
 
+  const visibleSpans = useMemo(
+    () => spans.filter((span) => spanMatchesFilter(span, filterQuery)),
+    [spans, filterQuery],
+  );
+
+  const filterActive = filterQuery.trim().length > 0;
+
   const stats = useMemo(() => {
     const listed = spans.length;
+    const shown = visibleSpans.length;
     const total = textMeta?.span_count ?? listed;
     const seq = textMeta?.processed_seq ?? textMeta?.capture_seq;
     const scan = textMeta?.scan_ms;
     const fps = textMeta?.vision_fps;
     const parts: string[] = [];
-    parts.push(`${listed} listed`);
+    if (filterActive) {
+      parts.push(`${shown}/${listed} shown`);
+    } else {
+      parts.push(`${listed} listed`);
+    }
     if (total !== listed) parts.push(`${total} in meta`);
     if (seq != null) parts.push(`seq ${seq}`);
     if (scan != null) parts.push(`${scan.toFixed(0)} ms`);
     if (fps != null) parts.push(`${fps.toFixed(1)} fps`);
     return parts.join(' · ');
-  }, [textMeta, spans.length]);
+  }, [textMeta, spans.length, visibleSpans.length, filterActive]);
 
   const sourceNote = useMemo(() => {
     if (!textMeta) return null;
@@ -193,6 +215,25 @@ export function TextDebugOverlay({ streamMeta, streamPortUp }: TextDebugOverlayP
   return (
     <div className="text-span-list">
       <div className="text-span-list__toolbar">
+        <input
+          type="search"
+          className="text-span-list__filter"
+          value={filterQuery}
+          onChange={(e) => setFilterQuery(e.target.value)}
+          placeholder="Filter text or color…"
+          spellCheck={false}
+          aria-label="Filter OCR text list"
+        />
+        {filterActive ? (
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost text-span-list__filter-clear"
+            onClick={() => setFilterQuery('')}
+            aria-label="Clear filter"
+          >
+            Clear
+          </button>
+        ) : null}
         <span className="text-span-list__stats">{stats || 'No text meta'}</span>
       </div>
       <div className="text-span-list__scroll">
@@ -202,6 +243,8 @@ export function TextDebugOverlay({ streamMeta, streamPortUp }: TextDebugOverlayP
           <p className="text-span-list__empty">
             {sourceNote ?? 'No OCR spans yet — wait for the text worker or check EXODIA_TEXT_VISION=1.'}
           </p>
+        ) : visibleSpans.length === 0 ? (
+          <p className="text-span-list__empty">No rows match filter.</p>
         ) : (
           <table className="text-span-list__table">
             <thead>
@@ -214,7 +257,7 @@ export function TextDebugOverlay({ streamMeta, streamPortUp }: TextDebugOverlayP
               </tr>
             </thead>
             <tbody>
-              {spans.map((span) => (
+              {visibleSpans.map((span) => (
                 <tr key={spanRowKey(span)}>
                   <td>
                     <span

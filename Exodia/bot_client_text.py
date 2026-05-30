@@ -260,6 +260,41 @@ def run_ocr_data(
     return words
 
 
+def _text_stroke_min_sat() -> int:
+    return _env_int("EXODIA_TEXT_STROKE_MIN_S", 160)
+
+
+def _text_stroke_min_val() -> int:
+    return _env_int("EXODIA_TEXT_STROKE_MIN_V", 120)
+
+
+def text_local_bg_enabled() -> bool:
+    return _env_bool("EXODIA_TEXT_LOCAL_BG", True)
+
+
+def _ui_stroke_masks(crop_bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    High-saturation UI lettering masks (separates #CC0000 text from dull red terrain).
+    """
+    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
+    h_ch = hsv[:, :, 0]
+    s_ch = hsv[:, :, 1]
+    v_ch = hsv[:, :, 2]
+    min_s = _text_stroke_min_sat()
+    min_v = _text_stroke_min_val()
+    sat = (s_ch >= min_s) & (v_ch >= min_v)
+    b = crop_bgr[:, :, 0]
+    g = crop_bgr[:, :, 1]
+    r = crop_bgr[:, :, 2]
+    red_hue = (h_ch <= 12) | (h_ch >= 168)
+    red_dom = (r > g + 20) & (r > b + 20)
+    green_hue = (h_ch >= 35) & (h_ch <= 95)
+    green_dom = (g > r + 20) & (g > b + 20)
+    red_mask = (sat & red_hue & red_dom).astype(np.uint8) * 255
+    green_mask = (sat & green_hue & green_dom).astype(np.uint8) * 255
+    return red_mask, green_mask
+
+
 def _foreground_mask(crop_bgr: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
@@ -267,7 +302,9 @@ def _foreground_mask(crop_bgr: np.ndarray) -> np.ndarray:
     saturated = hsv[:, :, 1] >= 40
     # OSRS skilling red/green is high-saturation but not always bright in grayscale (#CC0000).
     colored_ui = (hsv[:, :, 1] >= 100) & (hsv[:, :, 2] >= 50)
-    return ((bright & saturated) | (gray >= 200) | colored_ui).astype(np.uint8) * 255
+    red_stroke, green_stroke = _ui_stroke_masks(crop_bgr)
+    stroke = cv2.bitwise_or(red_stroke, green_stroke)
+    return ((bright & saturated) | (gray >= 200) | colored_ui | (stroke > 0)).astype(np.uint8) * 255
 
 
 def _text_color_pixels(crop_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -352,6 +389,73 @@ def _classify_span_color_hsv(crop_bgr: np.ndarray, mask: np.ndarray) -> str:
     return best_name
 
 
+def _classify_span_color_local(context_bgr: np.ndarray, inner: Bbox) -> str:
+    """
+    Compare OCR word interior to a nearby background ring.
+
+    Picks high-saturation UI strokes inside the word box so red lava behind a
+    transparent skilling panel does not dominate the median.
+    """
+    h0, w0 = context_bgr.shape[:2]
+    ix, iy, iw, ih = (int(inner[i]) for i in range(4))
+    if iw <= 0 or ih <= 0:
+        return "unknown"
+    pad = max(2, min(iw, ih) // 2)
+    inner_m = np.zeros((h0, w0), dtype=np.uint8)
+    cv2.rectangle(inner_m, (ix, iy), (ix + iw, iy + ih), 255, -1)
+    outer_m = np.zeros((h0, w0), dtype=np.uint8)
+    cv2.rectangle(
+        outer_m,
+        (max(0, ix - pad), max(0, iy - pad)),
+        (min(w0, ix + iw + pad), min(h0, iy + ih + pad)),
+        255,
+        -1,
+    )
+    ring_m = cv2.subtract(outer_m, inner_m)
+    red_stroke, green_stroke = _ui_stroke_masks(context_bgr)
+    red_inner = cv2.bitwise_and(red_stroke, inner_m)
+    green_inner = cv2.bitwise_and(green_stroke, inner_m)
+    rc = int(cv2.countNonZero(red_inner))
+    gc = int(cv2.countNonZero(green_inner))
+    if rc < 2 and gc < 2:
+        return "unknown"
+
+    ring_n = int(cv2.countNonZero(ring_m))
+    if ring_n >= 5:
+        fg_red = context_bgr[red_inner > 0]
+        bg = context_bgr[ring_m > 0]
+        if len(fg_red) >= 2 and len(bg) >= 5:
+            fg_r = float(np.median(fg_red[:, 2]))
+            bg_r = float(np.median(bg[:, 2]))
+            fg_g = float(np.median(fg_red[:, 1]))
+            bg_g = float(np.median(bg[:, 1]))
+            hsv_fg = cv2.cvtColor(fg_red.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV).reshape(-1, 3)
+            hsv_bg = cv2.cvtColor(bg.reshape(-1, 1, 3), cv2.COLOR_BGR2HSV).reshape(-1, 3)
+            fg_s = float(np.median(hsv_fg[:, 1]))
+            bg_s = float(np.median(hsv_bg[:, 1]))
+            red_fg = (
+                rc >= gc
+                and fg_r >= bg_r + 25
+                and fg_g <= bg_g + 15
+                and fg_s >= bg_s + 25
+            )
+            if red_fg:
+                return "red"
+        if gc >= 2 and gc > rc:
+            fg_gr = context_bgr[green_inner > 0]
+            if len(fg_gr) >= 2 and ring_n >= 5 and len(bg) >= 5:
+                if float(np.median(fg_gr[:, 1])) > float(np.median(bg[:, 1])) + 25:
+                    return "green"
+            elif gc >= 3:
+                return "green"
+
+    if rc >= 3 and rc >= gc:
+        return "red"
+    if gc >= 3 and gc > rc:
+        return "green"
+    return "unknown"
+
+
 def classify_span_color(
     crop_bgr: np.ndarray,
     mask: Optional[np.ndarray] = None,
@@ -361,25 +465,34 @@ def classify_span_color(
     """
     Classify UI text color from a word crop using HSV palette + OSRS BGR heuristics.
 
-    ``mask`` may be a same-size uint8 mask; if omitted, a bright/saturated foreground
-    mask is built. ``bbox`` is accepted for API symmetry but ignored when ``mask`` is set.
+    When ``bbox`` lies inside a larger ``crop_bgr`` (padded tile context), local
+    background-ring + high-saturation stroke masks run first to reject red terrain.
     """
     if crop_bgr is None or not getattr(crop_bgr, "size", 0):
         return "unknown"
     h, w = crop_bgr.shape[:2]
-    if mask is None and bbox is not None:
-        x, y, bw, bh = bbox
-        x1 = max(0, min(w, x))
-        y1 = max(0, min(h, y))
-        x2 = max(x1, min(w, x + bw))
-        y2 = max(y1, min(h, y + bh))
-        sub = crop_bgr[y1:y2, x1:x2]
-        if sub.size == 0:
-            return "unknown"
-        crop_bgr = sub
-        h, w = crop_bgr.shape[:2]
+    inner_bbox: Optional[Bbox] = None
+    word_crop = crop_bgr
+    if bbox is not None and len(bbox) == 4:
+        x, y, bw, bh = (int(bbox[i]) for i in range(4))
+        area_ratio = (bw * bh) / max(1, h * w)
+        has_margin = x > 0 or y > 0 or (x + bw) < w or (y + bh) < h
+        if text_local_bg_enabled() and has_margin and area_ratio < 0.82:
+            local = _classify_span_color_local(crop_bgr, (x, y, bw, bh))
+            if local != "unknown":
+                return local
+        else:
+            x1 = max(0, min(w, x))
+            y1 = max(0, min(h, y))
+            x2 = max(x1, min(w, x + bw))
+            y2 = max(y1, min(h, y + bh))
+            sub = crop_bgr[y1:y2, x1:x2]
+            if sub.size == 0:
+                return "unknown"
+            word_crop = sub
+    h, w = word_crop.shape[:2]
     if mask is None:
-        mask = _foreground_mask(crop_bgr)
+        mask = _foreground_mask(word_crop)
     elif mask.shape[:2] != (h, w):
         mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
     if cv2.countNonZero(mask) < 2:
@@ -387,13 +500,13 @@ def classify_span_color(
     if cv2.countNonZero(mask) < 2:
         mask = np.full((h, w), 255, dtype=np.uint8)
 
-    osrs_name = _classify_osrs_skilling_bgr(crop_bgr, mask)
+    osrs_name = _classify_osrs_skilling_bgr(word_crop, mask)
     if osrs_name != "unknown":
         return osrs_name
-    bgr_name = _classify_span_color_bgr(crop_bgr, mask)
+    bgr_name = _classify_span_color_bgr(word_crop, mask)
     if bgr_name != "unknown":
         return bgr_name
-    hsv_name = _classify_span_color_hsv(crop_bgr, mask)
+    hsv_name = _classify_span_color_hsv(word_crop, mask)
     if hsv_name != "unknown":
         return hsv_name
     return "unknown"
@@ -576,11 +689,19 @@ def scan_client_text(
                 gx = x0 + word.left
                 gy = y0 + word.top
                 bbox: Bbox = (gx, gy, word.width, word.height)
-                x1, y1 = word.left, word.top
-                x2 = min(tw, x1 + word.width)
-                y2 = min(th, y1 + word.height)
-                crop = tile[y1:y2, x1:x2] if x2 > x1 and y2 > y1 else tile
-                color = classify_span_color(crop)
+                pad = max(4, int(min(word.width, word.height) * 0.65))
+                cx1 = max(0, word.left - pad)
+                cy1 = max(0, word.top - pad)
+                cx2 = min(tw, word.left + word.width + pad)
+                cy2 = min(th, word.top + word.height + pad)
+                ctx = tile[cy1:cy2, cx1:cx2]
+                inner: Bbox = (
+                    word.left - cx1,
+                    word.top - cy1,
+                    word.width,
+                    word.height,
+                )
+                color = classify_span_color(ctx, bbox=inner)
                 spans.append(
                     ColoredTextSpan(
                         text=word.text,
@@ -629,6 +750,7 @@ __all__ = [
     "classify_span_color",
     "merge_adjacent_spans",
     "run_ocr_data",
+    "text_local_bg_enabled",
     "text_merge_words_enabled",
     "scan_client_text",
     "text_max_spans",

@@ -7,11 +7,41 @@
 
 .text-span-list__toolbar {
   flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
 
+.text-span-list__filter {
+  flex: 1 1 8rem;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.text-span-list__filter::placeholder {
+  color: var(--text-muted);
+}
+
+.text-span-list__filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.text-span-list__filter-clear {
+  flex-shrink: 0;
+}
+
 .text-span-list__stats {
+  flex: 1 1 100%;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
