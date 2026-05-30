@@ -21,7 +21,7 @@ export function useBotSession() {
     window.exodia.getBotRun().then(setBotRun);
     const unsubRun = window.exodia.onBotRunUpdate((run) => {
       setBotRun(run);
-      if (run?.usesStream && isBotActive(run)) {
+      if (run?.usesStream && !run.usesSharedStream && isBotActive(run)) {
         setPreviewLive(true);
       }
       if (!run) {
@@ -38,7 +38,7 @@ export function useBotSession() {
   }, []);
 
   useEffect(() => {
-    if (!previewLive || !isBotActive(botRun) || !botRun?.usesStream) {
+    if (!previewLive || !isBotActive(botRun) || !botRun?.usesStream || botRun.usesSharedStream) {
       return;
     }
 

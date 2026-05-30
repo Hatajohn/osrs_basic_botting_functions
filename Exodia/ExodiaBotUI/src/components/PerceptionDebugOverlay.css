@@ -3,6 +3,7 @@
   inset: 0;
   pointer-events: none;
   overflow: hidden;
+  z-index: 2;
 }
 
 .perception-debug-overlay__id-list {
@@ -111,4 +112,104 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
   pointer-events: auto;
   opacity: 0.92;
+}
+
+/* World template / track pin — larger and labeled; anchor point is sprite center */
+.perception-debug-overlay__world-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+  gap: 2px;
+}
+
+.perception-debug-overlay__world-dot-core {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.perception-debug-overlay__world-dot--tracked .perception-debug-overlay__world-dot-core {
+  width: 13px;
+  height: 13px;
+}
+
+.perception-debug-overlay__world-dot--stable .perception-debug-overlay__world-dot-core {
+  width: 13px;
+  height: 13px;
+  border-color: rgba(74, 222, 128, 0.98);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 8px rgba(74, 222, 128, 0.65);
+}
+
+.perception-debug-overlay__world-dot-id {
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.98);
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 3px;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.perception-debug-overlay__track-dot--tracked {
+  width: 9px;
+  height: 9px;
+  border-width: 1.5px;
+}
+
+.perception-debug-overlay__track-dot--stable {
+  width: 9px;
+  height: 9px;
+  border: 2px solid rgba(74, 222, 128, 0.95);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 6px rgba(74, 222, 128, 0.55);
+}
+
+.perception-debug-overlay__track-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  padding: 0 3px;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.98);
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+}
+
+.perception-debug-overlay__velocity-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.perception-debug-overlay__velocity-line {
+  stroke: rgba(250, 204, 21, 0.88);
+  stroke-width: 0.2%;
+  stroke-linecap: round;
+}
+
+.perception-debug-overlay__velocity-line--stable {
+  stroke: rgba(74, 222, 128, 0.92);
+  stroke-width: 0.25%;
 }

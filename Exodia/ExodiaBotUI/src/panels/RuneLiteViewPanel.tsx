@@ -1,6 +1,7 @@
 import { useRef, useState, type RefObject } from 'react';
 import { EphemeralOverlayLayer } from '../components/EphemeralOverlayLayer';
 import { PerceptionDebugOverlay } from '../components/PerceptionDebugOverlay';
+import { PerceptionMetaJsonPanel } from '../components/PerceptionMetaJsonPanel';
 import {
   ZoomableImageViewport,
   zoomPercent,
@@ -29,6 +30,8 @@ type RuneLiteViewPanelProps = {
   previewLive?: boolean;
   onTogglePreviewLive?: (live: boolean) => void;
   botRunning?: boolean;
+  /** Bot uses exodia_perception_stream only — do not switch RuneLite view to 1 FPS bot preview. */
+  keepStreamPreview?: boolean;
   streamPortUp?: boolean;
   streamRunning?: boolean;
   streamStale?: boolean;
@@ -38,8 +41,6 @@ type RuneLiteViewPanelProps = {
   perception?: InventoryPerceptionMeta | null;
   streamMeta?: StreamMeta | null;
   showStreamDebugOverlay?: boolean;
-  showTemplateTracks?: boolean;
-  showInventoryTracks?: boolean;
   onToggleStreamDebugOverlay?: (show: boolean) => void;
   worldHitCount?: number;
   overlayAnnotations?: OverlayAnnotationEntry[];
@@ -94,6 +95,7 @@ export function RuneLiteViewPanel({
   previewLive = false,
   onTogglePreviewLive,
   botRunning = false,
+  keepStreamPreview = false,
   streamPortUp = false,
   streamRunning = false,
   streamStale = false,
@@ -103,8 +105,6 @@ export function RuneLiteViewPanel({
   perception = null,
   streamMeta = null,
   showStreamDebugOverlay = false,
-  showTemplateTracks = true,
-  showInventoryTracks = true,
   onToggleStreamDebugOverlay,
   worldHitCount,
   overlayAnnotations = [],
@@ -115,25 +115,29 @@ export function RuneLiteViewPanel({
 }: RuneLiteViewPanelProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const [watchCollapsed, setWatchCollapsed] = useState(false);
+  const [metaJsonOpen, setMetaJsonOpen] = useState(false);
+  const [metaJsonCollapsed, setMetaJsonCollapsed] = useState(false);
   const [zoomInfo, setZoomInfo] = useState<ZoomViewportInfo | null>(null);
-  const showingStreamBase = Boolean(streamPortUp && viewportImage && !previewLive && !botRunning);
-  const usingLiveStream = Boolean(streamRunning && !previewLive && !botRunning);
-  const showStreamControls = Boolean(!previewLive && !botRunning && onRestartStream);
-  const streamRecovery = !streamPortUp && !previewLive && !botRunning;
+  const streamPreviewMode = !botRunning || keepStreamPreview;
+  const showingStreamBase = Boolean(streamPortUp && viewportImage && !previewLive && streamPreviewMode);
+  const usingLiveStream = Boolean(streamRunning && !previewLive && streamPreviewMode);
+  const showStreamControls = Boolean(!previewLive && streamPreviewMode && onRestartStream);
+  const streamRecovery = !streamPortUp && !previewLive && streamPreviewMode;
+  const botEmbeddedPreview = Boolean(previewLive && botRunning && !keepStreamPreview);
   const hasImage = Boolean(viewportImage);
   const error = result && !result.ok ? result.error : undefined;
   const hint = result && !result.ok ? result.hint : undefined;
   const busy = loading || calibrating;
   const templateStats = streamMeta?.perception?.world?.template_stats ?? [];
   const invTemplateStats = streamMeta?.perception?.inventory?.inventory_template_stats ?? [];
-  const modeLabel = previewLive && botRunning
+  const modeLabel = botEmbeddedPreview
     ? 'Live preview'
     : streamStale && showingStreamBase
       ? 'Stream stale'
       : usingLiveStream
         ? 'Live stream'
         : formatMode(debugMode);
-  const zoomResetKey = showingStreamBase || (previewLive && botRunning) ? undefined : result?.refreshedAt;
+  const zoomResetKey = showingStreamBase || botEmbeddedPreview ? undefined : result?.refreshedAt;
   const dimensionsLabel = formatDimensions(zoomInfo, result ?? undefined, streamMeta ?? undefined);
   const zoomLabel =
     zoomInfo && zoomInfo.fitScale > 0
@@ -147,7 +151,7 @@ export function RuneLiteViewPanel({
         <div className="panel__header-actions">
           <span
             className={`panel__badge${
-              previewLive && botRunning
+              botEmbeddedPreview
                 ? ' panel__badge--live'
                 : usingLiveStream
                   ? ' panel__badge--live'
@@ -156,7 +160,7 @@ export function RuneLiteViewPanel({
                     : ''
             }`}
           >
-            {previewLive && botRunning
+            {botEmbeddedPreview
               ? 'Live'
               : usingLiveStream
                 ? 'Stream'
@@ -221,6 +225,22 @@ export function RuneLiteViewPanel({
               {showStreamDebugOverlay ? 'Hide IDs' : 'IDs view'}
             </button>
           )}
+          {showStreamControls && (
+            <button
+              type="button"
+              className={`btn btn--sm${metaJsonOpen ? ' btn--active' : ''}`}
+              onClick={() => {
+                setMetaJsonOpen((open) => {
+                  const next = !open;
+                  if (next) setMetaJsonCollapsed(false);
+                  return next;
+                });
+              }}
+              title="Live /meta JSON from perception stream (inventory + world slices)"
+            >
+              {metaJsonOpen ? 'Hide JSON' : 'Meta JSON'}
+            </button>
+          )}
           {showStreamControls && onRestartStream && (
             <button
               type="button"
@@ -232,7 +252,7 @@ export function RuneLiteViewPanel({
               {streamRestarting ? 'Resetting…' : 'Hard reset stream'}
             </button>
           )}
-          {botRunning && onTogglePreviewLive && (
+          {botRunning && onTogglePreviewLive && !keepStreamPreview && (
             <button
               type="button"
               className={`btn btn--sm${previewLive ? ' btn--active' : ''}`}
@@ -255,7 +275,7 @@ export function RuneLiteViewPanel({
             type="button"
             className="btn btn--sm"
             onClick={onRefresh}
-            disabled={busy || (previewLive && botRunning)}
+            disabled={busy || botEmbeddedPreview}
             title={
               usingLiveStream
                 ? 'Force full re-identify on next stream frame'
@@ -292,7 +312,7 @@ export function RuneLiteViewPanel({
         {!loading && !hasImage && !error && (
           <div className="panel__placeholder">
             <p>
-              {previewLive && botRunning
+              {botEmbeddedPreview
                 ? 'Waiting for live preview from the bot stream…'
                 : streamRestarting
                   ? 'Restarting perception stream…'
@@ -347,7 +367,7 @@ export function RuneLiteViewPanel({
             resetKey={zoomResetKey}
             onZoomChange={setZoomInfo}
             alt={
-              previewLive && botRunning
+              botEmbeddedPreview
                 ? 'RuneLite live preview'
                 : showingStreamBase
                   ? streamStale
@@ -356,13 +376,11 @@ export function RuneLiteViewPanel({
                   : 'RuneLite debug frame'
             }
           >
-            {showingStreamBase &&
-              (showStreamDebugOverlay || showTemplateTracks || showInventoryTracks) && (
+            {showingStreamBase && (
               <PerceptionDebugOverlay
                 meta={streamMeta}
+                imageRef={imageRef}
                 showInventoryDebug={showStreamDebugOverlay}
-                showInventoryTracks={showInventoryTracks}
-                showWorldTracks={showTemplateTracks}
               />
             )}
             <EphemeralOverlayLayer annotations={overlayAnnotations} />
@@ -374,6 +392,13 @@ export function RuneLiteViewPanel({
             streamMeta={streamMeta}
             collapsed={watchCollapsed}
             onToggleCollapsed={() => setWatchCollapsed((v) => !v)}
+          />
+        )}
+        {showingStreamBase && metaJsonOpen && (
+          <PerceptionMetaJsonPanel
+            streamMeta={streamMeta}
+            collapsed={metaJsonCollapsed}
+            onToggleCollapsed={() => setMetaJsonCollapsed((v) => !v)}
           />
         )}
       </div>

@@ -3,6 +3,7 @@ import type { FileEntry } from '../../shared/ipc';
 import type { BotSpecFile } from '../../shared/specs';
 import { PanelHeader } from '../components/PanelHeader';
 import { BotsTab } from './BotsTab';
+import { PythonBotsTab } from './PythonBotsTab';
 import './BotsTab.css';
 import './ScriptsPanel.css';
 import './Panel.css';
@@ -14,7 +15,7 @@ type ScriptsPanelProps = {
   stripMode?: boolean;
 };
 
-type TabId = 'bots' | 'specs';
+type TabId = 'bots' | 'python' | 'specs';
 
 export function ScriptsPanel({
   onPathChange,
@@ -157,6 +158,15 @@ export function ScriptsPanel({
         <button
           type="button"
           role="tab"
+          aria-selected={tab === 'python'}
+          className={`scripts-panel__tab${tab === 'python' ? ' scripts-panel__tab--active' : ''}`}
+          onClick={() => setTab('python')}
+        >
+          Python
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === 'specs'}
           className={`scripts-panel__tab${tab === 'specs' ? ' scripts-panel__tab--active' : ''}`}
           onClick={() => setTab('specs')}
@@ -175,6 +185,7 @@ export function ScriptsPanel({
             onClearSpecs={clearSpecs}
           />
         )}
+        {tab === 'python' && <PythonBotsTab />}
         {tab === 'specs' && (
           <>
             <p className="scripts-panel__path" title={browsePath || rootPath}>

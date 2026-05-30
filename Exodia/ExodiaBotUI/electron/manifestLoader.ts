@@ -18,6 +18,8 @@ const BOT_ENTRY_KEYS = new Set([
   'args',
   'note',
   'deprecated',
+  'requiresStream',
+  'usesSharedStream',
 ]);
 
 const ARG_KEYS = new Set(['name', 'flag', 'type', 'default', 'label']);
@@ -131,6 +133,8 @@ function validateBotEntry(raw: unknown, index: number): BotManifestEntry {
     args,
     note: typeof obj.note === 'string' ? obj.note : undefined,
     deprecated: obj.deprecated === true,
+    requiresStream: obj.requiresStream === true ? true : undefined,
+    usesSharedStream: obj.usesSharedStream === true ? true : undefined,
   };
 }
 
@@ -191,10 +195,16 @@ export function buildArgvFromArgs(
   return argv;
 }
 
-export function botUsesStream(bot: BotManifestEntry): boolean {
+export function botRequiresStream(bot: BotManifestEntry): boolean {
+  if (bot.requiresStream === true) return true;
   const all = [...bot.defaultArgv];
   for (let i = 0; i < all.length - 1; i += 1) {
     if (all[i] === '--stream-port' && all[i + 1] !== '0') return true;
   }
   return false;
+}
+
+/** Whether the active bot run should use the perception MJPEG overlay in the UI. */
+export function botUsesStream(bot: BotManifestEntry): boolean {
+  return botRequiresStream(bot);
 }

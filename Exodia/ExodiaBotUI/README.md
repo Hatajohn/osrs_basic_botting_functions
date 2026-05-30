@@ -34,7 +34,7 @@ Four-quadrant layout:
 | Left | Log | Subprocess stdout/stderr (bots, calibration, smoke test) |
 | Center top | RuneLite view | Debug inventory overlay (F5) or live MJPEG preview while agent runs |
 | Center bottom | Current bot tasks | Active bot, runtime status chips |
-| Right top | Scripts → Bots / Specs | Load markdown task specs and start the agent |
+| Right top | Scripts → **Python** / Bots / Specs | Manifest FSM bots, agent specs, markdown browser |
 | Right bottom | Actions | Simple actions and chains (later phases) |
 
 ## Task specs (Bots + Specs tabs)
@@ -44,6 +44,19 @@ The agent reads **markdown spec files** (`.md`) to understand what to do.
 1. **Scripts → Specs** — browse folders (markdown files and directories only). Set the root folder via **Choose folder…** or **File → Preferences…** (`scriptsFolder`).
 2. Select a `.md` file → **Load into Bots**, or double-click the file.
 3. **Scripts → Bots** — review loaded specs (preview, remove, clear). Click **Start agent** to run `run_agent.py` with `--spec` for each loaded file.
+
+## Python FSM bots (Scripts → Python tab)
+
+Manifest bots with `moduleArgv` (direct `python -m …`) appear in the **Python** tab. Each entry reads launch args from `bots.manifest.json` and uses the same process manager as the agent (Start / Stop / Pause / Resume, runtime status, log streaming).
+
+| Bot id | Module | Notes |
+|--------|--------|-------|
+| `basic_stream_fishing` | `BasicStreamFishing.basic_stream_fishing` | Stream-only infernal seek/fish FSM (`usesSharedStream: true` — RuneLite view keeps normal ~10 FPS stream preview) |
+| `sacred_eel` | `SacredEelFishing.sacred_eel_fishing` | Legacy BotEyes path (still uses `bot_update` in-process) |
+
+**Requires:** calibrated `client_rect.json`, perception stream up (`exodia_perception_stream.py` / app auto-start). Stream bots set `EXODIA_STREAM_PORT` + `EXODIA_CAPTURE_STREAM=1` on spawn.
+
+Add more bots by extending `ExodiaBotUI/bots.manifest.json` (`moduleArgv`, `runtimeScriptId`, `runtimeCommands`, optional `usesSharedStream`).
 
 Loaded spec paths are passed to Python as:
 

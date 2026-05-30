@@ -12,7 +12,7 @@ import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Mapping, Optional, TYPE_CHECKING
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -25,6 +25,7 @@ __all__ = [
     "CaptureStreamPublisher",
     "PerceptionStreamPublisher",
     "MJPEGStreamServer",
+    "coherent_seq",
     "publish_game_preview",
     "preview_dimensions",
     "preview_max_width",
@@ -58,6 +59,27 @@ def preview_dimensions(frame_w: int, frame_h: int, max_width: int) -> tuple[int,
 def _baked_overlay_enabled() -> bool:
     """Server-side inventory/world JPEG composite (off by default; UI draws debug overlays client-side)."""
     return os.environ.get("EXODIA_STREAM_BAKED_OVERLAY", "0").strip().lower() in ("1", "true", "yes")
+
+
+def coherent_seq(
+    inventory: Optional[Mapping[str, Any]] = None,
+    text: Optional[Mapping[str, Any]] = None,
+    world: Optional[Mapping[str, Any]] = None,
+    action: Optional[Mapping[str, Any]] = None,
+) -> Optional[int]:
+    """Minimum ``processed_seq`` when inventory, text, world, and action are all present."""
+    seqs: list[int] = []
+    for slice_meta in (inventory, text, world, action):
+        if not isinstance(slice_meta, Mapping) or not slice_meta:
+            return None
+        raw = slice_meta.get("processed_seq")
+        if raw is None:
+            return None
+        try:
+            seqs.append(int(raw))
+        except (TypeError, ValueError):
+            return None
+    return min(seqs) if seqs else None
 
 
 def _encode_jpeg(img, quality: int = 85) -> Optional[bytes]:
@@ -352,6 +374,8 @@ class PerceptionStreamPublisher:
         pipeline: "CapturePipeline",
         inventory_cache: Optional["InventoryPerceptionCache"] = None,
         world_cache: Any = None,
+        action_cache: Any = None,
+        text_cache: Any = None,
         *,
         fps: float = 0.0,
         max_width: Optional[int] = None,
@@ -360,6 +384,8 @@ class PerceptionStreamPublisher:
         self._pipeline = pipeline
         self._inventory_cache = inventory_cache
         self._world_cache = world_cache
+        self._action_cache = action_cache
+        self._text_cache = text_cache
         self._max_width = int(max_width) if max_width is not None else preview_max_width()
         raw = fps if fps > 0 else os.environ.get("EXODIA_STREAM_PUBLISH_FPS", "10")
         try:
@@ -441,10 +467,21 @@ class PerceptionStreamPublisher:
                             self._publisher.publish("inventory_overlay", overlay)
                 inv_snap = inv_cache.snapshot()
                 world_cache = self._world_cache
+                action_cache = self._action_cache
+                text_cache = self._text_cache
+                inv_meta = inv_cache.inventory_meta()
+                world_meta = world_cache.world_meta() if world_cache is not None else {}
+                action_meta = action_cache.action_meta() if action_cache is not None else {}
+                text_meta = text_cache.text_meta() if text_cache is not None else {}
                 meta["perception"] = {
-                    "inventory": inv_cache.inventory_meta(),
-                    "world": world_cache.world_meta() if world_cache is not None else {},
+                    "inventory": inv_meta,
+                    "world": world_meta,
+                    "action": action_meta,
+                    "text": text_meta,
                 }
+                coh = coherent_seq(inv_meta, text_meta, world_meta, action_meta)
+                if coh is not None:
+                    meta["coherent_seq"] = coh
                 meta["processed_seq"] = inv_snap.processed_seq
                 meta["vision_fps"] = inv_snap.vision_fps
                 if snap is not None:

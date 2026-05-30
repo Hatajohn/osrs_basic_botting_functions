@@ -20,15 +20,19 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 _EXODIA = Path(__file__).resolve().parent
 if str(_EXODIA) not in sys.path:
     sys.path.insert(0, str(_EXODIA))
 
 from bot_capture import start_capture_pipeline, stop_capture_pipeline
+from bot_frame_dispatch import FrameFanout, frame_fanout_enabled
 from bot_client_config import default_client_rect_path, load_client_rect
 from bot_inventory_vision import InventoryPerceptionCache, InventoryVisionProcessor
 from bot_stream import FramePublisher, MJPEGStreamServer, PerceptionStreamPublisher, preview_max_width
+from bot_action_vision import ActionPerceptionCache, ActionVisionProcessor, action_vision_enabled
+from bot_text_vision import TextPerceptionCache, TextScanWorker, text_vision_enabled
 from bot_world_vision import WorldPerceptionCache, WorldVisionProcessor
 
 _CONTROL_FILE = _EXODIA / "captures" / "perception_stream_control.json"
@@ -46,7 +50,7 @@ def _shutdown_runtime() -> None:
             srv.stop()
         except Exception:
             pass
-    for key in ("inv_vision", "world_vision"):
+    for key in ("inv_vision", "world_vision", "action_vision", "text_worker"):
         proc = _runtime.get(key)
         if proc is not None:
             try:
@@ -77,6 +81,8 @@ def _ensure_capture_env() -> None:
         os.environ["EXODIA_CAPTURE_BACKEND"] = "wsl_ps"
     os.environ.setdefault("EXODIA_CAPTURE_STREAM", "1")
     os.environ.setdefault("EXODIA_INV_FRAME_BUCKETS", "1")
+    # Per-modality frame queues: set EXODIA_FRAME_FANOUT=0 to share pipe.buffer only.
+    os.environ.setdefault("EXODIA_FRAME_FANOUT", "1")
 
 
 def _emit(obj: dict) -> None:
@@ -86,7 +92,10 @@ def _emit(obj: dict) -> None:
 def _write_control_template() -> None:
     _CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
     if not _CONTROL_FILE.is_file():
-        _CONTROL_FILE.write_text(json.dumps({"invalidate": False}, indent=2), encoding="utf-8")
+        _CONTROL_FILE.write_text(
+            json.dumps({"invalidate": False, "pan_in_progress": False}, indent=2),
+            encoding="utf-8",
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -114,6 +123,18 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=0.0,
         help="World vision FPS (0=EXODIA_WORLD_VISION_FPS or 10)",
+    )
+    p.add_argument(
+        "--action-vision-fps",
+        type=float,
+        default=0.0,
+        help="Action strip vision FPS (0=EXODIA_ACTION_VISION_FPS or 10)",
+    )
+    p.add_argument(
+        "--text-vision-fps",
+        type=float,
+        default=0.0,
+        help="Full-client text OCR FPS (0=EXODIA_TEXT_VISION_FPS or 5)",
     )
     p.add_argument(
         "--publish-fps",
@@ -157,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
 
     vision_fps = args.vision_fps if args.vision_fps > 0 else 0.0
     world_vision_fps = args.world_vision_fps if args.world_vision_fps > 0 else 0.0
+    action_vision_fps = args.action_vision_fps if args.action_vision_fps > 0 else 0.0
+    text_vision_fps = args.text_vision_fps if args.text_vision_fps > 0 else 0.0
     publish_fps = args.publish_fps if args.publish_fps > 0 else 0.0
     max_width = preview_max_width() if args.max_width is None else int(args.max_width)
 
@@ -167,13 +190,28 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _on_signal)
 
     stop_capture_pipeline()
-    pipe = start_capture_pipeline(rect, fps=capture_fps, track_vision=False)
+    # When EXODIA_FRAME_FANOUT=1, register per-modality queues before capture dispatches.
+    fanout: Optional[FrameFanout] = None
+    inv_queue = world_queue = action_queue = text_queue = None
+    if frame_fanout_enabled():
+        fanout = FrameFanout()
+        inv_queue = fanout.register("inventory")
+        world_queue = fanout.register("world")
+        action_queue = fanout.register("action")
+        text_queue = fanout.register("text")
+    pipe = start_capture_pipeline(
+        rect,
+        fps=capture_fps,
+        track_vision=False,
+        fanout=fanout,
+    )
     pipe.set_geometry(rect, None, [0, rect[3] - 30, 520, 30])
 
     inv_cache = InventoryPerceptionCache()
     inv_vision = InventoryVisionProcessor(
         pipe.buffer,
         inv_cache,
+        frame_queue=inv_queue,
         fps=vision_fps if vision_fps > 0 else None,
         max_overlay_width=max_width,
         control_file=control_path,
@@ -186,10 +224,35 @@ def main(argv: list[str] | None = None) -> int:
         inv_cache,
         world_cache,
         rect,
+        frame_queue=world_queue,
         fps=world_vision_fps if world_vision_fps > 0 else None,
         control_file=control_path,
     )
     world_vision.start()
+
+    action_cache = ActionPerceptionCache()
+    text_cache = TextPerceptionCache()
+    action_vision: Optional[ActionVisionProcessor] = None
+    if action_vision_enabled():
+        action_vision = ActionVisionProcessor(
+            pipe.buffer,
+            inv_cache,
+            action_cache,
+            frame_queue=action_queue,
+            fps=action_vision_fps if action_vision_fps > 0 else None,
+            text_cache=text_cache,
+        )
+        action_vision.start()
+
+    text_worker: Optional[TextScanWorker] = None
+    if text_vision_enabled():
+        text_worker = TextScanWorker(
+            pipe.buffer,
+            text_cache,
+            frame_queue=text_queue,
+            fps=text_vision_fps if text_vision_fps > 0 else None,
+        )
+        text_worker.start()
 
     publisher = FramePublisher()
     stream_pub = PerceptionStreamPublisher(
@@ -197,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
         pipe,
         inv_cache,
         world_cache=world_cache,
+        action_cache=action_cache,
+        text_cache=text_cache,
         fps=publish_fps if publish_fps > 0 else 0.0,
         max_width=max_width,
     )
@@ -209,7 +274,10 @@ def main(argv: list[str] | None = None) -> int:
     _runtime["server"] = server
     _runtime["inv_vision"] = inv_vision
     _runtime["world_vision"] = world_vision
+    _runtime["action_vision"] = action_vision
+    _runtime["text_worker"] = text_worker
     _runtime["pipe"] = pipe
+    _runtime["fanout"] = fanout
     server.start_daemon()
 
     base = server.base_url

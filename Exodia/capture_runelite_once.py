@@ -28,9 +28,12 @@ See ``window_tool.linux_activate_move_resize`` for Linux client-window snapping.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 _EXODIA_DIR = Path(__file__).resolve().parent
@@ -85,7 +88,100 @@ _apply_capture_backend_argv()
 import bot_client as Client
 import bot_env as Env
 import bot_eyes as Eyes
+from bot_capture import FrameSnapshot
+from bot_client_text import ClientTextSnapshot, ColoredTextSpan, TextFinder
 from bot_frames import safe_imwrite, write_breakdown_sidecars
+from bot_runtime import ensure_logs_dir, write_json_atomic
+
+_EXODIA_LOGS_DIAG = _EXODIA_DIR / "logs" / "diag"
+
+_TEXT_COLOR_BGR = {
+    "green": (0, 255, 0),
+    "red": (0, 0, 255),
+    "yellow": (0, 255, 255),
+    "cyan": (255, 255, 0),
+    "orange": (0, 165, 255),
+    "white": (255, 255, 255),
+    "unknown": (128, 128, 128),
+}
+
+
+def _span_to_dict(span: ColoredTextSpan) -> dict:
+    return {
+        "text": span.text,
+        "color": span.color,
+        "bbox": list(span.bbox),
+        "conf": round(span.conf, 1),
+        "source": span.source,
+    }
+
+
+def _text_snapshot_to_dict(snap: ClientTextSnapshot) -> dict:
+    return {
+        "processed_seq": snap.processed_seq,
+        "capture_seq": snap.capture_seq,
+        "client_size": list(snap.client_size),
+        "elapsed_ms": round(snap.elapsed_ms, 1),
+        "span_count": len(snap.spans),
+        "spans": [_span_to_dict(s) for s in snap.spans],
+    }
+
+
+def _draw_text_span_overlay(client_bgr, spans: tuple) -> "object":
+    import cv2  # noqa: PLC0415
+
+    vis = client_bgr.copy()
+    for span in spans:
+        x, y, w, h = (int(v) for v in span.bbox)
+        color = _TEXT_COLOR_BGR.get(span.color.lower(), _TEXT_COLOR_BGR["unknown"])
+        cv2.rectangle(vis, (x, y), (x + w, y + h), color, 1)
+        label = "%s:%s" % (span.color[:1].upper(), span.text[:24])
+        ty = max(y - 4, 10)
+        cv2.putText(
+            vis,
+            label,
+            (x, ty),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+    return vis
+
+
+def write_text_dump(
+    client_bgr,
+    *,
+    client_rect: list,
+    overlay: bool = False,
+) -> dict:
+    """Run ``TextFinder.scan`` on client crop; write JSON (+ optional overlay) under logs/diag/."""
+    ensure_logs_dir()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    out_dir = _EXODIA_LOGS_DIAG / ("text_dump_%s" % stamp)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    snap = FrameSnapshot(
+        bgr=client_bgr,
+        seq=1,
+        ts=time.monotonic(),
+        client_rect=list(client_rect),
+        age_ms=0.0,
+    )
+    result = TextFinder.scan(snap)
+    payload = _text_snapshot_to_dict(result)
+    payload["client_rect"] = list(client_rect)
+    json_path = out_dir / "text_spans.json"
+    write_json_atomic(json_path, payload)
+
+    paths = {"json": str(json_path.resolve()), "dir": str(out_dir.resolve())}
+    if overlay:
+        overlay_bgr = _draw_text_span_overlay(client_bgr, result.spans)
+        overlay_path = out_dir / "text_overlay.png"
+        if safe_imwrite(overlay_path, overlay_bgr):
+            paths["overlay"] = str(overlay_path.resolve())
+    return paths
 
 
 def main() -> int:
@@ -135,6 +231,16 @@ def main() -> int:
         "--write-masked",
         action="store_true",
         help="Also save *_masked.png (post update() black bars — matches legacy BotEyes.curr_client).",
+    )
+    p.add_argument(
+        "--text-dump",
+        action="store_true",
+        help="Run TextFinder.scan on client crop; write JSON spans to logs/diag/.",
+    )
+    p.add_argument(
+        "--text-dump-overlay",
+        action="store_true",
+        help="With --text-dump, also write text_overlay.png with colored span boxes.",
     )
     src = p.add_mutually_exclusive_group()
     src.add_argument(
@@ -208,6 +314,20 @@ def main() -> int:
             write_masked_copy=args.write_masked,
         )
         print("Sidecars:", ", ".join("%s=%s" % (k, v) for k, v in sorted(side.items())))
+
+    if args.text_dump:
+        try:
+            dump_paths = write_text_dump(
+                primary_bgr,
+                client_rect=list(eyes.client_rect),
+                overlay=args.text_dump_overlay,
+            )
+            print("Text dump:", dump_paths.get("json"))
+            if dump_paths.get("overlay"):
+                print("Text overlay:", dump_paths["overlay"])
+        except Exception as exc:
+            print("Text dump failed:", exc, file=sys.stderr)
+            return 1
 
     return 0
 

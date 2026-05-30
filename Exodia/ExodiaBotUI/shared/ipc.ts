@@ -345,11 +345,33 @@ export type WorldPerceptionMeta = {
   templates_scanned?: string[];
   template_stats?: WorldTemplateStat[];
   vision_fps?: number;
+  pan_in_progress?: boolean;
+  motion_magnitude?: number;
+};
+
+export type TextSpanMeta = {
+  text: string;
+  color: string;
+  bbox: number[];
+  conf?: number;
+};
+
+export type TextPerceptionMeta = {
+  processed_seq?: number;
+  capture_seq?: number;
+  span_count?: number;
+  client_w?: number;
+  client_h?: number;
+  scan_ms?: number;
+  vision_fps?: number;
+  spans?: TextSpanMeta[];
+  fishing_spans?: TextSpanMeta[];
 };
 
 export type PerceptionMeta = {
   inventory?: InventoryPerceptionMeta;
   world?: WorldPerceptionMeta;
+  text?: TextPerceptionMeta;
 };
 
 export type StreamMeta = {

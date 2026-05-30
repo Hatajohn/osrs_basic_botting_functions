@@ -68,8 +68,6 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [aboutDetail, setAboutDetail] = useState('');
   const [showStreamDebugOverlay, setShowStreamDebugOverlay] = useState(false);
-  const [showTemplateTracks, setShowTemplateTracks] = useState(true);
-  const [showInventoryTracks, setShowInventoryTracks] = useState(true);
   const [debugMode, setDebugMode] = useState<DebugFrameMode>('inventory_identify');
   const [debugResult, setDebugResult] = useState<DebugFrameResult | null>(null);
   const [debugImage, setDebugImage] = useState<string | undefined>();
@@ -137,14 +135,12 @@ export default function App() {
   const runCalibrateClientRect = useCallback(async () => {
     setCalibrating(true);
     try {
-      const result = await window.exodia.runCalibrateClientRect();
-      if (result.ok) {
-        await startStream();
-      }
+      await window.exodia.runCalibrateClientRect();
+      // Main process stops capture, runs calibration, then hard-restarts stream.
     } finally {
       setCalibrating(false);
     }
-  }, [startStream]);
+  }, []);
 
   const prepareActionClickPreview = useCallback(async () => {
     if (previewLive) {
@@ -153,10 +149,12 @@ export default function App() {
     // Stream stays the base layer; action overlays stack on top (no debug-image swap).
   }, [previewLive, setPreviewLive]);
 
+  const keepStreamPreview = Boolean(botRun?.usesSharedStream && botRunning);
+
   const viewportImage =
-    previewLive && botRunning && liveImage
+    previewLive && botRunning && liveImage && !keepStreamPreview
       ? liveImage
-      : streamPortUp && streamImage && !(previewLive && botRunning)
+      : streamPortUp && streamImage && (!previewLive || keepStreamPreview)
         ? streamImage
         : debugImage;
 
@@ -211,12 +209,6 @@ export default function App() {
           if (mode) setDebugMode(mode);
           break;
         }
-        case 'toggleShowTemplateTracks':
-          setShowTemplateTracks((v) => !v);
-          break;
-        case 'toggleShowInventoryTracks':
-          setShowInventoryTracks((v) => !v);
-          break;
         case 'zoomIn':
           zoomViewportRef.current?.zoomIn();
           break;
@@ -230,16 +222,19 @@ export default function App() {
           await applyHighRes(!highRes);
           break;
         case 'toggleLogPanel':
-          dashboardLayout.togglePanelCollapsed('log');
+          dashboardLayout.togglePanelHidden('log');
           break;
         case 'toggleTasksPanel':
-          dashboardLayout.togglePanelCollapsed('tasks');
+          dashboardLayout.togglePanelHidden('tasks');
           break;
         case 'toggleScriptsPanel':
-          dashboardLayout.togglePanelCollapsed('scripts');
+          dashboardLayout.togglePanelHidden('scripts');
           break;
         case 'toggleActionsPanel':
-          dashboardLayout.togglePanelCollapsed('actions');
+          dashboardLayout.togglePanelHidden('actions');
+          break;
+        case 'toggleClientOnly':
+          dashboardLayout.toggleClientOnly();
           break;
         case 'botStop':
           await stopBot();
@@ -278,15 +273,18 @@ export default function App() {
           hasDebugFrame: Boolean(viewportImage),
           streamRunning,
           debugMode,
-          showTemplateTracks,
-          showInventoryTracks,
           hasZoomViewport: Boolean(viewportImage),
           highRes,
           panelsVisible: {
-            log: !dashboardLayout.logCollapsed,
-            tasks: !dashboardLayout.tasksCollapsed,
-            scripts: !dashboardLayout.scriptsCollapsed,
-            actions: !dashboardLayout.actionsCollapsed,
+            log: !dashboardLayout.logHidden,
+            tasks: !dashboardLayout.tasksHidden,
+            scripts: !dashboardLayout.scriptsHidden,
+            actions: !dashboardLayout.actionsHidden,
+            clientOnly:
+              dashboardLayout.logHidden &&
+              dashboardLayout.tasksHidden &&
+              dashboardLayout.scriptsHidden &&
+              dashboardLayout.actionsHidden,
           },
         }}
       />
@@ -307,8 +305,6 @@ export default function App() {
         streamMeta={streamMeta}
         showStreamDebugOverlay={showStreamDebugOverlay}
         onToggleStreamDebugOverlay={setShowStreamDebugOverlay}
-        showTemplateTracks={showTemplateTracks}
-        showInventoryTracks={showInventoryTracks}
         worldHitCount={worldHitCount}
         debugLoading={debugLoading}
         calibrating={calibrating}
@@ -320,6 +316,7 @@ export default function App() {
         previewLive={previewLive}
         onTogglePreviewLive={setPreviewLive}
         botRunning={botRunning}
+        keepStreamPreview={keepStreamPreview}
         overlayAnnotations={overlayAnnotations}
         latestActionPreview={latestActionPreview}
         onPushOverlayAnnotation={pushAnnotation}

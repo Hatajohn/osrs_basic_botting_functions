@@ -22,7 +22,10 @@ import numpy as np
 
 from bot_capture import FrameBuffer, FrameSnapshot
 from bot_eyes import INV_COLS, INV_ROWS
-from bot_template_watchlist import WatchlistResolver, locate_inventory_watch_templates
+from bot_frame_dispatch import FrameQueue
+from bot_perception_worker import run_modality_loop
+from bot_template_find import TemplateFinder
+from bot_template_watchlist import WatchlistResolver
 
 Rect = List[int]
 SlotCoord = Tuple[int, int]
@@ -285,12 +288,14 @@ class InventoryVisionProcessor:
         buffer: FrameBuffer,
         cache: InventoryPerceptionCache,
         *,
+        frame_queue: Optional[FrameQueue] = None,
         fps: Optional[float] = None,
         max_overlay_width: int = 640,
         outline_rematch_s: Optional[float] = None,
         control_file: Optional[Path] = None,
     ) -> None:
         self._buffer = buffer
+        self._frame_queue = frame_queue
         self._cache = cache
         self._fps = fps if fps is not None else default_inventory_vision_fps()
         self._max_overlay_width = max(320, int(max_overlay_width))
@@ -327,6 +332,9 @@ class InventoryVisionProcessor:
 
     def request_invalidate(self) -> None:
         self._cache.request_invalidate()
+
+    def _capture_seq(self, snap: FrameSnapshot) -> int:
+        return snap.seq if self._frame_queue is not None else self._buffer.seq
 
     def start(self) -> None:
         if self._vision_thread is not None:
@@ -432,7 +440,7 @@ class InventoryVisionProcessor:
                 occupancy=_empty_occupancy(),
                 slot_items=_empty_slot_grid(),
                 processed_seq=snap.seq,
-                capture_seq=self._buffer.seq,
+                capture_seq=self._capture_seq(snap),
                 vision_fps=self._actual_fps,
                 reidentify_pending=self._pending_identify_count(),
             )
@@ -462,7 +470,7 @@ class InventoryVisionProcessor:
             occupancy=self._occupancy,
             slot_items=items_snapshot,
             processed_seq=snap.seq,
-            capture_seq=self._buffer.seq,
+            capture_seq=self._capture_seq(snap),
             vision_fps=self._actual_fps,
             dirty_slots=dirty,
             reidentify_pending=self._pending_identify_count(),
@@ -471,10 +479,9 @@ class InventoryVisionProcessor:
         self._watchlist.refresh()
         inv_templates = self._watchlist.inventory_template_names()
         if inv_templates:
-            watch_matches = locate_inventory_watch_templates(
-                snap.bgr,
+            watch_matches = TemplateFinder.locate_inventory_watch(
+                snap,
                 inv_rect,
-                snap.client_rect,
                 inv_templates,
                 slot_items=items_snapshot,
             )
@@ -509,8 +516,6 @@ class InventoryVisionProcessor:
         )
 
     def _run_identify(self) -> None:
-        from bot_inventory_items import identify_inventory_slots_dirty
-
         while not self._stop.is_set():
             batch = self._dequeue_identify_batch()
             if not batch:
@@ -526,8 +531,8 @@ class InventoryVisionProcessor:
                 continue
 
             with self._slot_lock:
-                self._slot_items, _scores = identify_inventory_slots_dirty(
-                    snap.bgr,
+                self._slot_items, _scores = TemplateFinder.identify_slots_batch(
+                    snap,
                     inv_rect,
                     self._occupancy,
                     self._slot_items,
@@ -542,37 +547,19 @@ class InventoryVisionProcessor:
                 self._run_frame_buckets_if_idle()
 
     def _run_vision(self) -> None:
-        processed = 0
-        t0 = time.monotonic()
-        min_interval = 1.0 / self._fps if self._fps > 0 else 0.0
-
-        while not self._stop.is_set():
+        def _process(snap: FrameSnapshot) -> None:
             self._poll_control_file()
-            snap = self._buffer.latest_copy()
-            if snap is None or snap.seq <= self._last_processed_seq:
-                self._stop.wait(0.01)
-                continue
+            self._process_frame_fast(snap)
 
-            if snap.seq > self._last_processed_seq + 1:
-                fresh = self._buffer.latest_copy()
-                if fresh is not None:
-                    snap = fresh
-
-            try:
-                self._process_frame_fast(snap)
-            except Exception:
-                pass
-
-            self._last_processed_seq = snap.seq
-            processed += 1
-            elapsed = time.monotonic() - t0
-            if elapsed >= 1.0:
-                self._actual_fps = processed / elapsed
-                processed = 0
-                t0 = time.monotonic()
-
-            if min_interval > 0:
-                self._stop.wait(min_interval)
+        run_modality_loop(
+            frame_queue=self._frame_queue,
+            buffer=self._buffer,
+            stop_event=self._stop,
+            fps=self._fps,
+            process_fn=_process,
+            idle_wait_s=0.01,
+            on_fps=lambda fps: setattr(self, "_actual_fps", fps),
+        )
 
 
 __all__ = [

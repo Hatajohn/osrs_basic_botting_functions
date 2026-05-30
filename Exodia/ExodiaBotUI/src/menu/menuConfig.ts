@@ -17,8 +17,6 @@ export type MenuContext = {
   hasDebugFrame: boolean;
   streamRunning: boolean;
   debugMode: DebugFrameMode;
-  showTemplateTracks: boolean;
-  showInventoryTracks: boolean;
   hasZoomViewport: boolean;
   highRes: boolean;
   panelsVisible: {
@@ -26,6 +24,7 @@ export type MenuContext = {
     tasks: boolean;
     scripts: boolean;
     actions: boolean;
+    clientOnly: boolean;
   };
 };
 
@@ -49,8 +48,6 @@ export type MenuActionId =
   | 'previewFps'
   | 'overlayLayers'
   | 'togglePlayByPlay'
-  | 'toggleShowTemplateTracks'
-  | 'toggleShowInventoryTracks'
   | 'zoomIn'
   | 'zoomOut'
   | 'zoomFit'
@@ -59,6 +56,7 @@ export type MenuActionId =
   | 'toggleTasksPanel'
   | 'toggleScriptsPanel'
   | 'toggleActionsPanel'
+  | 'toggleClientOnly'
   | 'tools'
   | 'about'
   | 'openLogsFolder';
@@ -191,20 +189,6 @@ export const MENUS: MenuDef[] = [
         stubMessage: 'Debug capture modes apply only when the perception stream is offline',
       },
       {
-        id: 'toggleShowTemplateTracks',
-        label: 'Show template tracks',
-        enabledWhen: 'streamRunning',
-        phase: 1,
-        radioGroup: 'templateTracks',
-      },
-      {
-        id: 'toggleShowInventoryTracks',
-        label: 'Show inventory tracks',
-        enabledWhen: 'streamRunning',
-        phase: 1,
-        radioGroup: 'inventoryTracks',
-      },
-      {
         id: 'zoomIn',
         label: 'Zoom in',
         shortcut: 'Ctrl+=',
@@ -234,7 +218,7 @@ export const MENUS: MenuDef[] = [
       },
       {
         id: 'toggleLogPanel',
-        label: 'Log',
+        label: 'Show log panel',
         shortcut: 'Ctrl+Shift+L',
         enabledWhen: 'always',
         phase: 1,
@@ -242,7 +226,7 @@ export const MENUS: MenuDef[] = [
       },
       {
         id: 'toggleTasksPanel',
-        label: 'Bot tasks',
+        label: 'Show bot tasks panel',
         shortcut: 'Ctrl+Shift+T',
         enabledWhen: 'always',
         phase: 1,
@@ -250,7 +234,7 @@ export const MENUS: MenuDef[] = [
       },
       {
         id: 'toggleScriptsPanel',
-        label: 'Scripts',
+        label: 'Show scripts panel',
         shortcut: 'Ctrl+Shift+S',
         enabledWhen: 'always',
         phase: 1,
@@ -258,11 +242,19 @@ export const MENUS: MenuDef[] = [
       },
       {
         id: 'toggleActionsPanel',
-        label: 'Actions',
+        label: 'Show actions panel',
         shortcut: 'Ctrl+Shift+A',
         enabledWhen: 'always',
         phase: 1,
         radioGroup: 'panelActions',
+      },
+      {
+        id: 'toggleClientOnly',
+        label: 'Client view only',
+        shortcut: 'Ctrl+Shift+1',
+        enabledWhen: 'always',
+        phase: 1,
+        radioGroup: 'clientOnly',
       },
       {
         id: 'previewFps',
@@ -358,8 +350,6 @@ export const PHASE1_ENABLED = new Set<MenuActionId>([
   'debugModeRawClient',
   'debugModeGrid',
   'openLogsFolder',
-  'toggleShowTemplateTracks',
-  'toggleShowInventoryTracks',
   'zoomIn',
   'zoomOut',
   'zoomFit',
@@ -368,6 +358,7 @@ export const PHASE1_ENABLED = new Set<MenuActionId>([
   'toggleTasksPanel',
   'toggleScriptsPanel',
   'toggleActionsPanel',
+  'toggleClientOnly',
 ]);
 
 /** Phase 2 enabled items. */

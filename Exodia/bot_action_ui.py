@@ -23,6 +23,7 @@ __all__ = [
     "ACTION_FISHING",
     "ACTION_IDLE",
     "ACTION_NO_UI",
+    "can_seek_fishing_spot",
     "action_code_label",
     "describe_post_click_wait_status",
     "is_action_fishing",
@@ -60,6 +61,23 @@ def should_seek_fishing_spot(action_code: int) -> bool:
 def can_click_fishing_spot(action_code: int) -> bool:
     """Question: Is it safe to click a fishing spot (red idle strip only)?"""
     return is_action_idle(action_code)
+
+
+def can_seek_fishing_spot(
+    action_code: int,
+    *,
+    need_red_before_spot: bool = False,
+) -> bool:
+    """Question: May I click or seek a fishing spot (infernal / stream FSM gating)?
+
+    First spot: code ``2`` when ``need_red_before_spot`` is false. Re-click after a
+    green session requires confident NOT fishing (code ``1``).
+    """
+    if can_click_fishing_spot(action_code):
+        return True
+    if action_code == ACTION_NO_UI and not need_red_before_spot:
+        return True
+    return False
 
 
 def action_code_label(action_code: int) -> str:

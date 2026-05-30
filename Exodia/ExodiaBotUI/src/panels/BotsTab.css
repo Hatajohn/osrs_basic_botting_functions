@@ -170,7 +170,8 @@
 }
 
 .bots-tab__arg input[type='number'],
-.bots-tab__arg input[type='text'] {
+.bots-tab__arg input[type='text'],
+.bots-tab__arg select {
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 4px 6px;

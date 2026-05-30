@@ -1,0 +1,91 @@
+.text-span-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.text-span-list__toolbar {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.text-span-list__stats {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.text-span-list__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.text-span-list__empty,
+.text-span-list__note {
+  margin: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.text-span-list__note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.text-span-list__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.text-span-list__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.text-span-list__table td {
+  padding: 3px 8px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+}
+
+.text-span-list__table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.text-span-list__color {
+  text-transform: lowercase;
+  font-weight: 600;
+}
+
+.text-span-list__text {
+  word-break: break-word;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+
+.text-span-list__num {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--text-muted);
+  width: 3rem;
+}

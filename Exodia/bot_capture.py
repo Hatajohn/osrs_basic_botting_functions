@@ -26,6 +26,7 @@ import numpy as np
 import constants
 
 if TYPE_CHECKING:
+    from bot_frame_dispatch import FrameFanout
     from bot_track import TrackState
 
 Rect = List[int]
@@ -87,13 +88,20 @@ class FrameBuffer:
     _bgr: Optional[np.ndarray] = None
     _client_rect: Rect = field(default_factory=list)
 
-    def publish(self, bgr: np.ndarray, client_rect: Rect) -> int:
+    def publish(self, bgr: np.ndarray, client_rect: Rect) -> FrameSnapshot:
         with self._lock:
             self._seq += 1
             self._ts = time.monotonic()
-            self._bgr = np.asarray(bgr, dtype=np.uint8).copy()
+            copied = np.asarray(bgr, dtype=np.uint8).copy()
+            self._bgr = copied
             self._client_rect = [int(x) for x in client_rect]
-            return self._seq
+            return FrameSnapshot(
+                bgr=copied,
+                seq=self._seq,
+                ts=self._ts,
+                client_rect=list(self._client_rect),
+                age_ms=0.0,
+            )
 
     def latest_copy(self) -> Optional[FrameSnapshot]:
         with self._lock:
@@ -323,11 +331,17 @@ class CaptureProducer:
         client_rect: Rect,
         fps: float,
         grab_fn: Callable[[Rect], np.ndarray],
+        *,
+        fanout: Optional["FrameFanout"] = None,
     ) -> None:
         self._buffer = buffer
         self._client_rect = [int(x) for x in client_rect]
         self._fps = max(_MIN_CAPTURE_FPS, float(fps))
         self._grab_fn = grab_fn
+        self._fanout = fanout
+        from bot_frame_dispatch import frame_fanout_enabled
+
+        self._fanout_enabled = frame_fanout_enabled()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._actual_fps: float = 0.0
@@ -338,6 +352,9 @@ class CaptureProducer:
 
     def set_client_rect(self, rect: Rect) -> None:
         self._client_rect = [int(x) for x in rect]
+
+    def set_fanout(self, fanout: Optional["FrameFanout"]) -> None:
+        self._fanout = fanout
 
     def start(self) -> None:
         if self._thread is not None:
@@ -361,8 +378,15 @@ class CaptureProducer:
             try:
                 bgr = self._grab_fn(self._client_rect)
                 if bgr is not None and bgr.size > 0:
-                    self._buffer.publish(bgr, self._client_rect)
+                    snap = self._buffer.publish(bgr, self._client_rect)
                     grabs += 1
+                    fanout = self._fanout
+                    if (
+                        fanout is not None
+                        and self._fanout_enabled
+                        and fanout.queue_names()
+                    ):
+                        fanout.dispatch(snap)
             except Exception:
                 pass
             elapsed = time.monotonic() - t0
@@ -488,8 +512,18 @@ class CapturePipeline:
         self._static_exclude: List[Rect] = []
         self._pan_flag = False
         self._track_vision = True
+        self._fanout: Optional["FrameFanout"] = None
         self._producer: Optional[CaptureProducer] = None
         self._vision: Optional[VisionProcessor] = None
+
+    @property
+    def fanout(self) -> Optional["FrameFanout"]:
+        return self._fanout
+
+    def set_fanout(self, fanout: Optional["FrameFanout"]) -> None:
+        self._fanout = fanout
+        if self._producer is not None:
+            self._producer.set_fanout(fanout)
 
     def set_geometry(
         self,
@@ -540,7 +574,13 @@ class CapturePipeline:
         if self._producer is not None:
             return
         grab_fn = self._make_grab_fn()
-        self._producer = CaptureProducer(self.buffer, self._client_rect, self._fps, grab_fn)
+        self._producer = CaptureProducer(
+            self.buffer,
+            self._client_rect,
+            self._fps,
+            grab_fn,
+            fanout=self._fanout,
+        )
         use_track = self._track_vision if track_vision is None else bool(track_vision)
         vfps = self._vision_fps
         if vfps <= 0:
@@ -614,12 +654,15 @@ def start_capture_pipeline(
     fps: Optional[float] = None,
     vision_fps: float = 0.0,
     track_vision: bool = True,
+    fanout: Optional["FrameFanout"] = None,
 ) -> CapturePipeline:
     global _pipeline
     with _pipeline_lock:
         _stop_pipeline_locked()
         pipe = CapturePipeline(client_rect, fps=fps, vision_fps=vision_fps)
         pipe.set_track_vision(track_vision)
+        if fanout is not None:
+            pipe.set_fanout(fanout)
         pipe.start(track_vision=track_vision)
         _pipeline = pipe
         return pipe

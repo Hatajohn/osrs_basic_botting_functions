@@ -1,15 +1,20 @@
 """
-Temporal world-object tracking on template detections (Phase 0b).
+Temporal world-object tracking on template detections (Phase 0b/0c).
 
 Associates per-frame ``WorldHit`` dicts from ``WorldVisionProcessor`` into
 persistent ``track_id``s with velocity and stability flags for ``/meta`` consumers.
+
+Phase 0c: pan-aware freeze/clear during camera pan (control file + motion gate),
+optional ``calcOpticalFlowPyrLK`` patch refine between template re-matches.
 """
 from __future__ import annotations
 
+import os
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
+import cv2
 import numpy as np
 from scipy.spatial import distance as dist
 
@@ -23,6 +28,8 @@ __all__ = [
     "WorldObjectTrackerConfig",
     "WorldObjectTrackerState",
     "default_world_tracker_config",
+    "playspace_motion_magnitude",
+    "resolve_world_pan_active",
     "tracks_to_dict",
     "update_world_tracks",
 ]
@@ -41,6 +48,33 @@ class WorldObjectTrack:
     stable: bool
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    raw = os.environ.get(key, "").strip().lower()
+    if not raw:
+        return default
+    return raw not in ("0", "false", "no", "off")
+
+
+def _env_float(key: str, default: float) -> float:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = os.environ.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class WorldObjectTrackerConfig:
     max_distance: float = 50.0
@@ -49,6 +83,13 @@ class WorldObjectTrackerConfig:
     stable_variance_threshold: float = 64.0
     velocity_history: int = 3
     extrapolate_on_miss: bool = True
+    motion_pan_enabled: bool = True
+    motion_pan_threshold: float = 18.0
+    pan_settle_frames: int = 2
+    optical_flow_refine: bool = False
+    flow_patch_radius: int = 28
+    flow_win_size: int = 21
+    flow_max_level: int = 2
 
 
 def default_world_tracker_config(
@@ -59,6 +100,12 @@ def default_world_tracker_config(
     return WorldObjectTrackerConfig(
         max_distance=scaled_max_distance(client_w),
         max_missed=max(2, int(round(vision_fps * 0.5))),
+        motion_pan_enabled=_env_bool("EXODIA_WORLD_MOTION_PAN", True),
+        motion_pan_threshold=_env_float("EXODIA_WORLD_MOTION_PAN_THRESHOLD", 18.0),
+        pan_settle_frames=max(0, _env_int("EXODIA_WORLD_PAN_SETTLE_FRAMES", 2)),
+        optical_flow_refine=_env_bool("EXODIA_WORLD_FLOW_REFINE", False),
+        flow_patch_radius=max(12, _env_int("EXODIA_WORLD_FLOW_PATCH_RADIUS", 28)),
+        extrapolate_on_miss=not _env_bool("EXODIA_WORLD_FLOW_REFINE", False),
     )
 
 
@@ -85,11 +132,141 @@ class WorldObjectTrackerState:
     _next_id: int = 0
     _last_ts: float = 0.0
     pan_in_progress: bool = False
+    pan_settle_remaining: int = 0
+    _prev_gray: Optional[np.ndarray] = None
+    last_motion_magnitude: float = 0.0
 
 
 def _hit_centroid(hit: WorldHitDict) -> Tuple[float, float]:
     xy = hit.get("client_xy") or [0, 0]
     return float(xy[0]), float(xy[1])
+
+
+def _client_gray(frame_bgr: np.ndarray) -> Optional[np.ndarray]:
+    if frame_bgr is None or not getattr(frame_bgr, "size", 0):
+        return None
+    if frame_bgr.ndim == 2:
+        return np.asarray(frame_bgr, dtype=np.uint8)
+    return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+
+
+def playspace_motion_magnitude(
+    prev_bgr: Optional[np.ndarray],
+    curr_bgr: np.ndarray,
+    *,
+    inventory_rect: Optional[Sequence[int]] = None,
+) -> float:
+    """Mean playspace diff (0–255 scale) — large values indicate camera pan."""
+    from bot_search import playspace_search_roi
+    from bot_track import motion_mask, playspace_bgr_from_frame
+
+    prev_play = playspace_bgr_from_frame(prev_bgr) if prev_bgr is not None else None
+    curr_play = playspace_bgr_from_frame(curr_bgr)
+    if curr_play is None:
+        return 0.0
+
+    exclude: List[List[int]] = []
+    if inventory_rect is not None and len(inventory_rect) == 4:
+        h0, w0 = curr_bgr.shape[:2]
+        roi = playspace_search_roi(w0, h0, inventory_rect=inventory_rect)
+        ox, oy = (int(roi[0]), int(roi[1])) if roi else (0, 0)
+        exclude.append(
+            [
+                int(inventory_rect[0]) - ox,
+                int(inventory_rect[1]) - oy,
+                int(inventory_rect[2]),
+                int(inventory_rect[3]),
+            ]
+        )
+
+    mask = motion_mask(prev_play, curr_play, exclude or None)
+    return float(mask.mean()) if mask.size else 0.0
+
+
+def resolve_world_pan_active(
+    state: WorldObjectTrackerState,
+    *,
+    control_pan: bool,
+    motion_magnitude: float,
+    config: Optional[WorldObjectTrackerConfig] = None,
+) -> bool:
+    """
+    Combine control-file pan, motion gate, and post-pan settle countdown.
+
+    While active, ``update_world_tracks`` clears tracks instead of associating.
+    """
+    cfg = config or WorldObjectTrackerConfig()
+    motion_pan = (
+        cfg.motion_pan_enabled
+        and motion_magnitude >= cfg.motion_pan_threshold
+    )
+    actively_panning = bool(control_pan) or motion_pan
+    state.last_motion_magnitude = float(motion_magnitude)
+
+    if actively_panning:
+        state.pan_settle_remaining = cfg.pan_settle_frames
+        state.pan_in_progress = True
+        return True
+
+    if state.pan_settle_remaining > 0:
+        state.pan_settle_remaining -= 1
+        state.pan_in_progress = True
+        return True
+
+    state.pan_in_progress = False
+    return False
+
+
+def _refine_tracks_with_flow(
+    state: WorldObjectTrackerState,
+    curr_gray: np.ndarray,
+    dt: float,
+    cfg: WorldObjectTrackerConfig,
+) -> None:
+    prev_gray = state._prev_gray
+    if prev_gray is None or prev_gray.shape != curr_gray.shape or not state.tracks:
+        return
+
+    win = max(7, int(cfg.flow_win_size) | 1)
+    half = win // 2
+    criteria = (
+        cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+        10,
+        0.03,
+    )
+    lk_kwargs = dict(
+        winSize=(win, win),
+        maxLevel=int(cfg.flow_max_level),
+        criteria=criteria,
+    )
+
+    for track in state.tracks.values():
+        cx, cy = track.client_xy
+        if cx < half or cy < half or cx >= curr_gray.shape[1] - half or cy >= curr_gray.shape[0] - half:
+            continue
+        pts = np.array([[float(cx), float(cy)]], dtype=np.float32).reshape(-1, 1, 2)
+        next_pts, status, _err = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, pts, None, **lk_kwargs)
+        if status is None or int(status.ravel()[0]) != 1:
+            continue
+        nx, ny = float(next_pts.reshape(-1, 2)[0, 0]), float(next_pts.reshape(-1, 2)[0, 1])
+        dx = int(round(nx - cx))
+        dy = int(round(ny - cy))
+        if dx == 0 and dy == 0:
+            continue
+        track.client_xy = (cx + dx, cy + dy)
+        sx, sy = track.screen_xy
+        track.screen_xy = (sx + dx, sy + dy)
+        track.positions.append(track.client_xy)
+        if dt > 1e-6:
+            track.velocity_xy = (dx / dt, dy / dt)
+
+
+def _store_prev_gray(state: WorldObjectTrackerState, frame_bgr: Optional[np.ndarray]) -> None:
+    gray = _client_gray(frame_bgr) if frame_bgr is not None else None
+    if gray is None:
+        state._prev_gray = None
+        return
+    state._prev_gray = gray.copy()
 
 
 def _hit_screen_xy(hit: WorldHitDict) -> Tuple[int, int]:
@@ -265,6 +442,9 @@ def update_world_tracks(
     client_w: int,
     config: Optional[WorldObjectTrackerConfig] = None,
     vision_fps: float = 10.0,
+    frame_bgr: Optional[np.ndarray] = None,
+    control_pan: bool = False,
+    motion_magnitude: float = 0.0,
 ) -> List[WorldObjectTrack]:
     """
     Associate raw template hits to persistent tracks and return the active set.
@@ -272,15 +452,29 @@ def update_world_tracks(
     Tracks with ``missed_frames > max_missed`` are dropped. Unmatched hits spawn
     new ``track_id``s. Same-template greedy centroid matching uses
     ``scaled_max_distance(client_w)``.
+
+    During pan (control file, motion gate, or settle countdown) tracks are cleared.
+    When ``optical_flow_refine`` is enabled, LK flow nudges positions between matches.
     """
     cfg = config or default_world_tracker_config(client_w, vision_fps=vision_fps)
-    if state.pan_in_progress:
+    pan_active = resolve_world_pan_active(
+        state,
+        control_pan=control_pan,
+        motion_magnitude=motion_magnitude,
+        config=cfg,
+    )
+    if pan_active:
         state.tracks.clear()
         state._last_ts = ts
+        _store_prev_gray(state, frame_bgr)
         return []
 
     dt = ts - state._last_ts if state._last_ts > 0 else (1.0 / vision_fps if vision_fps > 0 else 0.1)
     state._last_ts = ts
+
+    curr_gray = _client_gray(frame_bgr) if frame_bgr is not None else None
+    if cfg.optical_flow_refine and curr_gray is not None:
+        _refine_tracks_with_flow(state, curr_gray, dt, cfg)
 
     hits_by_template: Dict[str, List[WorldHitDict]] = {}
     for hit in hits:
@@ -304,6 +498,7 @@ def update_world_tracks(
     for tid in drop:
         state.tracks.pop(tid, None)
 
+    _store_prev_gray(state, frame_bgr)
     return [_public_track(t) for t in state.tracks.values()]
 
 

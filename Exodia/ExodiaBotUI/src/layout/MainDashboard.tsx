@@ -2,6 +2,7 @@ import { useRef, type RefObject } from 'react';
 import { ActionsPanel } from '../panels/ActionsPanel';
 import { BotTasksPanel } from '../panels/BotTasksPanel';
 import { LogPanel } from '../panels/LogPanel';
+import { TextDebugPanel } from '../panels/TextDebugPanel';
 import { RuneLiteViewPanel } from '../panels/RuneLiteViewPanel';
 import { ScriptsPanel } from '../panels/ScriptsPanel';
 import type { ZoomViewportHandle } from '../components/ZoomableImageViewport';
@@ -31,8 +32,6 @@ type MainDashboardProps = {
   streamMeta?: StreamMeta | null;
   showStreamDebugOverlay?: boolean;
   onToggleStreamDebugOverlay?: (show: boolean) => void;
-  showTemplateTracks?: boolean;
-  showInventoryTracks?: boolean;
   worldHitCount?: number;
   debugLoading: boolean;
   calibrating: boolean;
@@ -44,6 +43,8 @@ type MainDashboardProps = {
   previewLive?: boolean;
   onTogglePreviewLive?: (live: boolean) => void;
   botRunning?: boolean;
+  /** Shared-stream FSM bot running — keep normal stream preview in RuneLite view. */
+  keepStreamPreview?: boolean;
   overlayAnnotations?: OverlayAnnotationEntry[];
   latestActionPreview?: ActionClickPreview | null;
   onPushOverlayAnnotation?: (preview: ActionClickPreview, opts?: PushAnnotationOpts) => string;
@@ -72,8 +73,6 @@ export function MainDashboard({
   streamMeta,
   showStreamDebugOverlay,
   onToggleStreamDebugOverlay,
-  showTemplateTracks,
-  showInventoryTracks,
   worldHitCount,
   debugLoading,
   calibrating,
@@ -85,6 +84,7 @@ export function MainDashboard({
   previewLive,
   onTogglePreviewLive,
   botRunning,
+  keepStreamPreview = false,
   overlayAnnotations = [],
   latestActionPreview = null,
   onPushOverlayAnnotation,
@@ -101,6 +101,8 @@ export function MainDashboard({
   const {
     togglePanelCollapsed,
     effectiveLogFlex,
+    effectiveLogTextFlex,
+    effectiveLogConsoleFlex,
     effectiveCenterFlex,
     effectiveScriptsColumnFlex,
     effectiveRuneliteFlex,
@@ -111,8 +113,14 @@ export function MainDashboard({
     tasksCollapsed,
     scriptsCollapsed,
     actionsCollapsed,
+    logHidden,
+    tasksHidden,
+    scriptsHidden,
+    actionsHidden,
     rightStripCollapsed,
+    rightColumnHidden,
     resizeLog,
+    resizeLogText,
     resizeScripts,
     resizeTasks,
     resizeActions,
@@ -122,19 +130,40 @@ export function MainDashboard({
 
   return (
     <main ref={resolvedContainerRef} className="dashboard">
-      <section
-        className={`dashboard__pane${logCollapsed ? ' dashboard__pane--strip' : ''}`}
-        style={{ flex: effectiveLogFlex }}
-      >
-        <LogPanel
-          entries={logEntries}
-          onClear={onClearLog}
-          collapsed={logCollapsed}
-          onToggleCollapse={toggle('log')}
-        />
-      </section>
+      {!logHidden && (
+        <section
+          className={`dashboard__log-column${logCollapsed ? ' dashboard__log-column--strip' : ''}`}
+          style={{ flex: effectiveLogFlex }}
+        >
+          {logCollapsed ? (
+            <div className="dashboard__pane dashboard__pane--strip">
+              <LogPanel
+                entries={logEntries}
+                onClear={onClearLog}
+                collapsed
+                onToggleCollapse={toggle('log')}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="dashboard__pane" style={{ flex: effectiveLogTextFlex }}>
+                <TextDebugPanel streamMeta={streamMeta} streamPortUp={streamPortUp} />
+              </div>
+              <Splitter orientation="horizontal" onDrag={resizeLogText} />
+              <div className="dashboard__pane" style={{ flex: effectiveLogConsoleFlex }}>
+                <LogPanel
+                  entries={logEntries}
+                  onClear={onClearLog}
+                  collapsed={false}
+                  onToggleCollapse={toggle('log')}
+                />
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
-      {!logCollapsed && <Splitter orientation="vertical" onDrag={resizeLog} />}
+      {!logHidden && !logCollapsed && <Splitter orientation="vertical" onDrag={resizeLog} />}
 
       <section className="dashboard__center" style={{ flex: effectiveCenterFlex }}>
         <div className="dashboard__pane" style={{ flex: effectiveRuneliteFlex }}>
@@ -149,6 +178,7 @@ export function MainDashboard({
             previewLive={previewLive}
             onTogglePreviewLive={onTogglePreviewLive}
             botRunning={botRunning}
+            keepStreamPreview={keepStreamPreview}
             streamPortUp={streamPortUp}
             streamRunning={streamRunning}
             streamStale={streamStale}
@@ -159,8 +189,6 @@ export function MainDashboard({
             streamMeta={streamMeta}
             showStreamDebugOverlay={showStreamDebugOverlay}
             onToggleStreamDebugOverlay={onToggleStreamDebugOverlay}
-            showTemplateTracks={showTemplateTracks}
-            showInventoryTracks={showInventoryTracks}
             worldHitCount={worldHitCount}
             overlayAnnotations={overlayAnnotations}
             latestActionPreview={latestActionPreview}
@@ -170,61 +198,73 @@ export function MainDashboard({
           />
         </div>
 
-        {!tasksCollapsed && <Splitter orientation="horizontal" onDrag={resizeTasks} />}
+        {!tasksHidden && !tasksCollapsed && <Splitter orientation="horizontal" onDrag={resizeTasks} />}
 
-        <div
-          className={`dashboard__pane${tasksCollapsed ? ' dashboard__pane--header-only' : ''}`}
-          style={{ flex: effectiveTasksFlex }}
-        >
-          <BotTasksPanel
-            debugResult={debugResult}
-            loading={debugLoading}
-            botRun={botRun}
-            runtimeStatus={runtimeStatus}
-            streamRunning={streamRunning}
-            collapsed={tasksCollapsed}
-            onToggleCollapse={toggle('tasks')}
-          />
-        </div>
-      </section>
-
-      {!rightStripCollapsed && <Splitter orientation="vertical" onDrag={resizeScripts} />}
-
-      <section
-        className={`dashboard__right${rightStripCollapsed ? ' dashboard__right--strip' : ''}`}
-        style={{ flex: effectiveScriptsColumnFlex }}
-      >
-        <div
-          className={`dashboard__pane${scriptsCollapsed || rightStripCollapsed ? ' dashboard__pane--header-only' : ''}${rightStripCollapsed ? ' dashboard__pane--strip-slot' : ''}`}
-          style={{ flex: effectiveScriptsFlex }}
-        >
-          <ScriptsPanel
-            collapsed={scriptsCollapsed}
-            onToggleCollapse={toggle('scripts')}
-            stripMode={rightStripCollapsed}
-          />
-        </div>
-
-        {!scriptsCollapsed && !actionsCollapsed && !rightStripCollapsed && (
-          <Splitter orientation="horizontal" onDrag={resizeActions} />
+        {!tasksHidden && (
+          <div
+            className={`dashboard__pane${tasksCollapsed ? ' dashboard__pane--header-only' : ''}`}
+            style={{ flex: effectiveTasksFlex }}
+          >
+            <BotTasksPanel
+              debugResult={debugResult}
+              loading={debugLoading}
+              botRun={botRun}
+              runtimeStatus={runtimeStatus}
+              streamRunning={streamRunning}
+              collapsed={tasksCollapsed}
+              onToggleCollapse={toggle('tasks')}
+            />
+          </div>
         )}
-
-        <div
-          className={`dashboard__pane${actionsCollapsed || rightStripCollapsed ? ' dashboard__pane--header-only' : ''}${rightStripCollapsed ? ' dashboard__pane--strip-slot' : ''}`}
-          style={{ flex: effectiveActionsFlex }}
-        >
-          <ActionsPanel
-            botRunning={botRunning}
-            latestActionPreview={latestActionPreview}
-            onPushOverlayAnnotation={onPushOverlayAnnotation}
-            onClearOverlayGroup={onClearOverlayGroup}
-            onPrepareClickPreview={onPrepareClickPreview}
-            collapsed={actionsCollapsed}
-            onToggleCollapse={toggle('actions')}
-            stripMode={rightStripCollapsed}
-          />
-        </div>
       </section>
+
+      {!rightColumnHidden && !rightStripCollapsed && (
+        <Splitter orientation="vertical" onDrag={resizeScripts} />
+      )}
+
+      {!rightColumnHidden && (
+        <section
+          className={`dashboard__right${rightStripCollapsed ? ' dashboard__right--strip' : ''}`}
+          style={{ flex: effectiveScriptsColumnFlex }}
+        >
+          {!scriptsHidden && (
+            <div
+              className={`dashboard__pane${scriptsCollapsed || rightStripCollapsed ? ' dashboard__pane--header-only' : ''}${rightStripCollapsed ? ' dashboard__pane--strip-slot' : ''}`}
+              style={{ flex: effectiveScriptsFlex }}
+            >
+              <ScriptsPanel
+                collapsed={scriptsCollapsed}
+                onToggleCollapse={toggle('scripts')}
+                stripMode={rightStripCollapsed}
+              />
+            </div>
+          )}
+
+          {!scriptsHidden &&
+            !actionsHidden &&
+            !scriptsCollapsed &&
+            !actionsCollapsed &&
+            !rightStripCollapsed && <Splitter orientation="horizontal" onDrag={resizeActions} />}
+
+          {!actionsHidden && (
+            <div
+              className={`dashboard__pane${actionsCollapsed || rightStripCollapsed ? ' dashboard__pane--header-only' : ''}${rightStripCollapsed ? ' dashboard__pane--strip-slot' : ''}`}
+              style={{ flex: effectiveActionsFlex }}
+            >
+              <ActionsPanel
+                botRunning={botRunning}
+                latestActionPreview={latestActionPreview}
+                onPushOverlayAnnotation={onPushOverlayAnnotation}
+                onClearOverlayGroup={onClearOverlayGroup}
+                onPrepareClickPreview={onPrepareClickPreview}
+                collapsed={actionsCollapsed}
+                onToggleCollapse={toggle('actions')}
+                stripMode={rightStripCollapsed}
+              />
+            </div>
+          )}
+        </section>
+      )}
     </main>
   );
 }

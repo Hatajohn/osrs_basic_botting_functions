@@ -10,6 +10,7 @@
   overflow: hidden;
 }
 
+.dashboard__log-column,
 .dashboard__center,
 .dashboard__right {
   display: flex;
@@ -17,6 +18,18 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.dashboard__log-column--strip {
+  flex-shrink: 0;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  overflow: hidden;
+}
+
+.dashboard__log-column > .dashboard__pane {
+  min-height: 72px;
 }
 
 .dashboard__pane {

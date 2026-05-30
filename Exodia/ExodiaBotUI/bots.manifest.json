@@ -2,6 +2,22 @@
   "version": 1,
   "bots": [
     {
+      "id": "basic_stream_fishing",
+      "title": "Basic stream fishing",
+      "kind": "bot",
+      "moduleArgv": ["-m", "BasicStreamFishing.basic_stream_fishing"],
+      "defaultArgv": [],
+      "runtimeScriptId": "basic_stream_fishing",
+      "runtimeCommands": ["pause", "resume", "stop", "snapshot", "step", "health"],
+      "requiresStream": true,
+      "usesSharedStream": true,
+      "note": "Infernal seek/fish FSM on perception stream only (no BotEyes)",
+      "args": [
+        { "name": "maxCycles", "flag": "--max-cycles", "type": "number", "default": 0, "label": "Max FSM steps (0 = unlimited)" },
+        { "name": "interval", "flag": "--interval", "type": "number", "default": 1, "label": "Poll interval (seconds)" }
+      ]
+    },
+    {
       "id": "sacred_eel",
       "title": "Sacred eel fishing",
       "kind": "bot",
@@ -9,6 +25,7 @@
       "defaultArgv": [],
       "runtimeScriptId": "sacred_eel_fishing",
       "runtimeCommands": ["pause", "resume", "stop", "snapshot", "step", "health"],
+      "requiresStream": true,
       "args": [
         { "name": "maxCycles", "flag": "--max-cycles", "type": "number", "default": 30, "label": "Max FSM steps (0 = unlimited)" },
         { "name": "interval", "flag": "--interval", "type": "number", "default": 6, "label": "Poll interval (seconds)" }
@@ -22,6 +39,7 @@
       "defaultArgv": ["--brain", "reference_fishing", "--stream-port", "8765"],
       "runtimeScriptId": "run_agent",
       "runtimeCommands": ["pause", "resume", "stop", "health"],
+      "requiresStream": true,
       "note": "Started from Bots tab with loaded markdown specs",
       "args": [
         { "name": "maxMs", "flag": "--max-ms", "type": "number", "default": 0, "label": "Wall-clock cap (ms, 0 = unlimited)" },
@@ -36,6 +54,7 @@
       "defaultArgv": ["--brain", "idle", "--stream-port", "8765"],
       "runtimeScriptId": "run_agent",
       "runtimeCommands": ["pause", "resume", "stop", "health"],
+      "requiresStream": true,
       "args": [
         { "name": "maxMs", "flag": "--max-ms", "type": "number", "default": 0, "label": "Wall-clock cap (ms, 0 = unlimited)" }
       ]

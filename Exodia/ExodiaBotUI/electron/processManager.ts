@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import type {
@@ -9,7 +10,9 @@ import type {
   StartBotResult,
   StopBotResult,
 } from '../shared/bots';
+import { defaultClientRectPath } from './clientRect';
 import {
+  botRequiresStream,
   botUsesStream,
   buildArgvFromArgs,
   findBot,
@@ -25,6 +28,11 @@ export type LogSink = (line: string, stream: 'stdout' | 'stderr' | 'system') => 
 export type ProcessManagerEvents = {
   onRunUpdate: (run: BotRunInfo | null) => void;
   onStatusUpdate: (status: RuntimeStatusPayload | null) => void;
+};
+
+export type StreamBotStartDeps = {
+  /** Verify perception stream is running and healthy before spawning stream bots. */
+  ensureStreamForBot: () => Promise<{ ok: boolean; error?: string }>;
 };
 
 function pipeLines(
@@ -45,10 +53,16 @@ export class ProcessManager {
   private events: ProcessManagerEvents;
   private statusWatcher: StatusWatcher;
   private killTimer: ReturnType<typeof setTimeout> | null = null;
+  private streamDeps: StreamBotStartDeps | null;
 
-  constructor(sink: LogSink, events: ProcessManagerEvents) {
+  constructor(
+    sink: LogSink,
+    events: ProcessManagerEvents,
+    streamDeps?: StreamBotStartDeps,
+  ) {
     this.sink = sink;
     this.events = events;
+    this.streamDeps = streamDeps ?? null;
     this.statusWatcher = new StatusWatcher((status) => {
       if (this.run && status?.paused !== undefined) {
         const nextState: BotProcessState = status.paused ? 'paused' : 'running';
@@ -108,11 +122,36 @@ export class ProcessManager {
       return { ok: false, error };
     }
 
+    const settings = loadSettings();
+    const streamPort = settings.streamPort ?? 8765;
+    const needsStream = botRequiresStream(bot);
+
+    if (needsStream) {
+      const rectPath = defaultClientRectPath(resolvedExodiaRoot);
+      if (!fs.existsSync(rectPath)) {
+        const error = 'perception stream required — calibrate client rect first (client_rect.json)';
+        this.sink(error, 'stderr');
+        return { ok: false, error };
+      }
+      if (!this.streamDeps) {
+        const error = 'perception stream required';
+        this.sink(error, 'stderr');
+        return { ok: false, error };
+      }
+      const streamReady = await this.streamDeps.ensureStreamForBot();
+      if (!streamReady.ok) {
+        const error = streamReady.error ?? 'perception stream required';
+        this.sink(error, 'stderr');
+        return { ok: false, error };
+      }
+    }
+
     const userArgv = buildArgvFromArgs(bot, argValues);
     const specArgv = (specPaths ?? []).flatMap((specPath) => ['--spec', specPath]);
     const spawnArgs = this.buildSpawnArgs(bot, resolvedExodiaRoot, [...userArgv, ...specArgv]);
     const runId = randomUUID();
     const usesStream = botUsesStream(bot);
+    const usesSharedStream = bot.usesSharedStream === true;
 
     const run: BotRunInfo = {
       runId,
@@ -125,6 +164,7 @@ export class ProcessManager {
       runtimeScriptId: bot.runtimeScriptId,
       runtimeCommands: [...bot.runtimeCommands],
       usesStream,
+      usesSharedStream,
     };
     this.run = run;
     this.events.onRunUpdate(run);
@@ -142,6 +182,12 @@ export class ProcessManager {
           EXODIA_ROOT: resolvedExodiaRoot,
           EXODIA_LOG_DIR: resolvedLogsDir,
           PYTHONUNBUFFERED: '1',
+          ...(needsStream
+            ? {
+                EXODIA_STREAM_PORT: String(streamPort),
+                EXODIA_CAPTURE_STREAM: '1',
+              }
+            : {}),
         },
       });
 

@@ -1,4 +1,4 @@
-import type { ActionClickPreview, StreamMeta } from '../../shared/ipc';
+import type { ActionClickPreview, StreamMeta, WorldPerceptionMeta } from '../../shared/ipc';
 
 export type PointLayout = {
   left: string;
@@ -56,6 +56,13 @@ export type PerceptionHudWorldMarker = {
   left: string;
   top: string;
   color: string;
+  /** Persistent world track id (Phase 0); absent for legacy ephemeral hits. */
+  trackId?: number;
+  stable?: boolean;
+  /** Client-space px/s — used to draw velocity arrow on overlay. */
+  velocityXY?: [number, number];
+  /** Arrow tip as image-layer percentage (when velocity is non-trivial). */
+  velocityEnd?: DisplayPoint;
 };
 
 export type PerceptionHudInvWatchMarker = {
@@ -102,6 +109,136 @@ const GRID_TILE_W = 50;
 const GRID_TILE_H = 45;
 const GRID_GAP_X = 7;
 const GRID_GAP_Y = 5;
+
+function templateStem(stem: string): string {
+  return stem.trim().toLowerCase().endsWith('.png') ? stem.slice(0, -4) : stem;
+}
+
+function clientDistance(a: [number, number], b: [number, number]): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+type WorldMarkerDraft = PerceptionHudWorldMarker & { clientXY: [number, number] };
+
+function draftWorldHitMarker(
+  hit: { template: string; client_xy?: number[]; score?: number },
+  index: number,
+  frameWidth: number,
+  frameHeight: number,
+): WorldMarkerDraft | null {
+  const template = hit.template ?? '';
+  const xy = hit.client_xy ?? [0, 0];
+  const pos = clientXYToPercent(frameWidth, frameHeight, [xy[0], xy[1]]);
+  if (!pos) return null;
+  const score = typeof hit.score === 'number' ? hit.score : 0;
+  return {
+    key: `world-hit-${index}-${template}`,
+    template,
+    score,
+    left: pos.left,
+    top: pos.top,
+    color: templateTrackColor(template),
+    clientXY: [xy[0], xy[1]],
+  };
+}
+
+function draftWorldTrackMarker(
+  track: {
+    track_id: number;
+    template: string;
+    client_xy?: number[];
+    score?: number;
+    velocity_xy?: number[];
+    stable?: boolean;
+  },
+  frameWidth: number,
+  frameHeight: number,
+): WorldMarkerDraft | null {
+  const template = track.template ?? '';
+  const xy = track.client_xy ?? [0, 0];
+  const pos = clientXYToPercent(frameWidth, frameHeight, [xy[0], xy[1]]);
+  if (!pos) return null;
+  const score = typeof track.score === 'number' ? track.score : 0;
+
+  let velocityEnd: DisplayPoint | undefined;
+  let velocityXY: [number, number] | undefined;
+  const VELOCITY_ARROW_SEC = 0.2;
+  const MIN_VELOCITY_PX_S = 4;
+  if (Array.isArray(track.velocity_xy) && track.velocity_xy.length >= 2) {
+    const vx = Number(track.velocity_xy[0]);
+    const vy = Number(track.velocity_xy[1]);
+    if (Number.isFinite(vx) && Number.isFinite(vy)) {
+      velocityXY = [vx, vy];
+      const speed = Math.hypot(vx, vy);
+      if (speed >= MIN_VELOCITY_PX_S) {
+        const endX = xy[0] + vx * VELOCITY_ARROW_SEC;
+        const endY = xy[1] + vy * VELOCITY_ARROW_SEC;
+        velocityEnd = clientXYToPercent(frameWidth, frameHeight, [endX, endY]) ?? undefined;
+      }
+    }
+  }
+
+  return {
+    key: `world-track-${track.track_id}`,
+    template,
+    score,
+    left: pos.left,
+    top: pos.top,
+    color: templateTrackColor(template),
+    trackId: track.track_id,
+    stable: Boolean(track.stable),
+    velocityXY,
+    velocityEnd,
+    clientXY: [xy[0], xy[1]],
+  };
+}
+
+/** Merge persistent tracks onto ephemeral hits — hits always render for live detections. */
+function buildWorldMarkers(
+  world: WorldPerceptionMeta | undefined,
+  frameWidth: number,
+  frameHeight: number,
+): PerceptionHudWorldMarker[] {
+  const hits = world?.hits ?? [];
+  const tracks = world?.tracks ?? [];
+  const DEDUPE_PX = 48;
+
+  const drafts: WorldMarkerDraft[] = [];
+  for (const [i, hit] of hits.entries()) {
+    const draft = draftWorldHitMarker(hit, i, frameWidth, frameHeight);
+    if (draft) drafts.push(draft);
+  }
+
+  for (const track of tracks) {
+    if (typeof track.track_id !== 'number') continue;
+    const draft = draftWorldTrackMarker(track, frameWidth, frameHeight);
+    if (!draft) continue;
+    const stem = templateStem(draft.template);
+    const idx = drafts.findIndex(
+      (m) =>
+        templateStem(m.template) === stem &&
+        clientDistance(m.clientXY, draft.clientXY) < DEDUPE_PX,
+    );
+    if (idx >= 0) {
+      drafts[idx] = { ...draft, key: drafts[idx]!.key };
+    } else {
+      drafts.push(draft);
+    }
+  }
+
+  return drafts.map(({ clientXY: _clientXY, ...marker }) => marker);
+}
+
+function perceptionFrameSize(
+  img: HTMLImageElement,
+  meta: StreamMeta | null | undefined,
+): { frameWidth: number; frameHeight: number } | null {
+  if (img.naturalWidth <= 0 || img.naturalHeight <= 0) return null;
+  const frameWidth = meta?.frame_width ?? img.naturalWidth;
+  const frameHeight = meta?.frame_height ?? img.naturalHeight;
+  if (frameWidth <= 0 || frameHeight <= 0) return null;
+  return { frameWidth, frameHeight };
+}
 
 function templateTrackColor(stem: string): string {
   let hash = 0;
@@ -213,11 +350,12 @@ export function buildItemIdIndex(
 }
 
 export function computePerceptionHudLayout(
+  img: HTMLImageElement,
   meta: StreamMeta | null | undefined,
 ): PerceptionHudLayout | null {
-  const frameWidth = meta?.frame_width ?? 0;
-  const frameHeight = meta?.frame_height ?? 0;
-  if (frameWidth <= 0 || frameHeight <= 0) return null;
+  const frame = perceptionFrameSize(img, meta);
+  if (!frame) return null;
+  const { frameWidth, frameHeight } = frame;
 
   const inventory = meta?.perception?.inventory;
   const world = meta?.perception?.world;
@@ -262,20 +400,7 @@ export function computePerceptionHudLayout(
     }
   }
 
-  const worldMarkers: PerceptionHudWorldMarker[] = [];
-  for (const [i, hit] of (world?.hits ?? []).entries()) {
-    const xy = hit.client_xy ?? [0, 0];
-    const pos = clientXYToPercent(frameWidth, frameHeight, [xy[0], xy[1]]);
-    if (!pos) continue;
-    worldMarkers.push({
-      key: `world-${i}-${hit.template}`,
-      template: hit.template,
-      score: hit.score,
-      left: pos.left,
-      top: pos.top,
-      color: templateTrackColor(hit.template),
-    });
-  }
+  const worldMarkers = buildWorldMarkers(world, frameWidth, frameHeight);
 
   const invWatchMarkers: PerceptionHudInvWatchMarker[] = [];
   const invWatch = inventory?.inventory_watch ?? [];

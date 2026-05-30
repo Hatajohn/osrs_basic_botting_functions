@@ -5,7 +5,11 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { loadSettings, resolveSettings } from './settings';
 import { pythonExists } from './paths';
 import { defaultClientRectPath } from './clientRect';
-import { killListenersOnPort, killPerceptionStreamProcesses } from './streamPortKill';
+import {
+  killListenersOnPort,
+  killOrphanCapturePowerShell,
+  killPerceptionStreamProcesses,
+} from './streamPortKill';
 import {
   controlFilePath as watchlistControlFilePath,
   enabledInventoryTemplates,
@@ -56,11 +60,33 @@ export type WorldPerceptionMeta = {
   templates_scanned?: string[];
   template_stats?: WorldTemplateStat[];
   vision_fps?: number;
+  pan_in_progress?: boolean;
+  motion_magnitude?: number;
+};
+
+export type TextSpanMeta = {
+  text: string;
+  color: string;
+  bbox: number[];
+  conf?: number;
+};
+
+export type TextPerceptionMeta = {
+  processed_seq?: number;
+  capture_seq?: number;
+  span_count?: number;
+  client_w?: number;
+  client_h?: number;
+  scan_ms?: number;
+  vision_fps?: number;
+  spans?: TextSpanMeta[];
+  fishing_spans?: TextSpanMeta[];
 };
 
 export type PerceptionMeta = {
   inventory?: InventoryPerceptionMeta;
   world?: WorldPerceptionMeta;
+  text?: TextPerceptionMeta;
 };
 
 export type StreamMeta = {
@@ -212,6 +238,8 @@ export class StreamProcessManager {
   private sink: LogSink;
   private lastError: string | undefined;
   private spawnedByUs = false;
+  private lastCaptureSeq: number | undefined;
+  private lastCaptureSeqChangeAt = 0;
 
   constructor(sink: LogSink) {
     this.sink = sink;
@@ -237,24 +265,50 @@ export class StreamProcessManager {
     return false;
   }
 
+  private noteCaptureSeq(seq: number | undefined): string | undefined {
+    if (seq == null) {
+      return undefined;
+    }
+    const now = Date.now();
+    if (this.lastCaptureSeq !== seq) {
+      this.lastCaptureSeq = seq;
+      this.lastCaptureSeqChangeAt = now;
+      return undefined;
+    }
+    if (now - this.lastCaptureSeqChangeAt > 4000) {
+      return `capture_seq frozen at ${seq}`;
+    }
+    return undefined;
+  }
+
   async getStatus(): Promise<StreamStatus> {
     const settings = loadSettings();
     const port = settings.streamPort ?? 8765;
     const base = `http://127.0.0.1:${port}`;
     const probed = await probeStreamPort(port);
     const childUp = this.isSpawned();
-    const running = probed || childUp;
     const meta = probed ? await fetchStreamMeta(port) : null;
+    const frozenError = this.noteCaptureSeq(meta?.capture_seq);
+    let error = probed || childUp ? frozenError ?? this.lastError : this.lastError;
+    const frameAge = meta?.frame_age_ms;
+    if (
+      probed &&
+      frameAge != null &&
+      frameAge > MAX_FRAME_AGE_MS &&
+      frozenError == null
+    ) {
+      error = `frame too stale (${frameAge}ms)`;
+    }
 
     return {
-      running,
-      attached: running && probed && !childUp,
+      running: probed || childUp,
+      attached: probed && !childUp,
       port,
       url: base,
       inventoryOverlayUrl: `${base}/stream/inventory_overlay`,
       gamePreviewUrl: `${base}/stream/game_preview`,
       metaUrl: `${base}/meta`,
-      error: running ? undefined : this.lastError,
+      error,
       meta: meta ?? undefined,
     };
   }
@@ -266,9 +320,18 @@ export class StreamProcessManager {
     const force = options?.force === true;
 
     if (!force && (await probeStreamPort(port))) {
-      this.sink(`Perception stream already active on port ${port}`, 'system');
-      syncWatchlistToControlFile(resolvedExodiaRoot);
-      return this.getStatus();
+      const health = await verifyStreamHealthy(port);
+      if (health.healthy) {
+        this.sink(`Perception stream already active on port ${port}`, 'system');
+        syncWatchlistToControlFile(resolvedExodiaRoot);
+        return this.getStatus();
+      }
+      this.sink(
+        `Stream on port ${port} not healthy (${health.error ?? 'unknown'}) — killing and respawning…`,
+        'system',
+      );
+      await this.hardKillAll(port);
+      await this.waitForPortFree(port, 8000);
     }
 
     if (!pythonExists(resolvedPythonPath)) {
@@ -382,6 +445,11 @@ export class StreamProcessManager {
             this.lastError = health.error ?? 'Perception stream not healthy after start';
             this.sink(this.lastError, 'stderr');
             await this.hardKillAll(port);
+            await this.waitForPortFree(port, 5000);
+          } else {
+            const metaOk = await fetchStreamMeta(port);
+            this.lastCaptureSeq = metaOk?.capture_seq;
+            this.lastCaptureSeqChangeAt = Date.now();
           }
           resolve(this.getStatus());
           return;
@@ -435,9 +503,24 @@ export class StreamProcessManager {
       if (!(await probeStreamPort(port))) {
         return true;
       }
-      await new Promise((r) => setTimeout(r, 400));
+      killListenersOnPort(port);
+      killPerceptionStreamProcesses(port);
+      killOrphanCapturePowerShell();
+      await new Promise((r) => setTimeout(r, 450));
     }
     return !(await probeStreamPort(port));
+  }
+
+  /** Stop stream and release port + WSL capture so calibration can grab the monitor. */
+  async stopForCalibration(): Promise<void> {
+    const port = loadSettings().streamPort ?? 8765;
+    this.sink('Stopping perception stream for calibration…', 'system');
+    await this.stop();
+    await this.hardKillAll(port);
+    await this.waitForPortFree(port, 10000);
+    this.lastCaptureSeq = undefined;
+    this.lastCaptureSeqChangeAt = 0;
+    this.lastError = undefined;
   }
 
   /** Hard-reset: kill zombies on the port, then spawn a fresh stream process. */
@@ -446,6 +529,8 @@ export class StreamProcessManager {
     const port = settings.streamPort ?? 8765;
     this.sink('Hard-resetting perception stream…', 'system');
     this.lastError = undefined;
+    this.lastCaptureSeq = undefined;
+    this.lastCaptureSeqChangeAt = 0;
 
     await this.stop();
     await this.hardKillAll(port);

@@ -22,6 +22,13 @@ export type BotManifestEntry = {
   args?: BotArgDef[];
   note?: string;
   deprecated?: boolean;
+  /** Bot subprocess reads perception HTTP /meta (stream must be up before start). */
+  requiresStream?: boolean;
+  /**
+   * Bot only consumes the UI's ``exodia_perception_stream`` (/meta, no BotEyes).
+   * RuneLite view keeps the normal ~10 FPS stream preview while this bot runs.
+   */
+  usesSharedStream?: boolean;
 };
 
 export type BotsManifest = {
@@ -42,6 +49,8 @@ export type BotRunInfo = {
   runtimeScriptId: string;
   runtimeCommands: string[];
   usesStream: boolean;
+  /** When true, bot reads /meta only — UI stays on shared perception stream preview. */
+  usesSharedStream: boolean;
 };
 
 export type RuntimeStatusPayload = {

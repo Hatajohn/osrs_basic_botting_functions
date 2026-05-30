@@ -25,7 +25,7 @@ import { selectTemplateFile } from './templateFile';
 import { loadTemplateWatchlist, saveTemplateWatchlist, syncWatchlistToControlFile } from './templateWatchlist';
 import { loadBotsManifest } from './manifestLoader';
 import { fetchGamePreview, fetchInventoryOverlay, fetchPristineClient } from './previewClient';
-import { StreamProcessManager } from './streamManager';
+import { StreamProcessManager, verifyStreamHealthy } from './streamManager';
 import { ProcessManager } from './processManager';
 import { pythonExists } from './paths';
 import {
@@ -267,13 +267,20 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.RUN_CALIBRATE_CLIENT_RECT, async () => {
     emitLog('Starting client rect calibration…', 'system');
+    if (streamManager) {
+      await streamManager.stopForCalibration();
+      mainWindow?.webContents.send(
+        IPC.STREAM_STATUS_UPDATE,
+        await streamManager.getStatus(),
+      );
+    }
     const result = await runCalibrateClientRect((line, stream) => emitLog(line, stream));
     if (result.canceled) {
       emitLog('Calibration cancelled.', 'system');
     } else if (result.ok) {
       emitLog('Client rect calibration saved.', 'system');
       if (streamManager) {
-        const status = await streamManager.start();
+        const status = await streamManager.restart();
         mainWindow?.webContents.send(IPC.STREAM_STATUS_UPDATE, status);
         if (status.running) {
           emitLog(
@@ -449,6 +456,8 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
 
+  streamManager = new StreamProcessManager((line, stream) => emitLog(line, stream));
+
   processManager = new ProcessManager(
     (line, stream) => emitLog(line, stream),
     {
@@ -459,9 +468,32 @@ app.whenReady().then(() => {
         mainWindow?.webContents.send(IPC.BOT_STATUS_UPDATE, status);
       },
     },
+    {
+      ensureStreamForBot: async () => {
+        if (!streamManager) {
+          return { ok: false, error: 'perception stream required' };
+        }
+        let status = await streamManager.getStatus();
+        if (!status.running) {
+          status = await streamManager.start();
+        }
+        if (!status.running) {
+          return {
+            ok: false,
+            error: status.error ?? 'perception stream required',
+          };
+        }
+        const health = await verifyStreamHealthy(status.port);
+        if (!health.healthy) {
+          return {
+            ok: false,
+            error: health.error ?? 'perception stream not healthy',
+          };
+        }
+        return { ok: true };
+      },
+    },
   );
-
-  streamManager = new StreamProcessManager((line, stream) => emitLog(line, stream));
 
   try {
     const { resolvedExodiaRoot } = resolveSettings(loadSettings());

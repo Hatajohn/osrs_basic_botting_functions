@@ -19,6 +19,43 @@ def bgr_bounds_from_color(color, shade):
     return lower, upper
 
 
+def stream_bot_init(
+    win_rect=None,
+    window_title="RuneLite",
+    *,
+    port=None,
+    require_calibration=True,
+):
+    """Initialize a stream-first bot session without ``BotEyes``.
+
+    Returns ``(client, arms, perception)``. Raises ``StreamUnavailableError`` when
+    the perception service is down, stale, or inventory is not calibrated.
+    """
+    from bot_client_config import load_client_rect, rect_from_env
+    from bot_perception_client import PerceptionClient, StreamUnavailableError, require_stream
+
+    require_stream()
+
+    if win_rect is None:
+        try:
+            win_rect = rect_from_env()
+        except ValueError as exc:
+            raise StreamUnavailableError(str(exc)) from exc
+    if win_rect is None:
+        win_rect = load_client_rect()
+    if not win_rect or len(win_rect) != 4:
+        raise StreamUnavailableError("missing or invalid client_rect.json")
+
+    client = Client.FixedClientWindow(win_rect)
+    client.update()
+    arms = Arms.BotArms()
+    perception = PerceptionClient(port=port)
+    perception.refresh()
+    if require_calibration:
+        perception.require_calibrated()
+    return client, arms, perception
+
+
 def bot_init(DEBUG=False, win_rect=None, window_title="RuneLite", refresh_frame=None):
     """Question: How do I create and wire client, eyes, and arms for a bot session?"""
     if win_rect is not None:

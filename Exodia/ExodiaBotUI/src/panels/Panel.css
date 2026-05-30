@@ -74,6 +74,10 @@
   color: #f87171;
 }
 
+.panel__body--flush {
+  padding: 0;
+}
+
 .panel__body {
   flex: 1;
   min-height: 0;

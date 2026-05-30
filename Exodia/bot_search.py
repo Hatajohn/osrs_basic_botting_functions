@@ -123,6 +123,7 @@ def search_with_camera_pan(
     max_relocate_attempts: int = 0,
     sleep_after_relocate_s: float = 3.0,
     on_relocate: Optional[Callable[[int, int], None]] = None,
+    signal_pan: Optional[Callable[[bool], None]] = None,
 ) -> List[Point]:
     """Question: How do I keep locating a target while panning (and optionally walking)?
 
@@ -132,6 +133,7 @@ def search_with_camera_pan(
 
     Returns the first non-empty hit list, or ``[]`` after all attempts.
     ``on_miss(attempt_index, max_pan_attempts)`` runs when a pan is about to happen.
+    ``signal_pan(active)`` runs around each pan (e.g. ``bot_stream_control.stream_pan_signal()``).
     """
     max_pan_attempts = max(0, int(max_pan_attempts))
     for attempt in range(max_pan_attempts + 1):
@@ -144,8 +146,14 @@ def search_with_camera_pan(
             break
         if on_miss is not None:
             on_miss(attempt + 1, max_pan_attempts)
-        pan()
-        sleep_fn(max(0.0, float(sleep_after_pan_s)))
+        if signal_pan is not None:
+            signal_pan(True)
+        try:
+            pan()
+            sleep_fn(max(0.0, float(sleep_after_pan_s)))
+        finally:
+            if signal_pan is not None:
+                signal_pan(False)
 
     max_relocate_attempts = max(0, int(max_relocate_attempts))
     for walk_i in range(max_relocate_attempts):

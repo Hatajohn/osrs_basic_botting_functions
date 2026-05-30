@@ -28,11 +28,9 @@ export function MenuBar({ onAction, menuContext, onZoomIn, onZoomOut, onZoomFit 
     hasDebugFrame: false,
     streamRunning: false,
     debugMode: 'inventory_identify',
-    showTemplateTracks: true,
-    showInventoryTracks: true,
     hasZoomViewport: false,
     highRes: false,
-    panelsVisible: { log: true, tasks: true, scripts: true, actions: true },
+    panelsVisible: { log: true, tasks: true, scripts: true, actions: true, clientOnly: false },
   };
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const barRef = useRef<HTMLElement>(null);
@@ -93,7 +91,11 @@ export function MenuBar({ onAction, menuContext, onZoomIn, onZoomOut, onZoomFit 
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        onAction('toggleActionsPanel', { id: 'toggleActionsPanel', label: 'Actions' });
+        onAction('toggleActionsPanel', { id: 'toggleActionsPanel', label: 'Show actions panel' });
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === '1') {
+        e.preventDefault();
+        onAction('toggleClientOnly', { id: 'toggleClientOnly', label: 'Client view only' });
       }
     };
     window.addEventListener('keydown', onKey);
@@ -113,22 +115,6 @@ export function MenuBar({ onAction, menuContext, onZoomIn, onZoomOut, onZoomFit 
       return (
         <>
           <span className="menu-bar__radio">{selected ? '●' : '○'}</span>
-          <span>{item.label}</span>
-        </>
-      );
-    }
-    if (item.id === 'toggleShowTemplateTracks') {
-      return (
-        <>
-          <span className="menu-bar__radio">{ctx.showTemplateTracks ? '●' : '○'}</span>
-          <span>{item.label}</span>
-        </>
-      );
-    }
-    if (item.id === 'toggleShowInventoryTracks') {
-      return (
-        <>
-          <span className="menu-bar__radio">{ctx.showInventoryTracks ? '●' : '○'}</span>
           <span>{item.label}</span>
         </>
       );
@@ -173,6 +159,14 @@ export function MenuBar({ onAction, menuContext, onZoomIn, onZoomOut, onZoomFit 
         </>
       );
     }
+    if (item.id === 'toggleClientOnly') {
+      return (
+        <>
+          <span className="menu-bar__radio">{ctx.panelsVisible.clientOnly ? '●' : '○'}</span>
+          <span>{item.label}</span>
+        </>
+      );
+    }
     return <span>{item.label}</span>;
   };
 
@@ -195,7 +189,8 @@ export function MenuBar({ onAction, menuContext, onZoomIn, onZoomOut, onZoomFit 
                 const prev = index > 0 ? menu.items[index - 1] : undefined;
                 const showSeparator =
                   (item.radioGroup === 'debugMode' && prev && prev.radioGroup !== 'debugMode') ||
-                  (item.id === 'toggleLogPanel' && prev?.id === 'toggleHighRes');
+                  (item.id === 'toggleLogPanel' && prev?.id === 'toggleHighRes') ||
+                  (item.id === 'toggleClientOnly' && prev?.id === 'toggleActionsPanel');
                 const enabled = isItemInteractive(item, ctx);
                 return (
                   <li key={item.id} role="none">

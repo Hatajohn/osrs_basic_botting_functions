@@ -67,6 +67,7 @@ __all__ = [
     "stream_snapshot_usable",
     "sync_inventory_geometry_from_snap",
     "world_hit_for_template",
+    "world_track_for_template",
 ]
 
 
@@ -87,7 +88,9 @@ def _normalize_template_stem(template: str) -> str:
     return stem
 
 
-def _perception_slices(meta: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+def _perception_slices(
+    meta: Optional[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     root = meta if isinstance(meta, dict) else {}
     perception = root.get("perception")
     if not isinstance(perception, dict):
@@ -98,7 +101,10 @@ def _perception_slices(meta: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], 
     world = perception.get("world")
     if not isinstance(world, dict):
         world = {}
-    return root, inventory, world
+    text = perception.get("text")
+    if not isinstance(text, dict):
+        text = {}
+    return root, inventory, world, text
 
 
 def _inventory_rect_from_meta(inventory: Dict[str, Any]) -> Optional[Rect]:
@@ -117,6 +123,7 @@ class StreamSnapshot:
     meta: Dict[str, Any]
     inventory: Dict[str, Any]
     world: Dict[str, Any]
+    text: Dict[str, Any]
     inventory_rect: Optional[Rect]
 
 
@@ -129,7 +136,7 @@ def fetch_stream_snapshot(port: Optional[int] = None) -> Optional[StreamSnapshot
     if bgr is None or frame is None:
         return None
     meta = fetch_stream_meta_http(port) or {}
-    _root, inventory, world = _perception_slices(meta)
+    _root, inventory, world, text = _perception_slices(meta)
     inv_rect = _inventory_rect_from_meta(inventory)
     return StreamSnapshot(
         bgr=bgr,
@@ -137,6 +144,7 @@ def fetch_stream_snapshot(port: Optional[int] = None) -> Optional[StreamSnapshot
         meta=meta,
         inventory=inventory,
         world=world,
+        text=text,
         inventory_rect=inv_rect,
     )
 
@@ -263,6 +271,14 @@ def refresh_stream_snapshot_if_stale(
         return snap
     apply_stream_snapshot_to_eyes(eyes, fresh, client_rect=list(client.win_rect))
     return fresh
+
+
+def world_track_for_template(world_meta: Dict[str, Any], template: str):
+    """Best ``WorldTrack`` for ``template`` (prefers stable tracks) from cache meta."""
+    from bot_perception_types import parse_world_meta
+
+    world = parse_world_meta(world_meta if isinstance(world_meta, dict) else {})
+    return world.best_track(template)
 
 
 def world_hit_for_template(world_meta: Dict[str, Any], template: str) -> Optional[Dict[str, Any]]:

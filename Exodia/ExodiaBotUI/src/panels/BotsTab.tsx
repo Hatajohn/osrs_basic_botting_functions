@@ -83,7 +83,7 @@ export function BotsTab({
     <div className="bots-tab">
       <div className="bots-tab__header">
         <p className="bots-tab__hint">
-          Loaded task specs for the agent. Choose markdown files in the Specs tab.
+          Agent task specs (markdown). For Python FSM bots, use the Python tab.
         </p>
         {specs.length > 0 && !active && (
           <button type="button" className="btn btn--sm" onClick={onClearSpecs}>

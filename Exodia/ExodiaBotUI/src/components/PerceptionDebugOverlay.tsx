@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, type RefObject } from 'react';
 import type { StreamMeta } from '../../shared/ipc';
+import { useImageAnchoredLayout } from '../hooks/useImageAnchoredLayout';
 import {
   computePerceptionHudLayout,
   type PerceptionHudInvWatchMarker,
@@ -9,67 +10,85 @@ import './PerceptionDebugOverlay.css';
 
 type PerceptionDebugOverlayProps = {
   meta: StreamMeta | null | undefined;
+  imageRef: RefObject<HTMLImageElement | null>;
   showInventoryDebug?: boolean;
-  showInventoryTracks?: boolean;
   showWorldTracks?: boolean;
 };
 
-type TrackDot = {
-  key: string;
-  left: string;
-  top: string;
-  color: string;
-  title: string;
-};
-
-function toTrackDots(
-  worldMarkers: PerceptionHudWorldMarker[],
-  invWatchMarkers: PerceptionHudInvWatchMarker[],
-): TrackDot[] {
-  const dots: TrackDot[] = [];
-  for (const m of worldMarkers) {
-    dots.push({
-      key: m.key,
-      left: m.left,
-      top: m.top,
-      color: m.color,
-      title: `${m.template} (${m.score.toFixed(2)})`,
-    });
+function worldMarkerTitle(m: PerceptionHudWorldMarker): string {
+  const parts = [m.template, `score ${Number(m.score ?? 0).toFixed(2)}`];
+  if (m.trackId != null) {
+    parts.unshift(`#${m.trackId}`);
   }
-  for (const m of invWatchMarkers) {
-    dots.push({
-      key: m.key,
-      left: m.left,
-      top: m.top,
-      color: m.color,
-      title: `${m.template}${m.score != null ? ` (${m.score.toFixed(2)})` : ''}`,
-    });
+  if (m.stable) {
+    parts.push('stable');
   }
-  return dots;
+  if (m.velocityXY) {
+    const [vx, vy] = m.velocityXY;
+    if (Number.isFinite(vx) && Number.isFinite(vy) && (vx !== 0 || vy !== 0)) {
+      parts.push(`v ${vx.toFixed(0)},${vy.toFixed(0)} px/s`);
+    }
+  }
+  return parts.join(' · ');
 }
 
-/** Live HUD from /meta — percentage-anchored, replaced each poll, no fade. */
+/** Live HUD from /meta — percentage-anchored on image layer, survives zoom transform. */
 export function PerceptionDebugOverlay({
   meta,
+  imageRef,
   showInventoryDebug = true,
-  showInventoryTracks = true,
   showWorldTracks = true,
 }: PerceptionDebugOverlayProps) {
-  const layout = useMemo(() => computePerceptionHudLayout(meta), [meta]);
+  const computeLayout = useCallback(
+    (img: HTMLImageElement) => computePerceptionHudLayout(img, meta),
+    [meta],
+  );
 
-  const trackDots = useMemo(() => {
-    if (!layout) return [];
-    const world = showWorldTracks ? layout.worldMarkers : [];
-    const inv = showInventoryTracks ? layout.invWatchMarkers : [];
-    return toTrackDots(world, inv);
-  }, [layout, showInventoryTracks, showWorldTracks]);
+  const layout = useImageAnchoredLayout(imageRef, computeLayout, [meta]);
 
-  if (!layout) return null;
+  const worldMarkers = useMemo(
+    () => (showWorldTracks && layout ? layout.worldMarkers : []),
+    [layout, showWorldTracks],
+  );
 
-  const { invBox, idEntries, slotMarkers } = layout;
+  const invWatchMarkers = useMemo(
+    () => (layout ? layout.invWatchMarkers : []),
+    [layout],
+  );
+
+  const velocityArrows = useMemo(
+    () => worldMarkers.filter((m) => m.velocityEnd != null),
+    [worldMarkers],
+  );
+
+  if (!layout && worldMarkers.length === 0 && invWatchMarkers.length === 0) return null;
+
+  const { invBox, idEntries, slotMarkers } = layout ?? {
+    invBox: null,
+    idEntries: [],
+    slotMarkers: [],
+  };
 
   return (
     <div className="perception-debug-overlay" aria-hidden>
+      {velocityArrows.length > 0 && (
+        <svg className="perception-debug-overlay__velocity-svg" aria-hidden>
+          {velocityArrows.map((m) => (
+            <line
+              key={`vel-${m.key}`}
+              className={
+                m.stable
+                  ? 'perception-debug-overlay__velocity-line perception-debug-overlay__velocity-line--stable'
+                  : 'perception-debug-overlay__velocity-line'
+              }
+              x1={m.left}
+              y1={m.top}
+              x2={m.velocityEnd!.left}
+              y2={m.velocityEnd!.top}
+            />
+          ))}
+        </svg>
+      )}
       {showInventoryDebug && idEntries.length > 0 && (
         <div className="perception-debug-overlay__id-list">
           <div className="perception-debug-overlay__id-list-title">IDs</div>
@@ -120,12 +139,34 @@ export function PerceptionDebugOverlay({
             {m.index}
           </span>
         ))}
-      {trackDots.map((dot) => (
+      {worldMarkers.map((m) => (
         <span
-          key={dot.key}
+          key={m.key}
+          className={
+            m.stable
+              ? 'perception-debug-overlay__world-dot perception-debug-overlay__world-dot--stable'
+              : m.trackId != null
+                ? 'perception-debug-overlay__world-dot perception-debug-overlay__world-dot--tracked'
+                : 'perception-debug-overlay__world-dot'
+          }
+          style={{ left: m.left, top: m.top, borderColor: m.color }}
+          title={worldMarkerTitle(m)}
+        >
+          <span
+            className="perception-debug-overlay__world-dot-core"
+            style={{ backgroundColor: m.color }}
+          />
+          {m.trackId != null && (
+            <span className="perception-debug-overlay__world-dot-id">{m.trackId}</span>
+          )}
+        </span>
+      ))}
+      {invWatchMarkers.map((m) => (
+        <span
+          key={m.key}
           className="perception-debug-overlay__track-dot"
-          style={{ left: dot.left, top: dot.top, backgroundColor: dot.color }}
-          title={dot.title}
+          style={{ left: m.left, top: m.top, backgroundColor: m.color }}
+          title={`${m.template}${m.score != null ? ` (${m.score.toFixed(2)})` : ''}`}
         />
       ))}
     </div>
