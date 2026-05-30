@@ -516,7 +516,8 @@ Diagnostic and runtime tooling is **not** a building-block layer — it wraps ca
 - **Capture pipeline** (`bot_capture.py`): `CapturePipeline`, `start_capture_pipeline` / `stop_capture_pipeline`, `capture_stream_latest`, `StreamFrameMeta`, `fetch_pristine_client_http_meta` — decoupled grab + HTTP pristine for actions.
 - **Stream** (`bot_stream.py`): `MJPEGStreamServer`, `FramePublisher`, `PerceptionStreamPublisher` — HTTP `/stream/*`, `/snapshot/pristine`, `/snapshot/pristine_meta.json`, `/meta` with nested `perception.inventory` / `perception.world`.
 - **Stream client** (`bot_stream_client.py`): `refresh_action_frame`, `fetch_stream_snapshot`, `apply_stream_snapshot_to_eyes`, `world_hit_for_template` — action subprocess consumption (no competing grab).
-- **Perception vision** (`bot_inventory_vision.py`, `bot_world_vision.py`): parallel `InventoryVisionProcessor` + `WorldVisionProcessor` on stream buffer; world cache honors `EXODIA_WORLD_TEMPLATES`. Stream defaults **10 FPS** (capture, inventory, world, publish). **Bottlenecks:** `wsl_ps` grab often caps fresh frames (~12 FPS at ~1920×1080 client); world shape match scales with template count and ROI size (see README *Perception bottlenecks*); world env capped at 15 in code; `run_agent` harness capture stays tick-aligned (~4 FPS) separately.
+- **Perception vision** (`bot_inventory_vision.py`, `bot_world_vision.py`, `bot_text_vision.py`, `bot_action_vision.py`): parallel workers on stream buffer — inventory grid, world template hits, full-client colored OCR spans, action-strip tri-state. Stream defaults **10 FPS** (capture, inventory, world, text, action, publish). **Bottlenecks:** `wsl_ps` grab often caps fresh frames (~12 FPS at ~1920×1080 client); world shape match scales with template count and ROI size (see README *Perception bottlenecks*); world env capped at 15 in code; `run_agent` harness capture stays tick-aligned (~4 FPS) separately.
+- **Text OCR** (`bot_client_text.py`, `bot_text_query.py`): `TextFinder.scan` → tiled Tesseract + color classify + line merge (`merge_adjacent_spans`: group by Y, greedy extend while gap/color rules pass). Default min confidence **60** (`EXODIA_TEXT_MIN_CONF`). Neutral chat colors (`white`/`yellow`/`orange`/`unknown`) chain on one line; red/green stay distinct. Query helpers filter by ROI/color for fishing (`resolve_fishing_action_from_tick`).
 - **Action chain** (`bot_chain.py`): stream-aware `click_template` / use-on; `perception_source` `stream_cache` vs `live_match` / `live_identify`.
 - **Standalone stream** (`exodia_perception_stream.py`): UI-spawned perception-only MJPEG (dual vision, no bot tick).
 - **Runtime control** (`bot_runtime.py`, `exodia_ctl.py`): `RuntimeBridge` — JSON control/status files under `logs/` while FSM scripts run.
@@ -644,6 +645,29 @@ Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/functio
 | `EXODIA_STREAM_IDENTIFY_WAIT_MS` | Poll for stream inventory identify (default `800`) |
 | `EXODIA_WORLD_VISION_FPS` | World vision thread (default `10`; code cap 15) |
 | `EXODIA_WORLD_TEMPLATES` | Comma stems cached in `perception.world.hits` (default `osrs_infernalEel`) |
+
+### Text OCR (`perception.text`)
+
+| Variable | Default / notes |
+|----------|-----------------|
+| `EXODIA_TEXT_VISION` | `1` — enable `TextScanWorker` on stream |
+| `EXODIA_TEXT_VISION_FPS` | `10` (0.5–15) |
+| `EXODIA_TEXT_MIN_CONF` | `60` — Tesseract word floor; also used by `bot_text_query` |
+| `EXODIA_TEXT_OUTPUT_MIN_CONF` | `60` — optional output filter (`EXODIA_TEXT_OUTPUT_FILTER`) |
+| `EXODIA_TEXT_META_FULL` | `1` — full `spans[]` in `/meta`; `0` → `fishing_spans` subset |
+| `EXODIA_TEXT_MERGE_WORDS` | `1` — line merge after OCR |
+| `EXODIA_TEXT_MERGE_MAX_GAP_LINE_H` | `12` — max horizontal gap (× line height) when chaining words |
+| `EXODIA_TEXT_MERGE_LINE_Y_FRAC` | `0.65` — Y tolerance for grouping words onto one line |
+| `EXODIA_TEXT_PSM` | `11` — Tesseract PSM |
+| `EXODIA_TEXT_LOCAL_BG` | `1` — background-ring stroke isolation (terrain vs UI red) |
+| `EXODIA_BASIC_FISHING_USE_TEXT` | `1` — stream fishing: green OCR before action-strip fallback |
+
+| Function | Question | Notes |
+|----------|----------|-------|
+| `TextFinder.scan()` | Full-client colored OCR on a frame? | Entry in `bot_client_text.py`; stream via `TextScanWorker`. |
+| `merge_adjacent_spans()` | Join word boxes into line phrases? | Line group + greedy extend; neutral color chaining for chat. |
+| `resolve_fishing_action_from_tick()` | Fishing state from stream text? | Green **Fishing** in strip ROI; ignores red spans. |
+| `infer_action_code_from_snapshot()` | Action strip code from OCR spans? | Used by `bot_action_vision` when text cache is synced. |
 
 ### Runtime / session
 

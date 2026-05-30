@@ -16,6 +16,7 @@ Python automation harness for **RuneLite** (OSRS): capture the client window, in
 | **Game state** | `bot_gamestate.py` | `GameState` dataclass + `build_game_state()` from `BotEyes` (OCR, inventory occupancy). |
 | **Frames** | `bot_frames.py` | Per-tick PNG sidecar writer (world, inventory, action/chat strips). |
 | **Stream** | `bot_stream.py` | MJPEG HTTP (`/stream/*`, `/snapshot/pristine`, `/meta` with nested inventory/world perception). |
+| **Text vision** | `bot_client_text.py`, `bot_text_vision.py` | Full-client tiled Tesseract OCR → colored spans on `/meta` `perception.text`; line merge + 60% min confidence. |
 | **Capture** | `bot_capture.py` | Decoupled `CaptureProducer` + `VisionProcessor` @ ≥2× OSRS tick rate. |
 | **Track** | `bot_track.py` | Playspace blob motion + centroid IDs (v1). |
 | **Action log** | `bot_action_log.py` | Always-on JSONL + plain-text action log per run. |
@@ -100,6 +101,27 @@ Capture runs on a **separate timer** (default 4 FPS, ≥2× the 600 ms OSRS tick
 | `EXODIA_TESSERACT_CMD` | Path to tesseract binary |
 | `EXODIA_SIGNIFICANCE_MAX_SKIPS` | Stall escape for significance gate |
 
+### Text OCR (stream `perception.text`)
+
+`TextScanWorker` tiles the client frame, runs Tesseract per active tile, classifies span color (HSV + OSRS skilling red/green heuristics), then **merges words into line-length phrases** (group by Y, greedy left-to-right chain). Fishing bots read green **Fishing** in the action strip via `bot_text_query.py`; the cache keeps all qualifying spans.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EXODIA_TEXT_VISION` | `1` | Enable/disable text worker on perception stream |
+| `EXODIA_TEXT_VISION_FPS` | `10` | Text scan thread rate (0.5–15) |
+| `EXODIA_TEXT_MIN_CONF` | `60` | Min Tesseract word confidence (0–100); filters terrain noise |
+| `EXODIA_TEXT_OUTPUT_MIN_CONF` | `60` | Min conf when `EXODIA_TEXT_OUTPUT_FILTER=1` |
+| `EXODIA_TEXT_META_FULL` | `1` | Include full `spans[]` in `/meta`; `0` → `fishing_spans` only |
+| `EXODIA_TEXT_MERGE_WORDS` | `1` | Merge per-word OCR into line phrases |
+| `EXODIA_TEXT_MERGE_MAX_GAP_LINE_H` | `12` | Max word gap as multiple of line height (chat sentences) |
+| `EXODIA_TEXT_MERGE_LINE_Y_FRAC` | `0.65` | Vertical tolerance when grouping words onto one line |
+| `EXODIA_TEXT_PSM` | `11` | Tesseract page segmentation mode |
+| `EXODIA_TEXT_LOCAL_BG` | `1` | Background-ring color check (red terrain vs UI text) |
+| `EXODIA_TEXT_STROKE_MIN_S` / `_V` | `160` / `120` | Min HSV saturation/value for UI stroke masks |
+| `EXODIA_BASIC_FISHING_USE_TEXT` | `1` | Stream fishing FSM: derive action from green OCR first |
+
+Diagnostics: `capture_runelite_once.py --text-dump [--text-dump-overlay]` → `logs/diag/text_spans.json`.
+
 ## Stream + action frame contract
 
 When **`EXODIA_STREAM_PORT`** is set (or capture stream is on), **action subprocesses** (`bot_chain` handlers from ExodiaBotUI) use the perception MJPEG service for frames and cached vision — not a competing sync **`wsl_ps`** grab on each click.
@@ -119,6 +141,8 @@ When **`EXODIA_STREAM_PORT`** is set (or capture stream is on), **action subproc
 | Capture buffer | 10 FPS | `bot_capture.py` `CaptureProducer`; `EXODIA_CAPTURE_FPS` |
 | Inventory vision | 10 FPS | `bot_inventory_vision.py`; `EXODIA_INVENTORY_VISION_FPS` |
 | World vision | 10 FPS | `bot_world_vision.py`; `EXODIA_WORLD_VISION_FPS` (hard cap 15; was 2 FPS before stream-first refactor) |
+| Text OCR | 10 FPS | `bot_text_vision.py` `TextScanWorker`; `EXODIA_TEXT_VISION_FPS` |
+| Action strip | 10 FPS | `bot_action_vision.py`; `EXODIA_ACTION_VISION_FPS` |
 | UI JPEG poll | ~10 FPS (100 ms) | `ExodiaBotUI/src/hooks/usePerceptionStream.ts` `FRAME_POLL_MS` |
 | UI `/meta` poll | ~2 Hz (500 ms) | same, `META_POLL_MS` |
 

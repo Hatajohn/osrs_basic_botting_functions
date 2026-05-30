@@ -211,6 +211,10 @@ Columns: **Path** | **Layer** | **Status** | **Imported by** | **Role** | **FUNC
 | `bot_stream_client.py` | infra | active | `bot_chain` | Action subprocess: fetch/apply stream snapshot | §2.13 |
 | `bot_inventory_vision.py` | infra | infra-optional | `exodia_perception_stream`, `bot_stream` | Inventory vision thread + cache | §7 |
 | `bot_world_vision.py` | infra | infra-optional | `exodia_perception_stream`, `bot_stream` | World vision thread + `EXODIA_WORLD_TEMPLATES` cache | §7 |
+| `bot_client_text.py` | simple-eyes | infra-optional | `bot_text_vision`, `bot_action_vision`, `bot_text_query`, `capture_runelite_once` | Tiled Tesseract OCR, color classify, line merge | §7 |
+| `bot_text_vision.py` | infra | infra-optional | `exodia_perception_stream` | `TextScanWorker` → `/meta` `perception.text` | §7 |
+| `bot_text_query.py` | compound | active | stream fishing FSM, `bot_action_vision` | Filter/query spans; fishing action inference | §7 |
+| `bot_action_vision.py` | infra | infra-optional | `exodia_perception_stream` | Action strip tri-state + template/OCR fusion | §7 |
 | `bot_chain.py` | compound | active | ExodiaBotUI action runner (subprocess) | Stream-aware template click / use-on | §2.13 |
 | `exodia_perception_stream.py` | entry-scripts | entry | ExodiaBotUI (spawn) | Standalone dual-vision MJPEG | §7 |
 | `bot_track.py` | infra | infra-optional | capture, stream, tests | Blob motion v1 | §7, §9 |

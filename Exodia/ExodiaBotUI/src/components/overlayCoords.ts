@@ -107,7 +107,7 @@ export function textSwatchForColor(color: string): string {
 function spanPlausibleForHighlight(span: TextSpanMeta): boolean {
   const text = (span.text ?? '').trim();
   if (!text) return false;
-  return (span.conf ?? 0) >= 45;
+  return (span.conf ?? 0) >= 60;
 }
 
 function buildTextMarkers(

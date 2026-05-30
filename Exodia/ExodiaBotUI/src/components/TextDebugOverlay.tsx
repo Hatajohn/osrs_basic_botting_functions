@@ -33,19 +33,83 @@ function unionBbox(a: number[], b: number[]): number[] {
   return [x1, y1, x2 - x1, y2 - y1];
 }
 
+const NEUTRAL_MERGE_COLORS = new Set(['white', 'yellow', 'orange', 'unknown']);
+const MERGE_MAX_GAP_LINE_H = 12;
+const MERGE_LINE_Y_FRAC = 0.65;
+
+function colorsMergeCompatible(a: string, b: string): boolean {
+  const ak = a.toLowerCase();
+  const bk = b.toLowerCase();
+  if (ak === bk) return true;
+  if (ak === 'unknown' || bk === 'unknown') return true;
+  if (NEUTRAL_MERGE_COLORS.has(ak) && NEUTRAL_MERGE_COLORS.has(bk)) return true;
+  return false;
+}
+
 function shouldMergeSpans(a: TextSpanMeta, b: TextSpanMeta): boolean {
   const [ax, ay, aw, ah] = a.bbox ?? [0, 0, 0, 0];
   const [bx, by, bw, bh] = b.bbox ?? [0, 0, 0, 0];
   const lineH = Math.max(ah, bh, 1);
   const acy = ay + ah * 0.5;
   const bcy = by + bh * 0.5;
-  if (Math.abs(acy - bcy) > lineH * 0.55) return false;
+  if (Math.abs(acy - bcy) > lineH * MERGE_LINE_Y_FRAC) return false;
   const gap = bx - (ax + aw);
-  if (gap > lineH * 4 || gap < -lineH * 0.6) return false;
-  const ca = a.color.toLowerCase();
-  const cb = b.color.toLowerCase();
-  if (ca !== cb && ca !== 'unknown' && cb !== 'unknown') return false;
-  return true;
+  if (gap > lineH * MERGE_MAX_GAP_LINE_H || gap < -lineH * 0.6) return false;
+  return colorsMergeCompatible(a.color, b.color);
+}
+
+function lineCenterY(spans: TextSpanMeta[]): number {
+  if (spans.length === 0) return 0;
+  return (
+    spans.reduce((sum, s) => sum + (s.bbox?.[1] ?? 0) + (s.bbox?.[3] ?? 0) * 0.5, 0) /
+    spans.length
+  );
+}
+
+function lineHeight(spans: TextSpanMeta[]): number {
+  return Math.max(...spans.map((s) => s.bbox?.[3] ?? 0), 1);
+}
+
+function groupSpansByLine(spans: TextSpanMeta[]): TextSpanMeta[][] {
+  if (spans.length === 0) return [];
+  const ordered = [...spans].sort((a, b) => {
+    const ay = a.bbox?.[1] ?? 0;
+    const by = b.bbox?.[1] ?? 0;
+    if (ay !== by) return ay - by;
+    return (a.bbox?.[0] ?? 0) - (b.bbox?.[0] ?? 0);
+  });
+  const lines: TextSpanMeta[][] = [[ordered[0]!]];
+  for (let i = 1; i < ordered.length; i += 1) {
+    const span = ordered[i]!;
+    const line = lines[lines.length - 1]!;
+    const refY = lineCenterY(line);
+    const lh = lineHeight(line);
+    const spanCy = (span.bbox?.[1] ?? 0) + (span.bbox?.[3] ?? 0) * 0.5;
+    if (Math.abs(spanCy - refY) <= lh * MERGE_LINE_Y_FRAC) {
+      line.push(span);
+    } else {
+      lines.push([span]);
+    }
+  }
+  return lines;
+}
+
+function mergeLineSpans(line: TextSpanMeta[]): TextSpanMeta[] {
+  const ordered = [...line].sort((a, b) => (a.bbox?.[0] ?? 0) - (b.bbox?.[0] ?? 0));
+  if (ordered.length === 0) return [];
+  const merged: TextSpanMeta[] = [];
+  let idx = 0;
+  while (idx < ordered.length) {
+    let accum = ordered[idx]!;
+    let j = idx + 1;
+    while (j < ordered.length && shouldMergeSpans(accum, ordered[j]!)) {
+      accum = mergeTwoSpans(accum, ordered[j]!);
+      j += 1;
+    }
+    merged.push(accum);
+    idx = j;
+  }
+  return merged;
 }
 
 function mergeTwoSpans(a: TextSpanMeta, b: TextSpanMeta): TextSpanMeta {
@@ -61,26 +125,14 @@ function mergeTwoSpans(a: TextSpanMeta, b: TextSpanMeta): TextSpanMeta {
   };
 }
 
-/** Join per-word OCR rows on the same line (e.g. ``Not`` + ``fishing``). */
+/** Join per-word OCR rows on the same line (e.g. chat sentences, ``Not`` + ``fishing``). */
 function mergeSpansForDisplay(spans: TextSpanMeta[]): TextSpanMeta[] {
   if (spans.length < 2) return spans;
-  const ordered = [...spans].sort((a, b) => {
-    const ay = a.bbox?.[1] ?? 0;
-    const by = b.bbox?.[1] ?? 0;
-    if (ay !== by) return ay - by;
-    return (a.bbox?.[0] ?? 0) - (b.bbox?.[0] ?? 0);
-  });
-  const merged: TextSpanMeta[] = [ordered[0]!];
-  for (let i = 1; i < ordered.length; i += 1) {
-    const span = ordered[i]!;
-    const prev = merged[merged.length - 1]!;
-    if (shouldMergeSpans(prev, span)) {
-      merged[merged.length - 1] = mergeTwoSpans(prev, span);
-    } else {
-      merged.push(span);
-    }
+  const out: TextSpanMeta[] = [];
+  for (const line of groupSpansByLine(spans)) {
+    out.push(...mergeLineSpans(line));
   }
-  return merged;
+  return out;
 }
 
 /** When HSV misses OSRS salmon text, infer skilling-line color from wording. */

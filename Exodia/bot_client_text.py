@@ -189,7 +189,7 @@ class OcrWord:
 
 
 def text_min_conf() -> float:
-    return _env_float("EXODIA_TEXT_MIN_CONF", 40.0)
+    return _env_float("EXODIA_TEXT_MIN_CONF", 60.0)
 
 
 def text_max_spans() -> int:
@@ -533,6 +533,31 @@ def _union_bbox(a: Bbox, b: Bbox) -> Bbox:
     return (x1, y1, x2 - x1, y2 - y1)
 
 
+_NEUTRAL_MERGE_COLORS = frozenset({"white", "yellow", "orange", "unknown"})
+
+
+def text_merge_max_gap_line_h() -> float:
+    """Max horizontal gap between words, as a multiple of line height (chat lines need more)."""
+    return max(1.0, _env_float("EXODIA_TEXT_MERGE_MAX_GAP_LINE_H", 12.0))
+
+
+def text_merge_line_y_frac() -> float:
+    """Vertical center tolerance when grouping words onto the same line."""
+    return max(0.2, _env_float("EXODIA_TEXT_MERGE_LINE_Y_FRAC", 0.65))
+
+
+def _colors_merge_compatible(a: str, b: str) -> bool:
+    """Allow neutral UI/chat colors to chain; keep red/green/cyan distinct from each other."""
+    ak, bk = a.lower(), b.lower()
+    if ak == bk:
+        return True
+    if ak == "unknown" or bk == "unknown":
+        return True
+    if ak in _NEUTRAL_MERGE_COLORS and bk in _NEUTRAL_MERGE_COLORS:
+        return True
+    return False
+
+
 def _should_merge_spans(a: ColoredTextSpan, b: ColoredTextSpan) -> bool:
     """Merge OCR words on the same UI line (e.g. ``Not`` + ``fishing``)."""
     ax, ay, aw, ah = a.bbox
@@ -540,18 +565,16 @@ def _should_merge_spans(a: ColoredTextSpan, b: ColoredTextSpan) -> bool:
     line_h = max(ah, bh, 1)
     acy = ay + ah * 0.5
     bcy = by + bh * 0.5
-    if abs(acy - bcy) > line_h * 0.55:
+    y_frac = text_merge_line_y_frac()
+    if abs(acy - bcy) > line_h * y_frac:
         return False
     gap = bx - (ax + aw)
-    if gap > line_h * 4.0:
+    max_gap = line_h * text_merge_max_gap_line_h()
+    if gap > max_gap:
         return False
     if gap < -line_h * 0.6:
         return False
-    if (
-        a.color != b.color
-        and a.color != "unknown"
-        and b.color != "unknown"
-    ):
+    if not _colors_merge_compatible(a.color, b.color):
         return False
     return True
 
@@ -568,19 +591,63 @@ def _merge_two_spans(a: ColoredTextSpan, b: ColoredTextSpan) -> ColoredTextSpan:
     )
 
 
+def _line_center_y(spans: Sequence[ColoredTextSpan]) -> float:
+    return sum(s.bbox[1] + s.bbox[3] * 0.5 for s in spans) / max(1, len(spans))
+
+
+def _line_height(spans: Sequence[ColoredTextSpan]) -> int:
+    return max(max(s.bbox[3] for s in spans), 1)
+
+
+def _group_spans_by_line(spans: Sequence[ColoredTextSpan]) -> List[List[ColoredTextSpan]]:
+    """Cluster OCR words onto horizontal lines before chaining."""
+    if not spans:
+        return []
+    ordered = sorted(spans, key=lambda s: (s.bbox[1], s.bbox[0]))
+    y_frac = text_merge_line_y_frac()
+    lines: List[List[ColoredTextSpan]] = [[ordered[0]]]
+    for span in ordered[1:]:
+        line = lines[-1]
+        ref_y = _line_center_y(line)
+        line_h = _line_height(line)
+        span_cy = span.bbox[1] + span.bbox[3] * 0.5
+        if abs(span_cy - ref_y) <= line_h * y_frac:
+            line.append(span)
+        else:
+            lines.append([span])
+    return lines
+
+
+def _merge_line_spans(line: Sequence[ColoredTextSpan]) -> List[ColoredTextSpan]:
+    """
+    Greedily extend each span while the next word continues the same line.
+
+    Uses a running merged bbox so gap checks reflect accumulated width.
+    """
+    ordered = sorted(line, key=lambda s: s.bbox[0])
+    if not ordered:
+        return []
+    merged: List[ColoredTextSpan] = []
+    idx = 0
+    while idx < len(ordered):
+        accum = ordered[idx]
+        j = idx + 1
+        while j < len(ordered) and _should_merge_spans(accum, ordered[j]):
+            accum = _merge_two_spans(accum, ordered[j])
+            j += 1
+        merged.append(accum)
+        idx = j
+    return merged
+
+
 def merge_adjacent_spans(spans: List[ColoredTextSpan]) -> List[ColoredTextSpan]:
-    """Join per-word OCR boxes that belong to one phrase on the same line."""
+    """Join per-word OCR boxes into line-length phrases."""
     if len(spans) < 2:
         return spans
-    ordered = sorted(spans, key=lambda s: (s.bbox[1], s.bbox[0]))
-    merged: List[ColoredTextSpan] = [ordered[0]]
-    for span in ordered[1:]:
-        prev = merged[-1]
-        if _should_merge_spans(prev, span):
-            merged[-1] = _merge_two_spans(prev, span)
-        else:
-            merged.append(span)
-    return merged
+    out: List[ColoredTextSpan] = []
+    for line in _group_spans_by_line(spans):
+        out.extend(_merge_line_spans(line))
+    return out
 
 
 def text_merge_words_enabled() -> bool:
@@ -593,7 +660,7 @@ def text_output_filter_enabled() -> bool:
 
 
 def text_output_min_conf() -> float:
-    return _env_float("EXODIA_TEXT_OUTPUT_MIN_CONF", 45.0)
+    return _env_float("EXODIA_TEXT_OUTPUT_MIN_CONF", 60.0)
 
 
 def _bbox_intersects(a: Bbox, rect: Sequence[int]) -> bool:
@@ -869,6 +936,8 @@ __all__ = [
     "merge_adjacent_spans",
     "run_ocr_data",
     "text_local_bg_enabled",
+    "text_merge_line_y_frac",
+    "text_merge_max_gap_line_h",
     "text_merge_words_enabled",
     "filter_spans_for_output",
     "scan_client_text",
