@@ -57,7 +57,7 @@ class TextPerceptionSnapshot:
 
 @dataclass
 class TextPerceptionCache:
-    """Thread-safe colored text scan state for stream consumers."""
+    """Thread-safe full-client OCR spans (all colors). Bots filter when reading."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _spans: Tuple[ColoredTextSpan, ...] = ()
@@ -129,7 +129,7 @@ class TextPerceptionCache:
 
 
 class TextScanWorker:
-    """Daemon thread: full-client colored OCR on fanout text queue frames."""
+    """Daemon thread: full-client colored OCR; cache holds all spans for consumers."""
 
     def __init__(
         self,

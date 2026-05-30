@@ -42,6 +42,7 @@ type RuneLiteViewPanelProps = {
   streamMeta?: StreamMeta | null;
   showStreamDebugOverlay?: boolean;
   onToggleStreamDebugOverlay?: (show: boolean) => void;
+  showTextHighlights?: boolean;
   worldHitCount?: number;
   overlayAnnotations?: OverlayAnnotationEntry[];
   latestActionPreview?: ActionClickPreview | null;
@@ -106,6 +107,7 @@ export function RuneLiteViewPanel({
   streamMeta = null,
   showStreamDebugOverlay = false,
   onToggleStreamDebugOverlay,
+  showTextHighlights = false,
   worldHitCount,
   overlayAnnotations = [],
   latestActionPreview = null,
@@ -381,6 +383,7 @@ export function RuneLiteViewPanel({
                 meta={streamMeta}
                 imageRef={imageRef}
                 showInventoryDebug={showStreamDebugOverlay}
+                showTextHighlights={showTextHighlights}
               />
             )}
             <EphemeralOverlayLayer annotations={overlayAnnotations} />

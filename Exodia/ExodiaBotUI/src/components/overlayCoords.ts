@@ -1,4 +1,10 @@
-import type { ActionClickPreview, StreamMeta, WorldPerceptionMeta } from '../../shared/ipc';
+import type {
+  ActionClickPreview,
+  StreamMeta,
+  TextPerceptionMeta,
+  TextSpanMeta,
+  WorldPerceptionMeta,
+} from '../../shared/ipc';
 
 export type PointLayout = {
   left: string;
@@ -74,6 +80,65 @@ export type PerceptionHudInvWatchMarker = {
   color: string;
 };
 
+export type PerceptionHudTextMarker = {
+  key: string;
+  text: string;
+  color: string;
+  left: string;
+  top: string;
+  width: string;
+  height: string;
+};
+
+const TEXT_COLOR_SWATCH: Record<string, string> = {
+  green: '#22c55e',
+  red: '#ef4444',
+  yellow: '#eab308',
+  cyan: '#22d3ee',
+  orange: '#f97316',
+  white: '#f8fafc',
+  unknown: '#94a3b8',
+};
+
+export function textSwatchForColor(color: string): string {
+  return TEXT_COLOR_SWATCH[color.toLowerCase()] ?? TEXT_COLOR_SWATCH.unknown!;
+}
+
+function spanPlausibleForHighlight(span: TextSpanMeta): boolean {
+  const text = (span.text ?? '').trim();
+  if (!text) return false;
+  return (span.conf ?? 0) >= 45;
+}
+
+function buildTextMarkers(
+  text: TextPerceptionMeta | undefined,
+  frameWidth: number,
+  frameHeight: number,
+): PerceptionHudTextMarker[] {
+  const raw: TextSpanMeta[] = (
+    text?.spans && text.spans.length > 0 ? text.spans : (text?.fishing_spans ?? [])
+  ).filter(spanPlausibleForHighlight);
+  const markers: PerceptionHudTextMarker[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const span = raw[i]!;
+    const bbox = span.bbox;
+    if (!bbox || bbox.length < 4) continue;
+    const box = clientRectToPercent(frameWidth, frameHeight, bbox as [number, number, number, number]);
+    if (!box) continue;
+    const colorKey = span.color?.toLowerCase() ?? 'unknown';
+    markers.push({
+      key: `text-${i}-${colorKey}-${span.text}`,
+      text: span.text,
+      color: textSwatchForColor(colorKey),
+      left: box.left,
+      top: box.top,
+      width: box.width,
+      height: box.height,
+    });
+  }
+  return markers;
+}
+
 export type PerceptionHudLayout = {
   invBox: DisplayRect | null;
   /** Distinct item ids in first-seen slot order (1-based index matches slot markers). */
@@ -81,6 +146,8 @@ export type PerceptionHudLayout = {
   slotMarkers: PerceptionHudSlotMarker[];
   worldMarkers: PerceptionHudWorldMarker[];
   invWatchMarkers: PerceptionHudInvWatchMarker[];
+  textMarkers: PerceptionHudTextMarker[];
+  textStripBox: DisplayRect | null;
 };
 
 /** Up to 28 visually distinct colors — one per inventory slot / distinct item id. */
@@ -359,6 +426,8 @@ export function computePerceptionHudLayout(
 
   const inventory = meta?.perception?.inventory;
   const world = meta?.perception?.world;
+  const text = meta?.perception?.text;
+  const action = meta?.perception?.action;
 
   let invBox: DisplayRect | null = null;
   const rect = inventory?.inventory_rect;
@@ -442,11 +511,30 @@ export function computePerceptionHudLayout(
     }
   }
 
-  if (!invBox && idEntries.length === 0 && slotMarkers.length === 0 && worldMarkers.length === 0 && invWatchMarkers.length === 0) {
+  const textMarkers = buildTextMarkers(text, frameWidth, frameHeight);
+  let textStripBox: DisplayRect | null = null;
+  const stripRect = action?.action_strip_rect;
+  if (stripRect && stripRect.length === 4) {
+    textStripBox = clientRectToPercent(
+      frameWidth,
+      frameHeight,
+      stripRect as [number, number, number, number],
+    );
+  }
+
+  if (
+    !invBox &&
+    idEntries.length === 0 &&
+    slotMarkers.length === 0 &&
+    worldMarkers.length === 0 &&
+    invWatchMarkers.length === 0 &&
+    textMarkers.length === 0 &&
+    !textStripBox
+  ) {
     return null;
   }
 
-  return { invBox, idEntries, slotMarkers, worldMarkers, invWatchMarkers };
+  return { invBox, idEntries, slotMarkers, worldMarkers, invWatchMarkers, textMarkers, textStripBox };
 }
 
 export function computeClickLayout(preview: ActionClickPreview): ClickLayout | null {

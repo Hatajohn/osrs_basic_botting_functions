@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -586,6 +587,120 @@ def text_merge_words_enabled() -> bool:
     return _env_bool("EXODIA_TEXT_MERGE_WORDS", True)
 
 
+def text_output_filter_enabled() -> bool:
+    """Optional ``/meta`` span filter only — never applied to ``TextPerceptionCache``."""
+    return _env_bool("EXODIA_TEXT_OUTPUT_FILTER", False)
+
+
+def text_output_min_conf() -> float:
+    return _env_float("EXODIA_TEXT_OUTPUT_MIN_CONF", 45.0)
+
+
+def _bbox_intersects(a: Bbox, rect: Sequence[int]) -> bool:
+    ax, ay, aw, ah = (int(a[i]) for i in range(4))
+    rx, ry, rw, rh = (int(rect[i]) for i in range(4))
+    ax2, ay2 = ax + aw, ay + ah
+    rx2, ry2 = rx + rw, ry + rh
+    ix1 = max(ax, rx)
+    iy1 = max(ay, ry)
+    ix2 = min(ax2, rx2)
+    iy2 = min(ay2, ry2)
+    return ix2 > ix1 and iy2 > iy1
+
+
+def _pad_rect(rect: Sequence[int], frame_w: int, frame_h: int, *, pad_x: int, pad_y: int) -> Bbox:
+    x, y, w, h = (int(rect[i]) for i in range(4))
+    return _clamp_bbox([x - pad_x, y - pad_y, w + 2 * pad_x, h + 2 * pad_y], frame_w, frame_h)
+
+
+def _clamp_bbox(rect: Sequence[int], frame_w: int, frame_h: int) -> Bbox:
+    x, y, w, h = (int(rect[i]) for i in range(4))
+    x = max(0, min(x, max(0, frame_w - 1)))
+    y = max(0, min(y, max(0, frame_h - 1)))
+    w = max(1, min(w, frame_w - x))
+    h = max(1, min(h, frame_h - y))
+    return (x, y, w, h)
+
+
+def _output_keep_rois(
+    frame_w: int,
+    frame_h: int,
+    *,
+    action_strip_rect: Optional[Sequence[int]] = None,
+) -> List[Bbox]:
+    """UI bands where skilling / action-line text is expected (not playspace NPC labels)."""
+    rois: List[Bbox] = []
+    if action_strip_rect is not None and len(action_strip_rect) == 4:
+        rois.append(
+            _pad_rect(action_strip_rect, frame_w, frame_h, pad_x=28, pad_y=14)
+        )
+    rois.append(
+        _clamp_bbox(
+            [
+                max(0, int(frame_w * 0.34)),
+                max(0, int(frame_h * 0.40)),
+                max(120, int(frame_w * 0.66)),
+                max(80, int(frame_h * 0.58)),
+            ],
+            frame_w,
+            frame_h,
+        )
+    )
+    rois.append(
+        _clamp_bbox(
+            [0, max(0, int(frame_h * 0.30)), max(120, int(frame_w * 0.38)), max(60, int(frame_h * 0.35))],
+            frame_w,
+            frame_h,
+        )
+    )
+    return rois
+
+
+def _span_in_keep_rois(span: ColoredTextSpan, rois: Sequence[Bbox]) -> bool:
+    return any(_bbox_intersects(span.bbox, roi) for roi in rois)
+
+
+def _normalize_span_text(text: str) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def _span_is_green_fishing(span: ColoredTextSpan) -> bool:
+    """Green ``Fishing`` (optional meta filter helper; cache keeps all spans)."""
+    norm = _normalize_span_text(span.text)
+    if not norm or "fish" not in norm:
+        return False
+    if re.search(r"\bnot\b", norm):
+        return False
+    return span.color.lower() == "green"
+
+
+def filter_spans_for_output(
+    spans: Sequence[ColoredTextSpan],
+    client_bgr: np.ndarray,
+    *,
+    frame_w: int,
+    frame_h: int,
+    action_strip_rect: Optional[Sequence[int]] = None,
+) -> List[ColoredTextSpan]:
+    """Optional meta/UI subset — full OCR remains in ``TextPerceptionCache``."""
+    _ = client_bgr
+    if not spans:
+        return []
+    if not text_output_filter_enabled():
+        return list(spans)
+    rois = _output_keep_rois(frame_w, frame_h, action_strip_rect=action_strip_rect)
+    kept: List[ColoredTextSpan] = []
+    for span in spans:
+        if span.conf < text_output_min_conf():
+            continue
+        if not _span_is_green_fishing(span):
+            continue
+        if not _span_in_keep_rois(span, rois):
+            continue
+        kept.append(span)
+    return kept
+
+
 def _bbox_iou(a: Bbox, b: Bbox) -> float:
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
@@ -649,6 +764,9 @@ def scan_client_text(
 ) -> ClientTextSnapshot:
     """
     Tile the full client frame, OCR active tiles, classify color, dedupe, and cap spans.
+
+    All qualifying spans are stored in the cache; fishing bots filter for green
+    ``Fishing`` when reading (see ``bot_text_query``).
     """
     t0 = time.monotonic()
     if client_bgr is None or not getattr(client_bgr, "size", 0):
@@ -752,7 +870,9 @@ __all__ = [
     "run_ocr_data",
     "text_local_bg_enabled",
     "text_merge_words_enabled",
+    "filter_spans_for_output",
     "scan_client_text",
     "text_max_spans",
     "text_min_conf",
+    "text_output_filter_enabled",
 ]

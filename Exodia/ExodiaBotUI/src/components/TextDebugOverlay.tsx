@@ -155,9 +155,16 @@ function spanMatchesFilter(span: TextSpanMeta, query: string): boolean {
 type TextDebugOverlayProps = {
   streamMeta: StreamMeta | null | undefined;
   streamPortUp?: boolean;
+  showTextHighlights?: boolean;
+  onToggleTextHighlights?: (show: boolean) => void;
 };
 
-export function TextDebugOverlay({ streamMeta, streamPortUp }: TextDebugOverlayProps) {
+export function TextDebugOverlay({
+  streamMeta,
+  streamPortUp,
+  showTextHighlights = false,
+  onToggleTextHighlights,
+}: TextDebugOverlayProps) {
   const textMeta = streamMeta?.perception?.text;
   const [filterQuery, setFilterQuery] = useState('');
   const incoming = useMemo(() => spansForList(textMeta), [textMeta]);
@@ -232,6 +239,18 @@ export function TextDebugOverlay({ streamMeta, streamPortUp }: TextDebugOverlayP
             aria-label="Clear filter"
           >
             Clear
+          </button>
+        ) : null}
+        {onToggleTextHighlights ? (
+          <button
+            type="button"
+            className={`btn btn--sm ${showTextHighlights ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => onToggleTextHighlights(!showTextHighlights)}
+            aria-pressed={showTextHighlights}
+            disabled={!streamPortUp}
+            title="Draw OCR span boxes on the RuneLite stream overlay"
+          >
+            Highlights
           </button>
         ) : null}
         <span className="text-span-list__stats">{stats || 'No text meta'}</span>

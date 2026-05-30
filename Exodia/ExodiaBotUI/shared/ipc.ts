@@ -368,10 +368,22 @@ export type TextPerceptionMeta = {
   fishing_spans?: TextSpanMeta[];
 };
 
+export type ActionPerceptionMeta = {
+  action_code?: number;
+  action_strip_rect?: number[] | null;
+  action_line_text?: string | null;
+  action_line_color?: string | null;
+  detection_source?: string;
+  processed_seq?: number;
+  capture_seq?: number;
+  vision_fps?: number;
+};
+
 export type PerceptionMeta = {
   inventory?: InventoryPerceptionMeta;
   world?: WorldPerceptionMeta;
   text?: TextPerceptionMeta;
+  action?: ActionPerceptionMeta;
 };
 
 export type StreamMeta = {

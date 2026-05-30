@@ -13,6 +13,7 @@ type PerceptionDebugOverlayProps = {
   imageRef: RefObject<HTMLImageElement | null>;
   showInventoryDebug?: boolean;
   showWorldTracks?: boolean;
+  showTextHighlights?: boolean;
 };
 
 function worldMarkerTitle(m: PerceptionHudWorldMarker): string {
@@ -38,6 +39,7 @@ export function PerceptionDebugOverlay({
   imageRef,
   showInventoryDebug = true,
   showWorldTracks = true,
+  showTextHighlights = false,
 }: PerceptionDebugOverlayProps) {
   const computeLayout = useCallback(
     (img: HTMLImageElement) => computePerceptionHudLayout(img, meta),
@@ -61,12 +63,25 @@ export function PerceptionDebugOverlay({
     [worldMarkers],
   );
 
-  if (!layout && worldMarkers.length === 0 && invWatchMarkers.length === 0) return null;
+  const textMarkers = useMemo(
+    () => (showTextHighlights && layout ? layout.textMarkers : []),
+    [layout, showTextHighlights],
+  );
 
-  const { invBox, idEntries, slotMarkers } = layout ?? {
+  if (
+    !layout &&
+    worldMarkers.length === 0 &&
+    invWatchMarkers.length === 0 &&
+    textMarkers.length === 0
+  ) {
+    return null;
+  }
+
+  const { invBox, idEntries, slotMarkers, textStripBox } = layout ?? {
     invBox: null,
     idEntries: [],
     slotMarkers: [],
+    textStripBox: null,
   };
 
   return (
@@ -169,6 +184,33 @@ export function PerceptionDebugOverlay({
           title={`${m.template}${m.score != null ? ` (${m.score.toFixed(2)})` : ''}`}
         />
       ))}
+      {showTextHighlights && textStripBox && (
+        <div
+          className="perception-debug-overlay__text-strip"
+          style={{
+            left: textStripBox.left,
+            top: textStripBox.top,
+            width: textStripBox.width,
+            height: textStripBox.height,
+          }}
+          title="Text scan ROI"
+        />
+      )}
+      {showTextHighlights &&
+        textMarkers.map((m) => (
+          <div
+            key={m.key}
+            className="perception-debug-overlay__text-hl"
+            style={{
+              left: m.left,
+              top: m.top,
+              width: m.width,
+              height: m.height,
+              ['--text-hl-color' as string]: m.color,
+            }}
+            title={`${m.text}`}
+          />
+        ))}
     </div>
   );
 }

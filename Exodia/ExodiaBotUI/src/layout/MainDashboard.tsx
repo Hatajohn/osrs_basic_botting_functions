@@ -32,6 +32,8 @@ type MainDashboardProps = {
   streamMeta?: StreamMeta | null;
   showStreamDebugOverlay?: boolean;
   onToggleStreamDebugOverlay?: (show: boolean) => void;
+  showTextHighlights?: boolean;
+  onToggleTextHighlights?: (show: boolean) => void;
   worldHitCount?: number;
   debugLoading: boolean;
   calibrating: boolean;
@@ -73,6 +75,8 @@ export function MainDashboard({
   streamMeta,
   showStreamDebugOverlay,
   onToggleStreamDebugOverlay,
+  showTextHighlights,
+  onToggleTextHighlights,
   worldHitCount,
   debugLoading,
   calibrating,
@@ -147,7 +151,12 @@ export function MainDashboard({
           ) : (
             <>
               <div className="dashboard__pane" style={{ flex: effectiveLogTextFlex }}>
-                <TextDebugPanel streamMeta={streamMeta} streamPortUp={streamPortUp} />
+                <TextDebugPanel
+                  streamMeta={streamMeta}
+                  streamPortUp={streamPortUp}
+                  showTextHighlights={showTextHighlights}
+                  onToggleTextHighlights={onToggleTextHighlights}
+                />
               </div>
               <Splitter orientation="horizontal" onDrag={resizeLogText} />
               <div className="dashboard__pane" style={{ flex: effectiveLogConsoleFlex }}>
@@ -189,6 +198,7 @@ export function MainDashboard({
             streamMeta={streamMeta}
             showStreamDebugOverlay={showStreamDebugOverlay}
             onToggleStreamDebugOverlay={onToggleStreamDebugOverlay}
+            showTextHighlights={showTextHighlights}
             worldHitCount={worldHitCount}
             overlayAnnotations={overlayAnnotations}
             latestActionPreview={latestActionPreview}

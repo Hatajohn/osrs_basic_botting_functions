@@ -68,6 +68,7 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [aboutDetail, setAboutDetail] = useState('');
   const [showStreamDebugOverlay, setShowStreamDebugOverlay] = useState(false);
+  const [showTextHighlights, setShowTextHighlights] = useState(false);
   const [debugMode, setDebugMode] = useState<DebugFrameMode>('inventory_identify');
   const [debugResult, setDebugResult] = useState<DebugFrameResult | null>(null);
   const [debugImage, setDebugImage] = useState<string | undefined>();
@@ -305,6 +306,8 @@ export default function App() {
         streamMeta={streamMeta}
         showStreamDebugOverlay={showStreamDebugOverlay}
         onToggleStreamDebugOverlay={setShowStreamDebugOverlay}
+        showTextHighlights={showTextHighlights}
+        onToggleTextHighlights={setShowTextHighlights}
         worldHitCount={worldHitCount}
         debugLoading={debugLoading}
         calibrating={calibrating}

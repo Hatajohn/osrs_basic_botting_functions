@@ -72,6 +72,24 @@
   color: rgba(255, 255, 255, 0.78);
 }
 
+.perception-debug-overlay__text-strip {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed rgba(148, 163, 184, 0.55);
+  background: rgba(148, 163, 184, 0.06);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.perception-debug-overlay__text-hl {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--text-hl-color) 75%, transparent);
+  background: color-mix(in srgb, var(--text-hl-color) 22%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
 .perception-debug-overlay__inv-rect {
   position: absolute;
   box-sizing: border-box;
