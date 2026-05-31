@@ -19,7 +19,6 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 import cv2
@@ -30,7 +29,7 @@ from bot_client_text import ClientTextSnapshot
 from bot_env import resize_image
 from bot_frame_dispatch import FrameQueue
 from bot_perception_worker import run_modality_loop
-from bot_template_find import TemplateFinder
+from bot_eyes import _load_template_gray
 from bot_text_query import infer_action_code_from_snapshot
 from bot_text_vision import TextPerceptionCache
 
@@ -43,13 +42,51 @@ _ACTION_FISHING = 0
 _ACTION_IDLE = 1
 _ACTION_NO_UI = 2
 
-from bot_action_templates import (
-    FISHING_TEXT_TEMPLATE as _FISH_TEMPLATE,
-    NOT_FISHING_TEXT_TEMPLATE as _NOT_FISH_TEMPLATE,
-    action_template_paths_ok,
-    load_template_gray as _load_template_gray,
-    resolve_action_template_path,
-)
+_FISHING_TEXT_TEMPLATE = "Fishing_text.png"
+_NOT_FISHING_TEXT_TEMPLATE = "Not_fishing_text.png"
+
+
+def _fishing_template_path(filename: str) -> Optional[str]:
+    path = os.path.join(os.getcwd(), "images", filename)
+    if os.path.isfile(path):
+        return path
+    return None
+
+
+def action_template_paths_ok() -> Dict[str, bool]:
+    return {
+        _FISHING_TEXT_TEMPLATE: _fishing_template_path(_FISHING_TEXT_TEMPLATE) is not None,
+        _NOT_FISHING_TEXT_TEMPLATE: _fishing_template_path(_NOT_FISHING_TEXT_TEMPLATE) is not None,
+    }
+
+
+def _score_fishing_strip_templates(strip: Optional[np.ndarray]) -> Tuple[float, float]:
+    """Return ``(fishing_score, not_fishing_score)`` for a gray or BGR strip ROI."""
+    if strip is None or not getattr(strip, "size", 0):
+        return 0.0, 0.0
+    if strip.ndim == 3:
+        gray = cv2.cvtColor(strip, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = strip
+
+    scores = {0: 0.0, 1: 0.0}
+    for filename, result_code in (
+        (_FISHING_TEXT_TEMPLATE, 0),
+        (_NOT_FISHING_TEXT_TEMPLATE, 1),
+    ):
+        path = _fishing_template_path(filename)
+        if path is None:
+            continue
+        template = _load_template_gray(path)
+        if template is None:
+            continue
+        th, tw = template.shape[:2]
+        if gray.shape[0] < th or gray.shape[1] < tw:
+            continue
+        res = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(res)
+        scores[result_code] = max(scores[result_code], float(max_val))
+    return scores[0], scores[1]
 
 
 def _env_float(key: str, default: float) -> float:
@@ -203,10 +240,6 @@ def _match_template_peaks(
     return peaks
 
 
-def _template_path(filename: str) -> Optional[Path]:
-    return resolve_action_template_path(filename)
-
-
 def _action_template_scores_in_bottom_ui(client_bgr: np.ndarray) -> Tuple[float, float]:
     """Fallback scan in bottom-right UI band (``bot_eyes.get_action_text`` parity)."""
     if client_bgr is None or not getattr(client_bgr, "size", 0):
@@ -214,7 +247,7 @@ def _action_template_scores_in_bottom_ui(client_bgr: np.ndarray) -> Tuple[float,
     h0, w0 = client_bgr.shape[:2]
     sx, sy, sw, sh = _clamp_roi(w0, h0, _bottom_right_ui_search_roi(w0, h0))
     patch = client_bgr[sy : sy + sh, sx : sx + sw]
-    return TemplateFinder.score_action_strip_templates(patch)
+    return _score_fishing_strip_templates(patch)
 
 
 def _green_status_visible(img_bgr: np.ndarray) -> bool:
@@ -248,11 +281,11 @@ def _find_action_strip_rect(
     box_w = int(os.environ.get("EXODIA_ACTION_STRIP_WIDTH", "100"))
     box_h = int(os.environ.get("EXODIA_ACTION_STRIP_HEIGHT", "30"))
     best: Optional[Tuple[float, int, int]] = None
-    for filename in (_FISH_TEMPLATE, _NOT_FISH_TEMPLATE):
-        path = _template_path(filename)
+    for filename in (_FISHING_TEXT_TEMPLATE, _NOT_FISHING_TEXT_TEMPLATE):
+        path = _fishing_template_path(filename)
         if path is None:
             continue
-        template = _load_template_gray(str(path))
+        template = _load_template_gray(path)
         if template is None:
             continue
         th, tw = template.shape[:2]
@@ -461,7 +494,7 @@ def detect_action_strip(
     idle_s = 0.0
     green_visible = False
     if strip is not None and strip.size > 0:
-        fish_s, idle_s = TemplateFinder.score_action_strip_templates(strip)
+        fish_s, idle_s = _score_fishing_strip_templates(strip)
         green_visible = _green_status_visible(strip)
 
     # Weak strip ROI — search bottom-right UI and refine rect via template peaks.
@@ -478,7 +511,7 @@ def detect_action_strip(
             if refined.size > 0:
                 strip_rect = found
                 strip = refined.copy()
-                fish_s, idle_s = TemplateFinder.score_action_strip_templates(strip)
+                fish_s, idle_s = _score_fishing_strip_templates(strip)
                 green_visible = _green_status_visible(strip)
 
     ocr_hit = _try_ocr_action_detection(
@@ -845,5 +878,4 @@ __all__ = [
     "default_action_vision_fps",
     "detect_action_strip",
     "resolve_action_strip_roi_client",
-    "resolve_action_template_path",
 ]

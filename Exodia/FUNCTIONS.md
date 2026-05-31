@@ -117,9 +117,13 @@ Not wired into infernal FSM yet — test/diagnose path only.
 
 **Sacred:** `SacredEelMachine(ctx).step()` — states FISHING / SEEK_SPOT / SCALING; eel count via `read_inventory_labels` + `count_labeled_item_slots`.
 
-**Infernal:** `InfernalEelMachine(ctx).step()` — states FISHING / SEEK_SPOT / CRACKING; same inventory counting; cracking via `use_named_item_on_named_item`.
+**Infernal:** `InfernalEelMachine(ctx).step()` — states FISHING / SEEK_SPOT / CRACKING; same inventory counting; cracking via repeated `use_named_item_on_named_item`.
 
-Outer session loops: `SacredEelFishing/sacred_eel_fishing.py`, `InfernalEelFishing/infernal_eel_fishing.py`.
+**BasicStream:** `BasicStreamFishingMachine(ctx).step()` — states FISHING / SEEK_SPOT / CRACKING on `StreamBotContext` only (no `BotEyes`). Green **Fishing** from `resolve_fishing_action_from_tick` (`tick.text`); spots from world tracks; full inventory → one hammer→eel, poll until occupied ≤ 6, then seek.
+
+Outer session loops: `SacredEelFishing/sacred_eel_fishing.py`, `InfernalEelFishing/infernal_eel_fishing.py`, `BasicStreamFishing/basic_stream_fishing.py`.
+
+**TODO:** Pull cracking logic out of `basic_stream_fishing_fsm.py` into a shared module when a second stream bot needs it.
 
 ### 12. Diagnose inventory vision (no mouse)
 
@@ -462,6 +466,16 @@ step()
   └─ CRACKING: use_named_item_on_named_item(hammer, eel) → CRACK_TICK_DELAY → re-count until zero eels
 ```
 
+**BasicStreamFishingMachine** (`BasicStreamFishing/basic_stream_fishing_fsm.py`):
+
+```
+step()
+  ├─ ctx.refresh → resolve_fishing_action_from_tick (green Fishing in tick.text only)
+  ├─ FISHING: not green → SEEK_SPOT; full inv → CRACKING
+  ├─ SEEK_SPOT: pan/click world track → wait for green → FISHING
+  └─ CRACKING: one hammer→eel → poll tick.inventory until occupied ≤ 6 → SEEK_SPOT
+```
+
 ### Other compounds
 
 | Function | Stack (summary) |
@@ -660,13 +674,13 @@ Architecture plan: [`PlansTODO/function-architecture-plan.md`](PlansTODO/functio
 | `EXODIA_TEXT_MERGE_LINE_Y_FRAC` | `0.65` — Y tolerance for grouping words onto one line |
 | `EXODIA_TEXT_PSM` | `11` — Tesseract PSM |
 | `EXODIA_TEXT_LOCAL_BG` | `1` — background-ring stroke isolation (terrain vs UI red) |
-| `EXODIA_BASIC_FISHING_USE_TEXT` | `1` — stream fishing: green OCR before action-strip fallback |
+| `EXODIA_BASIC_FISHING_USE_TEXT` | `1` — stream fishing: require text cache for green Fishing (no action-strip fallback) |
 
 | Function | Question | Notes |
 |----------|----------|-------|
 | `TextFinder.scan()` | Full-client colored OCR on a frame? | Entry in `bot_client_text.py`; stream via `TextScanWorker`. |
 | `merge_adjacent_spans()` | Join word boxes into line phrases? | Line group + greedy extend; neutral color chaining for chat. |
-| `resolve_fishing_action_from_tick()` | Fishing state from stream text? | Green **Fishing** in strip ROI; ignores red spans. |
+| `resolve_fishing_action_from_tick()` | Fishing state from stream text? | Green **Fishing** in action-strip ROI only; no `perception.action` fallback. |
 | `infer_action_code_from_snapshot()` | Action strip code from OCR spans? | Used by `bot_action_vision` when text cache is synced. |
 
 ### Runtime / session

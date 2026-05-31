@@ -86,11 +86,19 @@ export async function sendRuntimeCommand(
   });
 }
 
+function sessionStartedMs(iso: unknown): number | null {
+  if (typeof iso !== 'string' || !iso.trim()) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 /** Wait for runtime stop to take effect (poll status or timeout). */
 export async function waitForRuntimeStop(
   statusPath: string,
   runtimeScriptId: string,
   timeoutMs = 8000,
+  /** Ignore ``stop_reason`` left over from an earlier run (Electron spawn time, ms). */
+  startedAfterMs?: number | null,
 ): Promise<boolean> {
   const fs = await import('node:fs');
   const start = Date.now();
@@ -101,8 +109,21 @@ export async function waitForRuntimeStop(
         continue;
       }
       const raw = fs.readFileSync(statusPath, 'utf8');
-      const data = JSON.parse(raw) as { script?: string; stop_reason?: string };
+      const data = JSON.parse(raw) as {
+        script?: string;
+        stop_reason?: string;
+        session_started_at?: string;
+        updated_at?: string;
+      };
       if (data.script === runtimeScriptId && data.stop_reason) {
+        if (startedAfterMs != null) {
+          const sessionMs = sessionStartedMs(data.session_started_at);
+          // Status from a previous session — keep polling until this run acks stop.
+          if (sessionMs != null && sessionMs < startedAfterMs - 2000) {
+            await sleep(300);
+            continue;
+          }
+        }
         return true;
       }
     } catch {

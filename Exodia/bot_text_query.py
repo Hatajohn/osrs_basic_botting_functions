@@ -2,9 +2,9 @@
 Pure query helpers over ``ClientTextSnapshot`` / ``ColoredTextSpan``.
 
 Bots filter the shared text snapshot by color, substring, regex, or screen region
-instead of running per-script ROI OCR. Fishing ``action_code`` derivation lives in
-``infer_action_code_from_snapshot`` (colored OCR first; template fusion in
-``bot_action_vision`` later).
+instead of running per-script ROI OCR. Stream fishing uses ``resolve_fishing_action_from_tick``
+(green **Fishing** in the action strip only). ``infer_action_code_from_snapshot`` is used
+by ``bot_action_vision`` for the legacy action-strip worker.
 """
 from __future__ import annotations
 
@@ -118,6 +118,15 @@ def _frame_size_for_tick(tick: "PerceptionTick") -> Tuple[int, int]:
     return 0, 0
 
 
+def _bottom_right_search_rect(frame_w: int, frame_h: int) -> List[int]:
+    return [
+        max(0, int(frame_w * 0.40)),
+        max(0, int(frame_h * 0.45)),
+        max(200, int(frame_w * 0.60)),
+        max(200, int(frame_h * 0.52)),
+    ]
+
+
 def _pad_rect(rect: Sequence[int], frame_w: int, frame_h: int, *, pad_x: int = 24, pad_y: int = 12) -> List[int]:
     x, y, w, h = (int(rect[i]) for i in range(4))
     x1 = max(0, x - pad_x)
@@ -133,7 +142,7 @@ def _strip_rect_for_tick(tick: "PerceptionTick") -> Optional[List[int]]:
     if action.action_strip_rect is not None and len(action.action_strip_rect) == 4:
         base = [int(v) for v in action.action_strip_rect]
         if fw > 0 and fh > 0:
-            return _pad_rect(base, fw, fh)
+            return _pad_rect(base, fw, fh, pad_x=40, pad_y=20)
         return base
     inv = tick.inventory.rect
     rect = tick.client_rect
@@ -145,7 +154,7 @@ def _strip_rect_for_tick(tick: "PerceptionTick") -> Optional[List[int]]:
             frame_w=fw,
             frame_h=fh,
         )
-        return _pad_rect([ax, ay, aw, ah], fw, fh)
+        return _pad_rect([ax, ay, aw, ah], fw, fh, pad_x=40, pad_y=20)
     if fw > 0 and fh > 0:
         return [
             max(0, int(fw * 0.45)),
@@ -156,47 +165,43 @@ def _strip_rect_for_tick(tick: "PerceptionTick") -> Optional[List[int]]:
     return None
 
 
-def _bottom_right_search_rect(frame_w: int, frame_h: int) -> List[int]:
-    return [
-        max(0, int(frame_w * 0.40)),
-        max(0, int(frame_h * 0.45)),
-        max(200, int(frame_w * 0.60)),
-        max(200, int(frame_h * 0.52)),
-    ]
+def _infer_display_color(text: str, color: str) -> str:
+    """Match ``TextDebugOverlay.inferDisplayColor`` — unknown HSV → green/red from wording."""
+    key = (color or "unknown").strip().lower() or "unknown"
+    if key != "unknown":
+        return key
+    norm = _normalize_text(text)
+    if re.search(r"\bnot\b", norm) and re.search(r"fish", norm):
+        return "red"
+    if re.search(r"fish", norm) and not re.search(r"\bnot\b", norm):
+        return "green"
+    return key
 
 
-def _inference_from_action_snapshot(action: "object") -> Optional[ActionInference]:
-    """Use stream ``perception.action`` OCR line when span list is empty or stale."""
-    code = int(getattr(action, "action_code", ACTION_NO_UI))
-    line = getattr(action, "action_line_text", None) or ""
-    color = getattr(action, "action_line_color", None)
-    source = getattr(action, "detection_source", None) or "stream_action"
-    norm = _normalize_text(line)
-    fuzzy = default_fuzzy_threshold()
+def _text_indicates_fishing(text: str, *, fuzzy_threshold: float) -> bool:
+    norm = _normalize_text(text)
+    if not norm or re.search(r"\bnot\b", norm):
+        return False
+    if "fishing" in norm.replace(" ", ""):
+        return True
+    return _fuzzy_contains(text, "fishing", threshold=fuzzy_threshold)
 
-    if source in ("colored_ocr", "template", "contour") and code in (ACTION_FISHING, ACTION_IDLE):
-        return ActionInference(
-            action_code=code,
-            action_line_text=line.strip() or None,
-            action_line_color=color,
-            detection_source=source,
-        )
-    if norm:
-        if re.search(r"\bnot\b", norm) and _fuzzy_contains(line, "fish", threshold=fuzzy):
-            return ActionInference(
-                action_code=ACTION_IDLE,
-                action_line_text=line.strip(),
-                action_line_color=color or "red",
-                detection_source=source or "stream_action_line",
-            )
-        if _fuzzy_contains(line, "fishing", threshold=fuzzy) and not re.search(r"\bnot\b", norm):
-            return ActionInference(
-                action_code=ACTION_FISHING,
-                action_line_text=line.strip(),
-                action_line_color=color or "green",
-                detection_source=source or "stream_action_line",
-            )
-    return None
+
+def _group_spans_by_line(spans: Sequence[ColoredTextSpan]) -> List[List[ColoredTextSpan]]:
+    if not spans:
+        return []
+    ordered = sorted(spans, key=lambda s: (s.bbox[1], s.bbox[0]))
+    lines: List[List[ColoredTextSpan]] = [[ordered[0]]]
+    for span in ordered[1:]:
+        line = lines[-1]
+        ref_y = line[0].bbox[1] + line[0].bbox[3] * 0.5
+        line_h = max(s.bbox[3] for s in line)
+        span_cy = span.bbox[1] + span.bbox[3] * 0.5
+        if abs(span_cy - ref_y) <= line_h * 0.65:
+            line.append(span)
+        else:
+            lines.append([span])
+    return lines
 
 
 def _infer_green_fishing_in_rect(
@@ -208,7 +213,7 @@ def _infer_green_fishing_in_rect(
     """
     Positive signal only: green ``Fishing`` in ``rect`` (or full frame when ``rect`` is None).
 
-    Red NOT fishing is ignored — no green and no text both mean not fishing.
+    Per-span and per-line (matches text-view merge). Red NOT fishing is ignored.
     """
     fuzzy_threshold = default_fuzzy_threshold()
     min_conf = text_min_conf()
@@ -221,15 +226,21 @@ def _infer_green_fishing_in_rect(
     if not subset:
         return None
 
-    green_spans = [s for s in subset if s.color.lower() == "green"]
-    green_text = join_text(green_spans)
-    if green_text and _joined_strip_matches_fishing(green_text, fuzzy_threshold=fuzzy_threshold):
-        return ActionInference(
-            action_code=ACTION_FISHING,
-            action_line_text=green_text[:80],
-            action_line_color="green",
-            detection_source="colored_ocr_%s" % label,
-        )
+    green_spans = [
+        s
+        for s in subset
+        if _infer_display_color(s.text, s.color) == "green"
+    ]
+    for line in _group_spans_by_line(green_spans):
+        green_text = join_text(line)
+        if green_text and _text_indicates_fishing(green_text, fuzzy_threshold=fuzzy_threshold):
+            return ActionInference(
+                action_code=ACTION_FISHING,
+                action_line_text=green_text[:80],
+                action_line_color="green",
+                detection_source="colored_ocr_%s" % label,
+            )
+
     green_hits = tuple(
         s for s in subset if _is_green_fishing_span(s, fuzzy_threshold=fuzzy_threshold)
     )
@@ -238,42 +249,18 @@ def _infer_green_fishing_in_rect(
         return ActionInference(
             action_code=ACTION_FISHING,
             action_line_text=best_green.text,
-            action_line_color=best_green.color,
+            action_line_color=_infer_display_color(best_green.text, best_green.color),
             detection_source="colored_ocr_%s" % label,
         )
-
-    any_text = join_text(subset)
-    norm = _normalize_text(any_text)
-    if norm and _fuzzy_contains(any_text, "fishing", threshold=fuzzy_threshold) and not re.search(
-        r"\bnot\b", norm
-    ):
-        return ActionInference(
-            action_code=ACTION_FISHING,
-            action_line_text=any_text[:80],
-            action_line_color="unknown",
-            detection_source="keyword_%s" % label,
-        )
     return None
 
 
-def _infer_fishing_from_spans(
-    snapshot: ClientTextSnapshot,
-    *,
-    strip_rect: Optional[Rect] = None,
-    search_rect: Optional[Rect] = None,
-) -> Optional[ActionInference]:
-    """Find green ``Fishing`` in strip, search band, then full frame."""
-    for label, rect in (
-        ("action_strip", strip_rect),
-        ("search_band", search_rect),
-        ("full_frame", None),
-    ):
-        if rect is not None and len(rect) != 4:
-            continue
-        hit = _infer_green_fishing_in_rect(snapshot, rect, label=label)
-        if hit is not None:
-            return hit
-    return None
+_NOT_FISHING = ActionInference(
+    action_code=ACTION_IDLE,
+    action_line_text=None,
+    action_line_color=None,
+    detection_source="not_fishing",
+)
 
 
 def resolve_fishing_action_from_tick(
@@ -282,65 +269,73 @@ def resolve_fishing_action_from_tick(
     use_text: Optional[bool] = None,
 ) -> ActionInference:
     """
-    Read ``tick.text`` (full OCR cache) and look for green ``Fishing`` only.
+    Green ``Fishing`` OCR → ``ACTION_FISHING``; else not fishing.
 
-    Green in the action strip → fishing. No green in strip when other text exists
-    → not fishing (``ACTION_IDLE``). Red spans in the cache are ignored. Falls
-    back to stream ``perception.action`` when text is disabled or unavailable.
+    Matches the text-view list: inferred green from unknown HSV, per-line word merge,
+    and no full-frame join (avoids false negatives when other spans contain ``not``).
     """
     if use_text is None:
         use_text = stream_fishing_use_text()
-    action = tick.action
-    fallback = ActionInference(
-        action_code=int(action.action_code),
-        action_line_text=action.action_line_text,
-        action_line_color=action.action_line_color,
-        detection_source=action.detection_source or "stream_action",
-    )
-    action_inf = _inference_from_action_snapshot(action)
-    spans = tick.text.spans
-    has_span_data = len(spans) > 0
-
     if not use_text:
-        return action_inf or fallback
+        return ActionInference(
+            action_code=ACTION_IDLE,
+            action_line_text=None,
+            action_line_color=None,
+            detection_source="text_disabled",
+        )
 
-    if not has_span_data:
-        return action_inf or fallback
+    if not tick.text.spans:
+        return ActionInference(
+            action_code=ACTION_IDLE,
+            action_line_text=None,
+            action_line_color=None,
+            detection_source="no_text",
+        )
 
     strip_rect = _strip_rect_for_tick(tick)
-    fw, fh = _frame_size_for_tick(tick)
-    search_rect = _bottom_right_search_rect(fw, fh) if fw > 0 and fh > 0 else None
+    if strip_rect is None:
+        return ActionInference(
+            action_code=ACTION_IDLE,
+            action_line_text=None,
+            action_line_color=None,
+            detection_source="no_strip_rect",
+        )
 
     client = perception_tick_to_client_text(tick)
+    for label, rect in (
+        ("action_strip", strip_rect),
+        (
+            "search_band",
+            _bottom_right_search_rect(*_frame_size_for_tick(tick))
+            if _frame_size_for_tick(tick)[0] > 0
+            else None,
+        ),
+        ("full_frame", None),
+    ):
+        if rect is not None and len(rect) != 4:
+            continue
+        hit = _infer_green_fishing_in_rect(client, rect, label=label)
+        if hit is not None:
+            return hit
 
-    if strip_rect is not None:
-        text_inf = _infer_green_fishing_in_rect(
-            client, strip_rect, label="action_strip"
-        )
-        if text_inf is not None:
-            return text_inf
-        min_conf = text_min_conf()
-        if any(s.conf >= min_conf for s in spans_in_rect(client, strip_rect)):
+    # Last resort: any green Fishing span on the client (bbox may miss narrow ROIs).
+    fuzzy = default_fuzzy_threshold()
+    min_conf = text_min_conf()
+    for span in fishing_relevant_spans(client.spans, fuzzy_threshold=fuzzy):
+        if span.conf >= min_conf:
             return ActionInference(
-                action_code=ACTION_IDLE,
-                action_line_text=None,
-                action_line_color=None,
-                detection_source="no_green_fishing",
+                action_code=ACTION_FISHING,
+                action_line_text=span.text,
+                action_line_color=span.color,
+                detection_source="green_fishing_span",
             )
-        return action_inf or fallback
 
-    if search_rect is not None:
-        text_inf = _infer_green_fishing_in_rect(
-            client, search_rect, label="search_band"
-        )
-        if text_inf is not None:
-            return text_inf
-
-    text_inf = _infer_green_fishing_in_rect(client, None, label="full_frame")
-    if text_inf is not None:
-        return text_inf
-
-    return action_inf or fallback
+    return ActionInference(
+        action_code=ACTION_IDLE,
+        action_line_text=None,
+        action_line_color=None,
+        detection_source="no_green_fishing",
+    )
 
 
 def _fuzzy_ratio(a: str, b: str) -> float:
@@ -471,12 +466,9 @@ def join_text(spans: Sequence[ColoredTextSpan], sep: str = " ") -> str:
 
 
 def _is_green_fishing_span(span: ColoredTextSpan, *, fuzzy_threshold: float) -> bool:
-    if span.color.lower() != "green":
+    if _infer_display_color(span.text, span.color) != "green":
         return False
-    norm = _normalize_text(span.text)
-    if re.search(r"\bnot\b", norm):
-        return False
-    return _fuzzy_contains(span.text, "fishing", threshold=fuzzy_threshold)
+    return _text_indicates_fishing(span.text, fuzzy_threshold=fuzzy_threshold)
 
 
 def has_green_fishing_in_rect(
@@ -521,10 +513,7 @@ def _joined_strip_matches_idle(red_text: str, *, fuzzy_threshold: float) -> bool
 
 
 def _joined_strip_matches_fishing(green_text: str, *, fuzzy_threshold: float) -> bool:
-    norm = _normalize_text(green_text)
-    if not norm or re.search(r"\bnot\b", norm):
-        return False
-    return _fuzzy_contains(green_text, "fishing", threshold=fuzzy_threshold)
+    return _text_indicates_fishing(green_text, fuzzy_threshold=fuzzy_threshold)
 
 
 def fishing_relevant_spans(

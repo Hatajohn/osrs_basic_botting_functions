@@ -238,7 +238,11 @@ def main(argv: list[str] | None = None) -> int:
             logger.close(run_meta={"brain": brain_name, "error": "calibration_failed"})
             return 1
 
-    if capture_stream_enabled(args.stream_port) and report.client_rect:
+    # Local GDI capture + MJPEG publisher only when this process owns the stream.
+    # When EXODIA_STREAM_PORT points at exodia_perception_stream.py (--stream-port 0),
+    # consume frames over HTTP and do not compete for port 8765 or spawn wsl_ps.
+    publish_stream = args.stream_port > 0
+    if publish_stream and capture_stream_enabled(args.stream_port) and report.client_rect:
         capture_pipeline = start_capture_pipeline(
             report.client_rect,
             fps=default_capture_fps(),
@@ -252,8 +256,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         harness.capture_pipeline = capture_pipeline
         print("Capture pipeline: %.1f FPS target (2× OSRS tick min)" % default_capture_fps())
+    elif not publish_stream and report.client_rect:
+        from bot_capture import stream_service_port
 
-    if args.stream_port > 0:
+        port = stream_service_port()
+        if port > 0:
+            print("Using shared perception stream on port %d (no local capture publisher)" % port)
+
+    if publish_stream:
         from bot_stream import FramePublisher
 
         publisher = FramePublisher()

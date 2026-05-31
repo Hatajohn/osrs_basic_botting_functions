@@ -1,8 +1,16 @@
 """
-Basic stream fishing entrypoint — FISHING + SEEK_SPOT on perception stream only.
+Basic stream fishing — FISHING, SEEK_SPOT, and CRACKING on the perception stream.
 
-No ``BotEyes`` / ``bot_update``; spots from stable world tracks and action strip
-from stream ``/meta``. Validation target: infernal eel (``osrs_infernalEel``).
+No ``BotEyes`` / ``bot_update``. Signals:
+- Green ``Fishing`` in ``tick.text`` (text cache) → fishing.
+- World template tracks → spot clicks.
+- Inventory full (0 empty slots) → one hammer→eel, then wait until empty count stabilizes → seek.
+
+Validation target: infernal eel (``osrs_infernalEel``). Requires labeled
+``hammer`` and ``infernal_eel`` in ``items/`` for cracking.
+
+TODO: Extract CRACKING step logic from ``basic_stream_fishing_fsm.py`` into a
+dedicated module when a second bot needs it.
 
 Run from Exodia (stream service must be up, ``EXODIA_STREAM_PORT`` set)::
 
@@ -60,7 +68,7 @@ if str(EXODIA_DIR) not in sys.path:
 
 from bot_action_ui import ACTION_NO_UI, action_code_label, is_action_fishing
 from bot_perception_client import StreamUnavailableError
-from bot_perception_types import PerceptionTick
+from bot_perception_types import INV_SLOT_COUNT, PerceptionTick
 from bot_runtime import (
     RuntimeBridge,
     RuntimeCommand,
@@ -79,6 +87,7 @@ from .basic_stream_fishing_fsm import (
     BasicStreamFishingContext,
     BasicStreamFishingMachine,
     BasicStreamFishingState,
+    InventorySlotCountError,
     _locate_spots_from_tick,
     configure_fsm,
     initial_state_from_action,
@@ -344,7 +353,7 @@ def _build_runtime_bridge(
     def _set_state(cmd: RuntimeCommand) -> str:
         name = str(cmd.args.get("state") or cmd.args.get("name") or "").strip().upper()
         if not name:
-            raise ValueError("set_state requires args.state (FISHING, SEEK_SPOT)")
+            raise ValueError("set_state requires args.state (FISHING, SEEK_SPOT, CRACKING)")
         ctx.state = BasicStreamFishingState[name]
         return "state set to %s" % ctx.state.name
 
@@ -403,7 +412,7 @@ def _stream_health_probe(ctx: BasicStreamFishingContext) -> dict:
         "world_track_count": len(tick.world.tracks),
         "stable_tracks_by_stem": stable_by_stem,
         "spots_visible": _last_spots_visible,
-        "need_red_before_spot": ctx.need_red_before_spot,
+        "crack_started": ctx.crack_started,
     }
 
 
@@ -416,7 +425,7 @@ def _runtime_status_payload(ctx: BasicStreamFishingContext, runtime: RuntimeBrid
         action_line_text=ctx.action_line_text,
         action_detection_source=ctx.action_detection_source,
         waiting_for_fish=ctx.waiting_for_fish,
-        need_red_before_spot=ctx.need_red_before_spot,
+        crack_started=ctx.crack_started,
         spots_visible=_last_spots_visible,
         last_spot_click=ctx.last_spot_click,
         cycles=ctx.cycles,
@@ -464,38 +473,21 @@ def _print_startup_health(ctx: BasicStreamFishingContext) -> None:
     spot_hits = _locate_spots_from_tick(tick)
     _last_spots_visible = len(spot_hits)
     print("Health: infernal spots visible now (stream tracks):", _last_spots_visible)
-    from bot_action_vision import action_template_paths_ok, resolve_action_strip_roi_client
-
-    tpl_ok = action_template_paths_ok()
-    for name, ok in tpl_ok.items():
-        print("Health: action template", name, "OK" if ok else "MISSING (check Botting/images/)")
-    if tick.inventory.rect is not None and tick.client_rect is not None:
-        # client_rect on tick is screen; inventory.rect is client-local
-        cr = tick.client_rect
-        frame_w, frame_h = int(cr[2]), int(cr[3])
-        roi = resolve_action_strip_roi_client(
-            inventory_rect=tick.inventory.rect,
-            frame_w=frame_w,
-            frame_h=frame_h,
-        )
-        print("Health: action strip ROI (client-local):", roi)
-    action = tick.action
+    inv = tick.inventory
     print(
-        "Health: FSM reads → %s (code %d via %s)"
+        "Health: inventory %d empty, %d/%d occupied (grid) | meta occupied=%d"
         % (
-            ctx.action_status_label(),
-            ctx.action_code,
-            ctx.action_detection_source or "?",
+            inv.empty_slot_count(),
+            inv.occupied_from_grid(),
+            INV_SLOT_COUNT,
+            inv.occupied,
         )
     )
     print(
-        "Health: stream action meta → code %d fishing=%s not_fishing=%s scores %.2f/%.2f"
+        "Health: FSM reads → %s (via %s)"
         % (
-            action.action_code,
-            action.fishing_visible,
-            action.not_fishing_visible,
-            action.fish_template_score,
-            action.not_fish_template_score,
+            ctx.action_status_label(),
+            ctx.action_detection_source or "?",
         )
     )
     print(
@@ -575,7 +567,7 @@ def _run_basic_stream_session(args) -> None:
 
     _print_startup_health(ctx)
 
-    print("Basic stream fishing FSM — states: FISHING | SEEK_SPOT (stream-only, no BotEyes)")
+    print("Basic stream fishing FSM — states: FISHING | SEEK_SPOT | CRACKING (text cache + stream)")
     print("  Spot stems: %s" % ", ".join(infernal_spot_world_stems()))
     print("  Poll interval %.1fs (EXODIA_FSM_INTERVAL_S)" % interval_s)
     print(
@@ -627,18 +619,28 @@ def _run_basic_stream_session(args) -> None:
             if machine.should_throttle():
                 tick = ctx.last_tick
                 track_n = len(tick.world.tracks) if tick is not None else "?"
+                inv_n = (
+                    "%d empty"
+                    % tick.inventory.empty_slot_count()
+                    if tick is not None
+                    else "?"
+                )
                 print(
-                    "Cycle %d | %s | action %s | tracks %s | need_red %s"
+                    "Cycle %d | %s | action %s | tracks %s | inv %s"
                     % (
                         ctx.cycles,
                         ctx.state.name,
                         action_code_label(ctx.action_code),
                         track_n,
-                        ctx.need_red_before_spot,
+                        inv_n,
                     )
                 )
     except KeyboardInterrupt:
         print("\nCtrl+C — stopping.")
+    except InventorySlotCountError as exc:
+        _stop.set()
+        print("\nInventory slot count error — stopping bot:", exc, file=sys.stderr)
+        log_event("session.error", error="inventory_slot_count", detail=str(exc))
     except StreamUnavailableError as exc:
         print("\nStream lost:", exc)
     finally:
@@ -654,7 +656,7 @@ def _run_basic_stream_session(args) -> None:
                     "cycles": ctx.cycles,
                     "fsm_state": ctx.state.name,
                     "action_code": ctx.action_code,
-                    "need_red_before_spot": ctx.need_red_before_spot,
+                    "crack_started": ctx.crack_started,
                     "stopped": _stop.is_set(),
                 }
             )

@@ -1,13 +1,12 @@
 """
 Consolidated OpenCV template locate/score helpers for perception modalities.
 
-World playspace match, inventory watch templates, dirty slot identification,
-and action-strip template scoring share ``TemplateFinder`` entry points.
+World playspace match, inventory watch templates, and dirty slot identification
+share ``TemplateFinder`` entry points.
 """
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import cv2
@@ -17,13 +16,6 @@ from bot_capture import FrameSnapshot
 
 Rect = List[int]
 WorldHitDict = Dict[str, Any]
-
-from bot_action_templates import (
-    FISHING_TEXT_TEMPLATE,
-    NOT_FISHING_TEXT_TEMPLATE,
-    load_template_gray,
-    resolve_action_template_path,
-)
 
 
 def _env_bool(key: str, default: bool) -> bool:
@@ -217,35 +209,6 @@ class TemplateFinder:
             dirty_coords,
             frame_buckets=frame_buckets,
         )
-
-    @staticmethod
-    def score_action_strip_templates(strip: Optional[np.ndarray]) -> Tuple[float, float]:
-        """Return ``(fishing_score, not_fishing_score)`` for a gray or BGR strip ROI."""
-        if strip is None or not getattr(strip, "size", 0):
-            return 0.0, 0.0
-        if strip.ndim == 3:
-            gray = cv2.cvtColor(strip, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = strip
-
-        scores = {0: 0.0, 1: 0.0}
-        for filename, result_code in (
-            (FISHING_TEXT_TEMPLATE, 0),
-            (NOT_FISHING_TEXT_TEMPLATE, 1),
-        ):
-            path = resolve_action_template_path(filename)
-            if path is None:
-                continue
-            template = load_template_gray(str(path))
-            if template is None:
-                continue
-            th, tw = template.shape[:2]
-            if gray.shape[0] < th or gray.shape[1] < tw:
-                continue
-            res = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, _ = cv2.minMaxLoc(res)
-            scores[result_code] = max(scores[result_code], float(max_val))
-        return scores[0], scores[1]
 
 
 __all__ = [

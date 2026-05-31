@@ -51,7 +51,7 @@ Manifest bots with `moduleArgv` (direct `python -m …`) appear in the **Python*
 
 | Bot id | Module | Notes |
 |--------|--------|-------|
-| `basic_stream_fishing` | `BasicStreamFishing.basic_stream_fishing` | Stream-only infernal seek/fish FSM (`usesSharedStream: true` — RuneLite view keeps normal ~10 FPS stream preview) |
+| `basic_stream_fishing` | `BasicStreamFishing.basic_stream_fishing` | Stream infernal seek/fish/crack FSM — green text + world tracks + one hammer→eel (`usesSharedStream: true`) |
 | `sacred_eel` | `SacredEelFishing.sacred_eel_fishing` | Legacy BotEyes path (still uses `bot_update` in-process) |
 
 **Requires:** calibrated `client_rect.json`, perception stream up (`exodia_perception_stream.py` / app auto-start). Stream bots set `EXODIA_STREAM_PORT` + `EXODIA_CAPTURE_STREAM=1` on spawn.

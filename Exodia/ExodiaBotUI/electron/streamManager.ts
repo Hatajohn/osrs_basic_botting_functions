@@ -167,7 +167,7 @@ export async function verifyStreamHealthy(port: number): Promise<StreamHealthRes
   return { healthy: true };
 }
 
-async function waitForStreamHealthy(
+export async function waitForStreamHealthy(
   port: number,
   timeoutMs = HEALTH_VERIFY_TIMEOUT_MS,
 ): Promise<StreamHealthResult> {

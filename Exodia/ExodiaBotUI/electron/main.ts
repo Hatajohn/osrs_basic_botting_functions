@@ -25,7 +25,7 @@ import { selectTemplateFile } from './templateFile';
 import { loadTemplateWatchlist, saveTemplateWatchlist, syncWatchlistToControlFile } from './templateWatchlist';
 import { loadBotsManifest } from './manifestLoader';
 import { fetchGamePreview, fetchInventoryOverlay, fetchPristineClient } from './previewClient';
-import { StreamProcessManager, verifyStreamHealthy } from './streamManager';
+import { StreamProcessManager, waitForStreamHealthy } from './streamManager';
 import { ProcessManager } from './processManager';
 import { pythonExists } from './paths';
 import {
@@ -483,7 +483,7 @@ app.whenReady().then(() => {
             error: status.error ?? 'perception stream required',
           };
         }
-        const health = await verifyStreamHealthy(status.port);
+        const health = await waitForStreamHealthy(status.port);
         if (!health.healthy) {
           return {
             ok: false,

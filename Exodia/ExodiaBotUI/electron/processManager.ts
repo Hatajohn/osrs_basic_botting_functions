@@ -19,6 +19,7 @@ import {
   loadBotsManifest,
 } from './manifestLoader';
 import { pythonExists } from './paths';
+import { killOrphanCapturePowerShell } from './streamPortKill';
 import { sendRuntimeCommand, waitForRuntimeStop } from './runtimeClient';
 import { loadSettings, resolveSettings } from './settings';
 import { StatusWatcher } from './statusWatcher';
@@ -245,10 +246,19 @@ export class ProcessManager {
       const ctl = await sendRuntimeCommand('stop', active.runtimeCommands);
       if (ctl.stdout) pipeLines(ctl.stdout, 'stdout', this.sink);
       if (ctl.stderr) pipeLines(ctl.stderr, 'stderr', this.sink);
-      await waitForRuntimeStop(statusPath, active.runtimeScriptId, 8000);
+      const stopped = await waitForRuntimeStop(
+        statusPath,
+        active.runtimeScriptId,
+        8000,
+        active.startedAt,
+      );
+      if (!stopped) {
+        this.sink('Graceful stop timed out — force-killing bot process…', 'system');
+      }
     }
 
     await this.terminateChild();
+    killOrphanCapturePowerShell();
     return { ok: true };
   }
 
@@ -264,7 +274,7 @@ export class ProcessManager {
 
   dispose(): void {
     this.statusWatcher.stop();
-    void this.terminateChild();
+    void this.terminateChild().then(() => killOrphanCapturePowerShell());
   }
 
   private buildSpawnArgs(
@@ -282,6 +292,14 @@ export class ProcessManager {
       }
     }
     args.push(...bot.defaultArgv, ...userArgv);
+    if (bot.usesSharedStream === true) {
+      for (let i = 0; i < args.length - 1; i += 1) {
+        if (args[i] === '--stream-port') {
+          args[i + 1] = '0';
+          break;
+        }
+      }
+    }
     return args;
   }
 

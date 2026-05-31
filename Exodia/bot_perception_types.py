@@ -16,6 +16,10 @@ INV_SLOT_COUNT = INV_ROWS * INV_COLS
 _UNKNOWN_LABEL = "?"
 
 
+class InventorySlotCountError(ValueError):
+    """Occupied inventory slots exceed the OSRS grid size (28)."""
+
+
 def _normalize_template_stem(template: str) -> str:
     stem = (template or "").strip()
     if stem.lower().endswith(".png"):
@@ -87,8 +91,30 @@ class InventorySnapshot:
     def count_label(self, name: str) -> int:
         return len(self.slots_with_label(name))
 
+    def occupied_from_grid(self) -> int:
+        """Occupied slots from the parsed 7×4 occupancy grid."""
+        return sum(1 for slot in self.slots if slot.occupied)
+
+    def empty_slot_count(self) -> int:
+        """Unoccupied inventory slots (0 = full, ready to crack)."""
+        return max(0, INV_SLOT_COUNT - self.occupied_from_grid())
+
     def is_full(self) -> bool:
-        return self.occupied >= INV_SLOT_COUNT
+        return self.empty_slot_count() == 0
+
+    def validate_slot_counts(self) -> None:
+        """Raise when occupied counts exceed the 28-slot grid."""
+        grid_occupied = self.occupied_from_grid()
+        if grid_occupied > INV_SLOT_COUNT:
+            raise InventorySlotCountError(
+                "inventory grid reports %d occupied slots (max %d)"
+                % (grid_occupied, INV_SLOT_COUNT)
+            )
+        if self.occupied > INV_SLOT_COUNT:
+            raise InventorySlotCountError(
+                "inventory meta occupied=%d exceeds max %d (grid=%d)"
+                % (self.occupied, INV_SLOT_COUNT, grid_occupied)
+            )
 
     def label_counts(self) -> Dict[str, int]:
         counts: Dict[str, int] = {}
@@ -707,6 +733,7 @@ __all__ = [
     "INV_SLOT_COUNT",
     "ActionSnapshot",
     "InventorySlot",
+    "InventorySlotCountError",
     "InventorySnapshot",
     "PerceptionTick",
     "TextSnapshot",
